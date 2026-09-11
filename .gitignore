@@ -1,0 +1,17 @@
+# Build and outputs
+build/
+out/
+.cache/
+*.user
+.vs/
+Testing/
+artifacts/
+.freebuff/
+
+# Local logs and test dumps
+*.log
+/*_out.txt
+/*_res.txt
+/c.txt
+/g.txt
+/ctest_*.txt
