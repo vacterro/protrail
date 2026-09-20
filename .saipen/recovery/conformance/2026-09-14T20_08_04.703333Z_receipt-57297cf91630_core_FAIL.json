@@ -1,0 +1,17 @@
+{
+  "board_hash": "dcb825b088ec98dd",
+  "content_hash": "3878d82acc1054c7",
+  "exit_code": 1,
+  "gate": "core",
+  "kind": "conformance_receipt",
+  "log_hash": "1cc75ecfb3889a3a",
+  "project_identity": "v:\\___vac\\__k\\__code\\__main__\\protrail",
+  "receipt_id": "receipt-57297cf91630",
+  "schema_version": 2,
+  "source_head": "1fc09f09410da3493ed8f7ffca621ca0467ca259",
+  "source_tree_fingerprint": "git-delta-v1:c5bf8654c80dee77df56f8e9953268f92c845df17811667d0a21c1d292a89d01",
+  "state_hash": "1af7903ab0ef5790",
+  "timestamp_utc": "2026-09-14T20:08:04.703333Z",
+  "validator_protocol_version": "1",
+  "verdict": "FAIL"
+}

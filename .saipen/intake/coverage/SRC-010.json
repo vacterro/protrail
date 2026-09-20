@@ -1,0 +1,14 @@
+{
+  "requirements": {
+    "SRC-010:R001": {
+      "actionable": true,
+      "class": "requirement",
+      "disposition": "VERIFIED",
+      "evidence": "T-47 closed with verification evidence in LOG: verify -> PASS [target: T-47] conf: high -- corridor complete: audit/1.md closed (SRC-009 12/12 terminal, T-46 DONE, inbox clean), T-36 Advanced Motion Wake DONE, T-37 Main UI Essentials DONE. ctest_safe 21/21 PASS Release+Debug; gui 111/111.",
+      "text": "Consume the external audit inbox audit/1.md (SRC-009) through canonical SOURCE-AUDIT-INBOX-01 closure now that all 12 findings are terminal via T-45, then continue T-36 Advanced Motion Wake and T-37 Main UI Essentials; T-32 stays parked at its real manual gate and T-43 closes only after T-36/T-37.",
+      "verification": "the Work this request created reached its own verification gate; see the T-47 VERIFY cycle in .saipen/LOG.md",
+      "work": "T-47"
+    }
+  },
+  "schema_version": 1
+}

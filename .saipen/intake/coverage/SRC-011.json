@@ -1,0 +1,14 @@
+{
+  "requirements": {
+    "SRC-011:R001": {
+      "actionable": true,
+      "class": "requirement",
+      "disposition": "VERIFIED",
+      "evidence": "T-49 closed with verification evidence in LOG: verify -> PASS [target: T-49] conf: high -- cmake --build build --config Release/Debug (MSVC /W4 /WX): 0 warnings 0 errors; ctest --test-dir build -C Release: 23/23 PASS; ctest --test-dir build -C Debug: 23/23 PASS; protrail_main_window_tests 8/8 PASS; protrail_tray_tests 39/39 PASS incl. 7 new home-surface regressions (manual startup shows Main not Settings, autostart shows neither surface, tray ",
+      "text": "ProTrail final closure wave (source-only v0.1.0): the compact Main Essentials window must be the real manual-launch product home with the advanced SettingsWindow reachable from it, developer Set Current as Release Defaults must capture the complete canonical AppConfig, the home/settings lifecycle must be covered by direct deterministic regressions, the repository must be presented as a professional GitHub source project, and a source-only v0.1.0 release must be prepared while the final executable/binary release stays blocked until the user supplies the product icon",
+      "verification": "the Work this request created reached its own verification gate; see the T-49 VERIFY cycle in .saipen/LOG.md",
+      "work": "T-49"
+    }
+  },
+  "schema_version": 1
+}

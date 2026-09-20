@@ -1,0 +1,14 @@
+{
+  "clauses": {
+    "SRC-009:R001": {
+      "actionable": true,
+      "class": "requirement",
+      "text": "CORE-001: ConfigStorage::load_from_file must carry load provenance (MissingFresh/LoadedCurrent/LoadedMigrated/MalformedBackedUp/MalformedBackupFailed/UnsupportedFutureSchema/ReadFailure); reject schema_version > kCurrentSchemaVersion as valid-but-unsupported without rewriting it; disable persistence for protected states so no save path can destroy the source."
+    }
+  },
+  "derived_at": "2026-09-18T17:47:57Z",
+  "derived_from": "SRC-009",
+  "interpretation_revision": 1,
+  "schema_version": 1,
+  "source_sha256": "b917026e290d669e96150711d5883efc4462d5b62e250f73115b3f42f65a3f06"
+}

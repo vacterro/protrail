@@ -1,0 +1,20 @@
+{
+  "externalization_event": {
+    "event_id": "E-301",
+    "operation_id": "ticket-5514afb1bc5c419db485a27d35a69b91",
+    "reason": "new BOARD record exceeds the live cap; canonical writer externalized detail"
+  },
+  "lossless": true,
+  "metadata_path": ".saipen/recovery/board-compaction/T-37/T-37-9de21d17dbe903c22f23e129.json",
+  "operation": "board_legacy_compaction",
+  "original_record_bytes": 1311,
+  "original_record_path": ".saipen/recovery/board-compaction/T-37/T-37-9de21d17dbe903c22f23e129.BOARD.md",
+  "original_record_sha256": "9de21d17dbe903c22f23e12976454389ce026638ccf062691125d35457c27256",
+  "project_identity": "v:\\___vac\\__k\\__code\\__main__\\protrail",
+  "project_lineage": "lineage-6a51dcf887de4de492b000b2cad0e980",
+  "schema_version": 1,
+  "source": ".saipen/BOARD.md",
+  "status": "COMMITTED",
+  "supersedes_detail_ref": "",
+  "ticket_id": "T-37"
+}

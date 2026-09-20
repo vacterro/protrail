@@ -1,0 +1,34 @@
+{
+  "clauses": {
+    "SRC-009:R001": {
+      "actionable": true,
+      "class": "requirement",
+      "text": "CORE-001: ConfigStorage::load_from_file must carry load provenance (MissingFresh/LoadedCurrent/LoadedMigrated/MalformedBackedUp/MalformedBackupFailed/UnsupportedFutureSchema/ReadFailure); reject schema_version > kCurrentSchemaVersion as valid-but-unsupported without rewriting it; disable persistence for protected states so no save path can destroy the source."
+    },
+    "SRC-009:R002": {
+      "actionable": true,
+      "class": "requirement",
+      "text": "CORE-002: startup reconciliation must enforce the persisted autostart DESIRED state in both directions -- ON reconciles the owned Run value to the current exe, OFF idempotently removes ProTrail's own value -- so a transient disable failure cannot leave config OFF while HKCU Run still launches ProTrail."
+    },
+    "SRC-009:R003": {
+      "actionable": true,
+      "class": "requirement",
+      "text": "CORE-003: every publication path that can change TrailConfig::enabled (direct checkbox, color preset, Restore All, apply_config/dev preset) must compare old vs new and run the ONE canonical history-hygiene transition exactly once, so stale disabled-period movement can never render after re-enable."
+    },
+    "SRC-009:R004": {
+      "actionable": true,
+      "class": "requirement",
+      "text": "W2-001: readiness and ACK wait sets must be built by appending only non-null handles to a compact array, recording each real handle index at append time, so the protocol mutex stays watched even when the shutdown beacon cannot be opened; one shared helper for both phases."
+    },
+    "SRC-009:R005": {
+      "actionable": true,
+      "class": "requirement",
+      "text": "W2-002: a whole-AppConfig operation (Restore All / apply_config / dev preset) must be ONE Application-level controller transaction: capture old state, install the validated new config, apply Master/Trail/Click enable-edge invariants exactly once, reconcile Start-with-Windows desired state, and persist ONCE instead of serializing intermediate hybrids."
+    }
+  },
+  "derived_at": "2026-09-18T17:48:28Z",
+  "derived_from": "SRC-009",
+  "interpretation_revision": 5,
+  "schema_version": 1,
+  "source_sha256": "b917026e290d669e96150711d5883efc4462d5b62e250f73115b3f42f65a3f06"
+}

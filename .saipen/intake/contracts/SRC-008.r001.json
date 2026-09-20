@@ -1,0 +1,14 @@
+{
+  "clauses": {
+    "SRC-008:R001": {
+      "actionable": true,
+      "class": "requirement",
+      "text": "Continue ProTrail from supplied handoff: reconcile canonical SAIPEN state (CLEAN/stale BOARD), ingest audit/1.md 12 findings as canonical tickets, then repair serially starting CORE-001 config write-safety"
+    }
+  },
+  "derived_at": "2026-09-18T17:45:21Z",
+  "derived_from": "SRC-008",
+  "interpretation_revision": 1,
+  "schema_version": 1,
+  "source_sha256": "bf650b17e4491c2ed5a48a7c1e7e5ff22ea0e3138def7641da02d5e1385906a7"
+}

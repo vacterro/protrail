@@ -1,17 +1,35 @@
-# Build and outputs
+# Build trees and generated output
 build/
+build_*/
 out/
 .cache/
-*.user
 .vs/
 Testing/
 artifacts/
 .freebuff/
 
-# Local logs and test dumps
+# Local tooling state (editor/agent caches, never product sources)
+.codebase-memory/
+dev/presets/
+*.user
+
+# Local logs and scratch output captured at the repository root. These are
+# per-run working files, not product sources: the canonical record of a ticket
+# lives in .saipen/ and ROADMAP/evidence/.
 *.log
+/*.txt
+!/CMakeLists.txt
+/*.csv
 /*_out.txt
 /*_res.txt
-/c.txt
-/g.txt
-/ctest_*.txt
+
+# Local scripts, probes, packages and dumps at the repository root.
+# (The handful of historical build/deploy scripts that ARE tracked stay
+# tracked; this only stops NEW root-level scratch from being added.)
+/*.bat
+/*.ps1
+/*.cmd
+/*.tmp
+/*.dmp
+/*.zip
+/*.rar

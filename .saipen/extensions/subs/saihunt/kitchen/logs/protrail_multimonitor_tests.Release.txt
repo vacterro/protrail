@@ -1,0 +1,114 @@
+[2026-09-17 18:26:42] [INFO ] overlay_manager: created \\.\DISPLAY1 bounds=[-1920,0-0,1080] dpi=96x96 scale=1.00 primary=no
+[2026-09-17 18:26:42] [WARN ] overlay_manager: failed to create \\.\DISPLAY2 bounds=[0,0-1920,1080] dpi=96x96 scale=1.00 primary=yes
+[2026-09-17 18:26:42] [INFO ] overlay_manager: created \\.\DISPLAY3 bounds=[1920,0-3840,1080] dpi=96x96 scale=1.00 primary=no
+[2026-09-17 18:26:42] [INFO ] overlay_manager: initialized 2 of 3 per-monitor overlays
+[2026-09-17 18:26:42] [INFO ] overlay_manager: created \\.\SYNTHDISPLAY1 bounds=[0,0-1920,1080] dpi=120x120 scale=1.25 primary=yes
+[2026-09-17 18:26:42] [WARN ] overlay_manager: failed to create \\.\SYNTHDISPLAY2 bounds=[0,0-1920,1080] dpi=96x96 scale=1.00 primary=no
+[2026-09-17 18:26:42] [INFO ] overlay_manager: initialized 1 of 2 per-monitor overlays
+[2026-09-17 18:26:42] [INFO ] overlay_manager: created \\.\SYNTHDISPLAY1 bounds=[0,0-1920,1080] dpi=96x96 scale=1.00 primary=yes
+[2026-09-17 18:26:42] [INFO ] overlay_manager: initialized 1 of 1 per-monitor overlays
+[2026-09-17 18:26:42] [INFO ] overlay_manager: topology transition begin
+[2026-09-17 18:26:42] [INFO ] overlay_manager: old \\.\SYNTHDISPLAY1 bounds=[0,0-1920,1080] dpi=96x96 scale=1.00 primary=yes
+[2026-09-17 18:26:42] [INFO ] overlay_manager: new \\.\SYNTHDISPLAY1 bounds=[0,0-1920,1080] dpi=144x144 scale=1.50 primary=yes
+[2026-09-17 18:26:42] [INFO ] overlay_manager: topology transition complete, live=1
+[2026-09-17 18:26:42] [INFO ] overlay_manager: created \\.\SYNTHDISPLAY1 bounds=[0,0-1920,1080] dpi=96x96 scale=1.00 primary=yes
+[2026-09-17 18:26:42] [INFO ] overlay_manager: initialized 1 of 1 per-monitor overlays
+[2026-09-17 18:26:42] [INFO ] overlay_manager: created \\.\SYNTHDISPLAY1 bounds=[-1920,0-0,1080] dpi=96x96 scale=1.00 primary=no
+[2026-09-17 18:26:42] [INFO ] overlay_manager: created \\.\SYNTHDISPLAY2 bounds=[0,0-1920,1080] dpi=144x144 scale=1.50 primary=yes
+[2026-09-17 18:26:42] [INFO ] overlay_manager: created \\.\SYNTHDISPLAY3 bounds=[1920,0-3840,1080] dpi=96x96 scale=1.00 primary=no
+[2026-09-17 18:26:42] [INFO ] overlay_manager: initialized 3 of 3 per-monitor overlays
+[2026-09-17 18:26:42] [INFO ] overlay_manager: topology transition begin
+[2026-09-17 18:26:42] [INFO ] overlay_manager: old \\.\SYNTHDISPLAY1 bounds=[-1920,0-0,1080] dpi=96x96 scale=1.00 primary=no
+[2026-09-17 18:26:42] [INFO ] overlay_manager: old \\.\SYNTHDISPLAY2 bounds=[0,0-1920,1080] dpi=144x144 scale=1.50 primary=yes
+[2026-09-17 18:26:42] [INFO ] overlay_manager: old \\.\SYNTHDISPLAY3 bounds=[1920,0-3840,1080] dpi=96x96 scale=1.00 primary=no
+[2026-09-17 18:26:42] [INFO ] overlay_manager: new \\.\SYNTHDISPLAY1 bounds=[-1920,0-0,1080] dpi=96x96 scale=1.00 primary=no
+[2026-09-17 18:26:42] [INFO ] overlay_manager: new \\.\SYNTHDISPLAY2 bounds=[0,0-1920,1080] dpi=192x192 scale=2.00 primary=yes
+[2026-09-17 18:26:42] [INFO ] overlay_manager: new \\.\SYNTHDISPLAY3 bounds=[1920,0-3840,1080] dpi=96x96 scale=1.00 primary=no
+[2026-09-17 18:26:42] [INFO ] overlay_manager: topology transition complete, live=3
+[2026-09-17 18:26:42] [INFO ] overlay_manager: created \\.\DISPLAY1 bounds=[-1920,0-0,1080] dpi=96x96 scale=1.00 primary=no
+[2026-09-17 18:26:42] [WARN ] overlay_manager: failed to create \\.\DISPLAY2 bounds=[0,0-1920,1080] dpi=96x96 scale=1.00 primary=yes
+[2026-09-17 18:26:42] [INFO ] overlay_manager: created \\.\DISPLAY3 bounds=[1920,0-3840,1080] dpi=96x96 scale=1.00 primary=no
+[2026-09-17 18:26:42] [INFO ] overlay_manager: initialized 2 of 3 per-monitor overlays
+[2026-09-17 18:26:42] [INFO ] overlay_manager: topology transition begin
+[2026-09-17 18:26:42] [INFO ] overlay_manager: old \\.\DISPLAY1 bounds=[-1920,0-0,1080] dpi=96x96 scale=1.00 primary=no
+[2026-09-17 18:26:42] [INFO ] overlay_manager: old \\.\DISPLAY2 bounds=[0,0-1920,1080] dpi=96x96 scale=1.00 primary=yes
+[2026-09-17 18:26:42] [INFO ] overlay_manager: old \\.\DISPLAY3 bounds=[1920,0-3840,1080] dpi=96x96 scale=1.00 primary=no
+[2026-09-17 18:26:42] [INFO ] overlay_manager: new \\.\DISPLAY1 bounds=[-1920,0-0,1080] dpi=96x96 scale=1.00 primary=no
+[2026-09-17 18:26:42] [INFO ] overlay_manager: new \\.\DISPLAY2 bounds=[0,0-1920,1080] dpi=96x96 scale=1.00 primary=yes
+[2026-09-17 18:26:42] [INFO ] overlay_manager: new \\.\DISPLAY3 bounds=[1920,0-3840,1080] dpi=96x96 scale=1.00 primary=no
+[2026-09-17 18:26:42] [INFO ] overlay_manager: topology transition complete, live=3
+[2026-09-17 18:26:42] [INFO ] overlay_manager: created \\.\SYNTHDISPLAY1 bounds=[0,0-1920,1080] dpi=96x96 scale=1.00 primary=yes
+[2026-09-17 18:26:42] [INFO ] overlay_manager: initialized 1 of 1 per-monitor overlays
+[2026-09-17 18:26:42] [INFO ] overlay_manager: topology transition begin
+[2026-09-17 18:26:42] [INFO ] overlay_manager: old \\.\SYNTHDISPLAY1 bounds=[0,0-1920,1080] dpi=96x96 scale=1.00 primary=yes
+[2026-09-17 18:26:42] [INFO ] overlay_manager: new \\.\SYNTHDISPLAY1 bounds=[0,0-2560,1440] dpi=96x96 scale=1.00 primary=yes
+[2026-09-17 18:26:42] [WARN ] overlay_manager: topology create failed \\.\SYNTHDISPLAY1 bounds=[0,0-2560,1440] dpi=96x96 scale=1.00 primary=yes
+[2026-09-17 18:26:42] [INFO ] overlay_manager: topology transition complete, live=0
+[2026-09-17 18:26:42] [INFO ] overlay_manager: topology transition begin
+[2026-09-17 18:26:42] [INFO ] overlay_manager: old \\.\SYNTHDISPLAY1 bounds=[0,0-2560,1440] dpi=96x96 scale=1.00 primary=yes
+[2026-09-17 18:26:42] [INFO ] overlay_manager: new \\.\SYNTHDISPLAY1 bounds=[0,0-2560,1440] dpi=96x96 scale=1.00 primary=yes
+[2026-09-17 18:26:42] [INFO ] overlay_manager: topology transition complete, live=1
+[2026-09-17 18:26:42] [INFO ] overlay_manager: created \\.\SYNTHDISPLAY1 bounds=[0,0-1920,1080] dpi=96x96 scale=1.00 primary=yes
+[2026-09-17 18:26:42] [INFO ] overlay_manager: initialized 1 of 1 per-monitor overlays
+[2026-09-17 18:26:42] [INFO ] overlay_manager: topology transition begin
+[2026-09-17 18:26:42] [INFO ] overlay_manager: old \\.\SYNTHDISPLAY1 bounds=[0,0-1920,1080] dpi=96x96 scale=1.00 primary=yes
+[2026-09-17 18:26:42] [INFO ] overlay_manager: new \\.\SYNTHDISPLAY1 bounds=[0,0-2560,1440] dpi=96x96 scale=1.00 primary=yes
+[2026-09-17 18:26:42] [INFO ] overlay_manager: topology transition complete, live=1
+[2026-09-17 18:26:42] [INFO ] overlay_manager: created \\.\SYNTHDISPLAY1 bounds=[0,0-1920,1080] dpi=96x96 scale=1.00 primary=yes
+[2026-09-17 18:26:42] [INFO ] overlay_manager: initialized 1 of 1 per-monitor overlays
+[2026-09-17 18:26:42] [INFO ] overlay_manager: topology transition begin
+[2026-09-17 18:26:42] [INFO ] overlay_manager: old \\.\SYNTHDISPLAY1 bounds=[0,0-1920,1080] dpi=96x96 scale=1.00 primary=yes
+[2026-09-17 18:26:42] [INFO ] overlay_manager: new \\.\SYNTHDISPLAY1 bounds=[0,0-1920,1080] dpi=96x96 scale=1.00 primary=yes
+[2026-09-17 18:26:42] [INFO ] overlay_manager: new \\.\SYNTHDISPLAY2 bounds=[1920,0-3840,1080] dpi=96x96 scale=1.00 primary=no
+[2026-09-17 18:26:42] [INFO ] overlay_manager: topology transition complete, live=2
+[2026-09-17 18:26:42] [INFO ] overlay: render chain initialized (D3D11 -> DXGI flip -> D2D -> DComp)
+[2026-09-17 18:26:42] [INFO ] overlay: WM_DISPLAYCHANGE received; queueing topology reconciliation
+[2026-09-17 18:26:42] [INFO ] overlay: WM_DISPLAYCHANGE received; queueing topology reconciliation
+[2026-09-17 18:26:42] [INFO ] overlay: resources released
+[2026-09-17 18:26:42] [INFO ] overlay: render chain initialized (D3D11 -> DXGI flip -> D2D -> DComp)
+[2026-09-17 18:26:42] [INFO ] overlay: resources released
+[2026-09-17 18:26:42] [INFO ] overlay: render chain initialized (D3D11 -> DXGI flip -> D2D -> DComp)
+[2026-09-17 18:26:42] [INFO ] overlay: resources released
+[2026-09-17 18:26:42] [WARN ] overlay: recoverable device loss in test (hr=-2005270521); recovery pending
+[2026-09-17 18:26:42] [INFO ] overlay: render chain initialized (D3D11 -> DXGI flip -> D2D -> DComp)
+[2026-09-17 18:26:42] [INFO ] overlay: resources released
+[2026-09-17 18:26:42] [WARN ] overlay: recoverable device loss in test (hr=-2003238900); recovery pending
+[2026-09-17 18:26:42] [WARN ] overlay: recovery attempt 1 failed; next bounded retry in 500 ms
+[2026-09-17 18:26:42] [INFO ] overlay: render chain initialized (D3D11 -> DXGI flip -> D2D -> DComp)
+[2026-09-17 18:26:42] [WARN ] overlay: D3D removed reason hr=0 (test)
+[2026-09-17 18:26:42] [INFO ] overlay: resources released
+[2026-09-17 18:26:42] [WARN ] overlay: recoverable device loss in test (hr=-2005270523); recovery pending
+[2026-09-17 18:26:42] [WARN ] overlay: recovery attempt 1 failed; next bounded retry in 500 ms
+[2026-09-17 18:26:42] [INFO ] overlay: render chain initialized (D3D11 -> DXGI flip -> D2D -> DComp)
+[2026-09-17 18:26:42] [INFO ] overlay: resources released
+[2026-09-17 18:26:42] [WARN ] overlay: recoverable device loss in test (hr=-2005270521); recovery pending
+[2026-09-17 18:26:42] [WARN ] overlay: recovery attempt 1 failed; next bounded retry in 500 ms
+[2026-09-17 18:26:42] [INFO ] overlay: render resources recovered after 1 failed attempt(s); Ready
+[2026-09-17 18:26:43] [INFO ] overlay: render chain initialized (D3D11 -> DXGI flip -> D2D -> DComp)
+[2026-09-17 18:26:43] [INFO ] overlay: resources released
+[2026-09-17 18:26:43] [WARN ] overlay: recoverable device loss in test (hr=-2005270521); recovery pending
+[2026-09-17 18:26:43] [WARN ] overlay: recovery attempt 1 failed; next bounded retry in 500 ms
+[2026-09-17 18:26:43] [WARN ] overlay: recovery attempt 2 failed; next bounded retry in 1000 ms
+[2026-09-17 18:26:43] [WARN ] overlay: recovery attempt 3 failed; next bounded retry in 2000 ms
+[2026-09-17 18:26:43] [WARN ] overlay: recovery attempt 4 failed; next bounded retry in 4000 ms
+[2026-09-17 18:26:43] [WARN ] overlay: recovery attempt 5 failed; next bounded retry in 5000 ms
+[2026-09-17 18:26:43] [WARN ] overlay: recovery attempt 6 failed; next bounded retry in 5000 ms
+[2026-09-17 18:26:43] [INFO ] overlay: render chain initialized (D3D11 -> DXGI flip -> D2D -> DComp)
+[2026-09-17 18:26:43] [INFO ] overlay: resources released
+[2026-09-17 18:26:43] [WARN ] overlay: recoverable device loss in test (hr=-2003238900); recovery pending
+[2026-09-17 18:26:43] [INFO ] overlay: render resources recovered after 0 failed attempt(s); Ready
+[2026-09-17 18:26:43] [WARN ] overlay: recoverable device loss in test (hr=-2003238900); recovery pending
+[2026-09-17 18:26:43] [INFO ] overlay: render resources recovered after 0 failed attempt(s); Ready
+[2026-09-17 18:26:43] [WARN ] overlay: recoverable device loss in test (hr=-2003238900); recovery pending
+[2026-09-17 18:26:43] [INFO ] overlay: render resources recovered after 0 failed attempt(s); Ready
+[2026-09-17 18:26:43] [INFO ] overlay: render chain initialized (D3D11 -> DXGI flip -> D2D -> DComp)
+[2026-09-17 18:26:43] [INFO ] overlay: resources released
+[2026-09-17 18:26:43] [WARN ] overlay: recoverable device loss in test (hr=-2005270521); recovery pending
+[2026-09-17 18:26:43] [INFO ] overlay: recreating render resources
+[2026-09-17 18:26:43] [INFO ] overlay: render chain initialized (D3D11 -> DXGI flip -> D2D -> DComp)
+[2026-09-17 18:26:43] [INFO ] overlay: resources released
+[2026-09-17 18:26:43] [INFO ] overlay: render chain initialized (D3D11 -> DXGI flip -> D2D -> DComp)
+[2026-09-17 18:26:43] [WARN ] overlay: D3D removed reason hr=0 (test)
+[2026-09-17 18:26:43] [INFO ] overlay: resources released
+[2026-09-17 18:26:43] [WARN ] overlay: recoverable device loss in test (hr=-2005270523); recovery pending
+[2026-09-17 18:26:43] [WARN ] overlay: recovery attempt 1 failed; next bounded retry in 500 ms

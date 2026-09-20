@@ -1,0 +1,102 @@
+[2026-09-17 18:26:44] [INFO ] ProTrail starting
+[2026-09-17 18:26:44] [INFO ] Direct2D + DirectComposition link verified
+[2026-09-17 18:26:44] [INFO ] dpi: process awareness UNAWARE
+[2026-09-17 18:26:44] [INFO ] mouse_input: raw input registered (RIDEV_INPUTSINK, message-only window, Qt-dispatched)
+[2026-09-17 18:26:44] [INFO ] mouse input layer started (raw input + GetCursorPos sampling)
+[2026-09-17 18:26:44] [INFO ] overlay: render chain initialized (D3D11 -> DXGI flip -> D2D -> DComp)
+[2026-09-17 18:26:44] [INFO ] overlay_manager: created \\.\DISPLAY1 bounds=[1920,0-3840,1080] dpi=96x96 scale=1.00 primary=no
+[2026-09-17 18:26:44] [INFO ] overlay: render chain initialized (D3D11 -> DXGI flip -> D2D -> DComp)
+[2026-09-17 18:26:44] [INFO ] overlay_manager: created \\.\DISPLAY2 bounds=[-1920,0-0,1080] dpi=96x96 scale=1.00 primary=no
+[2026-09-17 18:26:44] [INFO ] overlay: render chain initialized (D3D11 -> DXGI flip -> D2D -> DComp)
+[2026-09-17 18:26:44] [INFO ] overlay_manager: created \\.\DISPLAY3 bounds=[0,0-1920,1080] dpi=96x96 scale=1.00 primary=yes
+[2026-09-17 18:26:44] [INFO ] overlay_manager: initialized 3 of 3 per-monitor overlays
+[2026-09-17 18:26:44] [INFO ] overlay: shown (no activate)
+[2026-09-17 18:26:44] [INFO ] overlay: shown (no activate)
+[2026-09-17 18:26:44] [INFO ] overlay: shown (no activate)
+[2026-09-17 18:26:44] [INFO ] overlay manager initialized (no diagnostics)
+[2026-09-17 18:26:44] [INFO ] Settings window shown (Golden Default theme)
+[2026-09-17 18:26:44] [INFO ] System tray icon initialized
+[2026-09-17 18:26:44] [INFO ] ProTrail exit requested
+[2026-09-17 18:26:44] [INFO ] ProTrail shutting down
+[2026-09-17 18:26:44] [INFO ] overlay: resources released
+[2026-09-17 18:26:44] [INFO ] overlay: resources released
+[2026-09-17 18:26:44] [INFO ] overlay: resources released
+[2026-09-17 18:26:44] [INFO ] mouse_input: raw input unregistered
+[2026-09-17 18:26:44] [INFO ] ProTrail shutdown complete
+[2026-09-17 18:26:44] [INFO ] ProTrail starting
+[2026-09-17 18:26:45] [INFO ] Direct2D + DirectComposition link verified
+[2026-09-17 18:26:45] [INFO ] dpi: process awareness UNAWARE
+[2026-09-17 18:26:45] [INFO ] mouse_input: raw input registered (RIDEV_INPUTSINK, message-only window, Qt-dispatched)
+[2026-09-17 18:26:45] [INFO ] mouse input layer started (raw input + GetCursorPos sampling)
+[2026-09-17 18:26:45] [INFO ] overlay: render chain initialized (D3D11 -> DXGI flip -> D2D -> DComp)
+[2026-09-17 18:26:45] [INFO ] overlay_manager: created \\.\DISPLAY1 bounds=[1920,0-3840,1080] dpi=96x96 scale=1.00 primary=no
+[2026-09-17 18:26:45] [INFO ] overlay: render chain initialized (D3D11 -> DXGI flip -> D2D -> DComp)
+[2026-09-17 18:26:45] [INFO ] overlay_manager: created \\.\DISPLAY2 bounds=[-1920,0-0,1080] dpi=96x96 scale=1.00 primary=no
+[2026-09-17 18:26:45] [INFO ] overlay: render chain initialized (D3D11 -> DXGI flip -> D2D -> DComp)
+[2026-09-17 18:26:45] [INFO ] overlay_manager: created \\.\DISPLAY3 bounds=[0,0-1920,1080] dpi=96x96 scale=1.00 primary=yes
+[2026-09-17 18:26:45] [INFO ] overlay_manager: initialized 3 of 3 per-monitor overlays
+[2026-09-17 18:26:45] [INFO ] overlay: shown (no activate)
+[2026-09-17 18:26:45] [INFO ] overlay: shown (no activate)
+[2026-09-17 18:26:45] [INFO ] overlay: shown (no activate)
+[2026-09-17 18:26:45] [INFO ] overlay manager initialized (no diagnostics)
+[2026-09-17 18:26:45] [INFO ] Settings window shown (Golden Default theme)
+[2026-09-17 18:26:45] [INFO ] System tray icon initialized
+[2026-09-17 18:26:45] [INFO ] ProTrail exit requested
+[2026-09-17 18:26:45] [INFO ] ProTrail shutting down
+[2026-09-17 18:26:45] [INFO ] overlay: resources released
+[2026-09-17 18:26:45] [INFO ] overlay: resources released
+[2026-09-17 18:26:45] [INFO ] overlay: resources released
+[2026-09-17 18:26:45] [INFO ] mouse_input: raw input unregistered
+[2026-09-17 18:26:45] [INFO ] ProTrail shutdown complete
+[2026-09-17 18:26:45] [INFO ] ProTrail starting
+[2026-09-17 18:26:45] [INFO ] Direct2D + DirectComposition link verified
+[2026-09-17 18:26:45] [INFO ] dpi: process awareness UNAWARE
+[2026-09-17 18:26:45] [INFO ] mouse_input: raw input registered (RIDEV_INPUTSINK, message-only window, Qt-dispatched)
+[2026-09-17 18:26:45] [INFO ] mouse input layer started (raw input + GetCursorPos sampling)
+[2026-09-17 18:26:45] [INFO ] overlay: render chain initialized (D3D11 -> DXGI flip -> D2D -> DComp)
+[2026-09-17 18:26:45] [INFO ] overlay_manager: created \\.\DISPLAY1 bounds=[1920,0-3840,1080] dpi=96x96 scale=1.00 primary=no
+[2026-09-17 18:26:45] [INFO ] overlay: render chain initialized (D3D11 -> DXGI flip -> D2D -> DComp)
+[2026-09-17 18:26:45] [INFO ] overlay_manager: created \\.\DISPLAY2 bounds=[-1920,0-0,1080] dpi=96x96 scale=1.00 primary=no
+[2026-09-17 18:26:45] [INFO ] overlay: render chain initialized (D3D11 -> DXGI flip -> D2D -> DComp)
+[2026-09-17 18:26:45] [INFO ] overlay_manager: created \\.\DISPLAY3 bounds=[0,0-1920,1080] dpi=96x96 scale=1.00 primary=yes
+[2026-09-17 18:26:45] [INFO ] overlay_manager: initialized 3 of 3 per-monitor overlays
+[2026-09-17 18:26:45] [INFO ] overlay: shown (no activate)
+[2026-09-17 18:26:45] [INFO ] overlay: shown (no activate)
+[2026-09-17 18:26:45] [INFO ] overlay: shown (no activate)
+[2026-09-17 18:26:45] [INFO ] overlay manager initialized (no diagnostics)
+[2026-09-17 18:26:45] [INFO ] Settings window shown (Golden Default theme)
+[2026-09-17 18:26:45] [INFO ] System tray icon initialized
+[2026-09-17 18:26:45] [INFO ] ProTrail master enable: OFF (clearing effects)
+[2026-09-17 18:26:45] [INFO ] ProTrail master enable: ON
+[2026-09-17 18:26:45] [INFO ] ProTrail exit requested
+[2026-09-17 18:26:45] [INFO ] ProTrail shutting down
+[2026-09-17 18:26:45] [INFO ] overlay: resources released
+[2026-09-17 18:26:45] [INFO ] overlay: resources released
+[2026-09-17 18:26:45] [INFO ] overlay: resources released
+[2026-09-17 18:26:45] [INFO ] mouse_input: raw input unregistered
+[2026-09-17 18:26:45] [INFO ] ProTrail shutdown complete
+[2026-09-17 18:26:45] [INFO ] ProTrail starting
+[2026-09-17 18:26:45] [INFO ] Direct2D + DirectComposition link verified
+[2026-09-17 18:26:45] [INFO ] dpi: process awareness UNAWARE
+[2026-09-17 18:26:45] [INFO ] mouse_input: raw input registered (RIDEV_INPUTSINK, message-only window, Qt-dispatched)
+[2026-09-17 18:26:45] [INFO ] mouse input layer started (raw input + GetCursorPos sampling)
+[2026-09-17 18:26:45] [INFO ] overlay: render chain initialized (D3D11 -> DXGI flip -> D2D -> DComp)
+[2026-09-17 18:26:45] [INFO ] overlay_manager: created \\.\DISPLAY1 bounds=[1920,0-3840,1080] dpi=96x96 scale=1.00 primary=no
+[2026-09-17 18:26:45] [INFO ] overlay: render chain initialized (D3D11 -> DXGI flip -> D2D -> DComp)
+[2026-09-17 18:26:45] [INFO ] overlay_manager: created \\.\DISPLAY2 bounds=[-1920,0-0,1080] dpi=96x96 scale=1.00 primary=no
+[2026-09-17 18:26:45] [INFO ] overlay: render chain initialized (D3D11 -> DXGI flip -> D2D -> DComp)
+[2026-09-17 18:26:45] [INFO ] overlay_manager: created \\.\DISPLAY3 bounds=[0,0-1920,1080] dpi=96x96 scale=1.00 primary=yes
+[2026-09-17 18:26:45] [INFO ] overlay_manager: initialized 3 of 3 per-monitor overlays
+[2026-09-17 18:26:45] [INFO ] overlay: shown (no activate)
+[2026-09-17 18:26:45] [INFO ] overlay: shown (no activate)
+[2026-09-17 18:26:45] [INFO ] overlay: shown (no activate)
+[2026-09-17 18:26:45] [INFO ] overlay manager initialized (no diagnostics)
+[2026-09-17 18:26:45] [INFO ] Settings window shown (Golden Default theme)
+[2026-09-17 18:26:45] [INFO ] System tray icon initialized
+[2026-09-17 18:26:45] [INFO ] ProTrail exit requested
+[2026-09-17 18:26:45] [INFO ] ProTrail shutting down
+[2026-09-17 18:26:45] [INFO ] overlay: resources released
+[2026-09-17 18:26:46] [INFO ] overlay: resources released
+[2026-09-17 18:26:46] [INFO ] overlay: resources released
+[2026-09-17 18:26:46] [INFO ] mouse_input: raw input unregistered
+[2026-09-17 18:26:46] [INFO ] ProTrail shutdown complete

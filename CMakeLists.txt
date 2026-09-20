@@ -18,21 +18,75 @@ endif()
 
 if(MSVC)
     # Warnings as errors, UTF-8 source, conformant preprocessor.
-    add_compile_options(/W4 /WX /utf-8 /Zc:preprocessor /permissive- /FS)
+    add_compile_options(/W4 /WX /EHsc /utf-8 /Zc:preprocessor /permissive- /FS)
 endif()
 
+# T-34: Developer Release Defaults panel in dev builds only
+option(PROTRAIL_DEV_BUILD "Enable developer tools and defaults authoring panel" OFF)
+if(PROTRAIL_DEV_BUILD)
+    add_compile_definitions(PROTRAIL_DEV_BUILD=1)
+else()
+    add_compile_definitions($<$<CONFIG:Debug>:PROTRAIL_DEV_BUILD=1>)
+endif()
+add_compile_definitions(PROTRAIL_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+
 # ---- Qt ----
-list(APPEND CMAKE_PREFIX_PATH "C:/Qt/6.8.0/msvc2022_64")
+# Developer convenience only: a local Qt install is a valid prefix when it
+# exists. CI supplies its own Qt (install-qt-action exports Qt6_DIR), and an
+# absent hardcoded path must never shadow the environment's real one.
+if(EXISTS "C:/Qt/6.8.0/msvc2022_64")
+    list(APPEND CMAKE_PREFIX_PATH "C:/Qt/6.8.0/msvc2022_64")
+endif()
 find_package(Qt6 6.8 REQUIRED COMPONENTS Widgets Test)
 qt_standard_project_setup()
+
+# ---- T-33 canonical Release Defaults build gate ----
+# The ONE semantic default configuration is resources/release_defaults.json.
+# A missing or malformed source must fail the build visibly: silently shipping
+# unknown fallback values is the exact failure this gate removes. The same
+# script is wired into CTest with a deliberately broken file, so the gate
+# itself is proven rather than asserted.
+set(PROTRAIL_RELEASE_DEFAULTS
+    "${CMAKE_CURRENT_SOURCE_DIR}/resources/release_defaults.json")
+# AUTORCC embeds the canonical source; the .qrc sits beside the JSON so its
+# relative <file> entry resolves without a path hack.
+set(PROTRAIL_RELEASE_DEFAULTS_QRC
+    "${CMAKE_CURRENT_SOURCE_DIR}/resources/release_defaults.qrc")
+# The gate must re-run whenever the canonical source changes; without this the
+# JSON is not a configure input and an edited-but-invalid file would sail
+# through until the next unrelated reconfigure.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${PROTRAIL_RELEASE_DEFAULTS}")
+if(NOT EXISTS "${PROTRAIL_RELEASE_DEFAULTS}")
+    message(FATAL_ERROR
+        "RELEASE_DEFAULTS_MISSING: ${PROTRAIL_RELEASE_DEFAULTS} does not exist")
+endif()
+execute_process(
+    COMMAND "${CMAKE_COMMAND}"
+            -D DEFAULTS_FILE=${PROTRAIL_RELEASE_DEFAULTS}
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/validate_release_defaults.cmake"
+    RESULT_VARIABLE _defaults_rc
+    OUTPUT_VARIABLE _defaults_out
+    ERROR_VARIABLE _defaults_err)
+if(NOT _defaults_rc EQUAL 0)
+    message(FATAL_ERROR
+        "RELEASE_DEFAULTS_INVALID: ${_defaults_out}${_defaults_err}")
+endif()
+
 
 # ---- Sources ----
 add_executable(protrail
     src/app/main.cpp
     src/app/application.cpp
     src/app/application.h
+    src/app/single_instance.h
+    src/app/single_instance.cpp
     src/app/startup_paths.h
     src/app/startup_paths.cpp
+    src/app/startup_mode.h
+    src/app/startup_mode.cpp
+    src/platform/autostart.h
+    src/platform/autostart.cpp
     src/core/log.cpp
     src/core/log.h
     src/core/cursor_sample.h
@@ -59,12 +113,19 @@ add_executable(protrail
     src/ui/theme.qrc
     src/ui/settings_window.h
     src/ui/settings_window.cpp
+    src/ui/main_window.h
+    src/ui/main_window.cpp
     src/ui/tray_icon.h
     src/ui/tray_icon.cpp
     src/config/app_config.h
     src/config/app_config.cpp
     src/config/config_storage.h
     src/config/config_storage.cpp
+    src/config/release_defaults.h
+    src/config/release_defaults.cpp
+    src/config/dev_defaults.h
+    src/config/dev_defaults.cpp
+    "${PROTRAIL_RELEASE_DEFAULTS_QRC}"
     src/render/render_scheduler.h
     src/render/render_scheduler.cpp
     src/render/overlay_manager.h
@@ -81,6 +142,7 @@ target_link_libraries(protrail PRIVATE
     dxgi
     user32
     psapi
+    advapi32
 )
 
 target_include_directories(protrail PRIVATE src)
@@ -107,6 +169,9 @@ set_target_properties(protrail_tests PROPERTIES
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
 )
 add_test(NAME protrail_tests COMMAND protrail_tests)
+set_tests_properties(protrail_tests PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+)
 
 qt_add_executable(protrail_history_tests
     tests/test_cursor_history.cpp
@@ -169,6 +234,21 @@ set_target_properties(protrail_trail_tests PROPERTIES
 )
 add_test(NAME protrail_trail_tests COMMAND protrail_trail_tests)
 
+# T-019: pure continuous-stroke cap-policy regressions (no Qt, no D2D
+# runtime). Drives real TrailEffect output through the production sink
+# contract and asserts the flat-flat/flat-round/round-round decisions.
+qt_add_executable(protrail_stroke_policy_tests
+    tests/test_trail_stroke_policy.cpp
+    src/effects/trail_effect.cpp
+    src/core/cursor_history.cpp
+)
+target_link_libraries(protrail_stroke_policy_tests PRIVATE d2d1)
+target_include_directories(protrail_stroke_policy_tests PRIVATE .)
+set_target_properties(protrail_stroke_policy_tests PROPERTIES
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
+)
+add_test(NAME protrail_stroke_policy_tests COMMAND protrail_stroke_policy_tests)
+
 # T-009: pure click-bubble math tests (no Qt, no D2D runtime; only effect
 # headers). Covers C12 items 1-17.
 qt_add_executable(protrail_click_tests
@@ -181,6 +261,19 @@ set_target_properties(protrail_click_tests PROPERTIES
 )
 add_test(NAME protrail_click_tests COMMAND protrail_click_tests)
 
+# T-026 Hold Motion Wake / T-027 Hold Controls: pure structural and
+# determinism tests for the detached world-space wake layer. No Qt and no D2D
+# runtime; the effect's own sink contract is the observation point.
+qt_add_executable(protrail_hold_wake_tests
+    tests/test_hold_wake.cpp
+    src/effects/click_bubble_effect.cpp
+)
+target_include_directories(protrail_hold_wake_tests PRIVATE .)
+set_target_properties(protrail_hold_wake_tests PROPERTIES
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
+)
+add_test(NAME protrail_hold_wake_tests COMMAND protrail_hold_wake_tests)
+
 # T-010 MVP 05: settings-window binding tests (QtTest; needs the QApplication
 # platform offscreen so the tests run headless in CI/agent shells).
 qt_add_executable(protrail_gui_tests
@@ -189,6 +282,13 @@ qt_add_executable(protrail_gui_tests
     src/ui/check.xpm
     src/ui/theme.qrc
     src/ui/settings_window.cpp
+    src/ui/main_window.cpp
+    src/config/app_config.cpp
+    src/config/config_storage.cpp
+    src/config/release_defaults.cpp
+    src/config/dev_defaults.cpp
+    "${PROTRAIL_RELEASE_DEFAULTS_QRC}"
+    src/core/log.cpp
     src/effects/trail_effect.cpp
     src/effects/click_bubble_effect.cpp
     src/core/cursor_history.cpp
@@ -206,11 +306,42 @@ set_tests_properties(protrail_gui_tests PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
 )
 
+# T-037: direct deterministic coverage for the compact product-home surface.
+# The developer-only "Set Defaults" action is gated by the same runtime
+# is_dev_build() authority the Settings developer panel uses, so this target
+# links the dev-defaults owner (and its storage/defaults dependencies) instead
+# of duplicating that decision as a second compile-time rule.
+qt_add_executable(protrail_main_window_tests
+    tests/test_main_window.cpp
+    src/ui/main_window.cpp
+    src/ui/theme.cpp
+    src/ui/check.xpm
+    src/ui/theme.qrc
+    src/config/app_config.cpp
+    src/config/config_storage.cpp
+    src/config/release_defaults.cpp
+    src/config/dev_defaults.cpp
+    "${PROTRAIL_RELEASE_DEFAULTS_QRC}"
+    src/core/log.cpp
+)
+target_link_libraries(protrail_main_window_tests PRIVATE Qt6::Widgets Qt6::Test)
+target_include_directories(protrail_main_window_tests PRIVATE .)
+set_target_properties(protrail_main_window_tests PROPERTIES
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
+)
+add_test(NAME protrail_main_window_tests COMMAND protrail_main_window_tests)
+set_tests_properties(protrail_main_window_tests PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+)
+
 # T-011 MVP 06: configuration & persistence tests.
 qt_add_executable(protrail_config_tests
     tests/test_config.cpp
     src/config/app_config.cpp
     src/config/config_storage.cpp
+    src/config/release_defaults.cpp
+    src/config/dev_defaults.cpp
+    "${PROTRAIL_RELEASE_DEFAULTS_QRC}"
     src/core/log.cpp
 )
 target_link_libraries(protrail_config_tests PRIVATE Qt6::Core Qt6::Test)
@@ -254,12 +385,20 @@ set_target_properties(protrail_multimonitor_tests PROPERTIES
 add_test(NAME protrail_multimonitor_tests COMMAND protrail_multimonitor_tests)
 
 # T-014 MVP 09 / T-017R1: tray integration & lifecycle tests.
-qt_add_executable(protrail_tray_tests
-    tests/test_tray.cpp
+# T-021: the application-shaped source set is named ONCE here and consumed by
+# both controller-level targets (tray lifecycle + Trail child-toggle
+# lifecycle), so neither can drift from what the shipped application is.
+set(PROTRAIL_APP_SOURCES
     src/app/application.h
     src/app/application.cpp
+    src/app/single_instance.h
+    src/app/single_instance.cpp
     src/app/startup_paths.h
     src/app/startup_paths.cpp
+    src/app/startup_mode.h
+    src/app/startup_mode.cpp
+    src/platform/autostart.h
+    src/platform/autostart.cpp
     src/render/overlay_manager.h
     src/render/overlay_manager.cpp
     src/render/overlay_window.h
@@ -277,6 +416,8 @@ qt_add_executable(protrail_tray_tests
     src/ui/tray_icon.cpp
     src/ui/settings_window.h
     src/ui/settings_window.cpp
+    src/ui/main_window.h
+    src/ui/main_window.cpp
     src/ui/theme.h
     src/ui/theme.cpp
     src/ui/check.xpm
@@ -285,6 +426,11 @@ qt_add_executable(protrail_tray_tests
     src/config/app_config.cpp
     src/config/config_storage.h
     src/config/config_storage.cpp
+    src/config/release_defaults.h
+    src/config/release_defaults.cpp
+    src/config/dev_defaults.h
+    src/config/dev_defaults.cpp
+    "${PROTRAIL_RELEASE_DEFAULTS_QRC}"
     src/core/log.h
     src/core/log.cpp
     src/effects/trail_effect.h
@@ -293,6 +439,11 @@ qt_add_executable(protrail_tray_tests
     src/effects/click_bubble_effect.cpp
     src/core/cursor_history.h
     src/core/cursor_history.cpp
+)
+
+qt_add_executable(protrail_tray_tests
+    tests/test_tray.cpp
+    ${PROTRAIL_APP_SOURCES}
 )
 target_link_libraries(protrail_tray_tests PRIVATE
     Qt6::Widgets
@@ -303,6 +454,7 @@ target_link_libraries(protrail_tray_tests PRIVATE
     dxgi
     user32
     psapi
+    advapi32
 )
 target_include_directories(protrail_tray_tests PRIVATE .)
 set_target_properties(protrail_tray_tests PROPERTIES
@@ -312,4 +464,166 @@ add_test(NAME protrail_tray_tests COMMAND protrail_tray_tests)
 set_tests_properties(protrail_tray_tests PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
 )
+
+# T-021: Trail child-toggle lifecycle freshness. Controller-level regressions
+# run INSIDE the production event loop (real SettingsWindow -> signal ->
+# controller wiring) and assert against the application's own CursorHistory,
+# including a real TrailEffect geometry build.
+qt_add_executable(protrail_trail_lifecycle_tests
+    tests/test_trail_lifecycle.cpp
+    ${PROTRAIL_APP_SOURCES}
+)
+target_link_libraries(protrail_trail_lifecycle_tests PRIVATE
+    Qt6::Widgets
+    Qt6::Test
+    d2d1
+    dcomp
+    d3d11
+    dxgi
+    user32
+    psapi
+    advapi32
+)
+target_include_directories(protrail_trail_lifecycle_tests PRIVATE .)
+set_target_properties(protrail_trail_lifecycle_tests PROPERTIES
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
+)
+add_test(NAME protrail_trail_lifecycle_tests COMMAND protrail_trail_lifecycle_tests)
+set_tests_properties(protrail_trail_lifecycle_tests PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+)
+
+# T-021: deterministic sparkle overlay regressions. Pure effect-model tests
+# (determinism, mode character, hard bounds); no GUI, no COM, no window.
+qt_add_executable(protrail_sparkle_tests
+    tests/test_trail_sparkles.cpp
+    src/effects/trail_effect.cpp
+    src/core/cursor_history.cpp
+)
+target_link_libraries(protrail_sparkle_tests PRIVATE
+    Qt6::Core
+    Qt6::Test
+    d2d1
+)
+target_include_directories(protrail_sparkle_tests PRIVATE .)
+set_target_properties(protrail_sparkle_tests PROPERTIES
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
+)
+add_test(NAME protrail_sparkle_tests COMMAND protrail_sparkle_tests)
+
+# T-33: canonical Release Defaults regressions. Proves the embedded source is
+# readable, that a fresh configuration equals it, and that the canonical
+# defaults roundtrip through the normal persistence pipeline.
+qt_add_executable(protrail_release_defaults_tests
+    tests/test_release_defaults.cpp
+    src/config/app_config.cpp
+    src/config/config_storage.cpp
+    src/config/release_defaults.cpp
+    src/config/dev_defaults.cpp
+    "${PROTRAIL_RELEASE_DEFAULTS_QRC}"
+    src/core/log.cpp
+)
+target_link_libraries(protrail_release_defaults_tests PRIVATE Qt6::Core Qt6::Test)
+target_include_directories(protrail_release_defaults_tests PRIVATE .)
+set_target_properties(protrail_release_defaults_tests PROPERTIES
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
+)
+add_test(NAME protrail_release_defaults_tests COMMAND protrail_release_defaults_tests)
+
+# T-33 build-gate regression: the SAME validator the configure step runs must
+# FAIL on a deliberately broken defaults source. This is what stops the gate
+# from silently degrading into a no-op.
+set(PROTRAIL_BROKEN_DEFAULTS
+    "${CMAKE_CURRENT_BINARY_DIR}/release_defaults_broken.json")
+file(WRITE "${PROTRAIL_BROKEN_DEFAULTS}" "{ \"schema_version\": 1, \"trail\": {} }\n")
+add_test(NAME protrail_release_defaults_gate
+    COMMAND "${CMAKE_COMMAND}"
+            -D DEFAULTS_FILE=${PROTRAIL_BROKEN_DEFAULTS}
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/validate_release_defaults.cmake")
+set_tests_properties(protrail_release_defaults_gate PROPERTIES WILL_FAIL TRUE)
+
+# T-33: the gate must also PASS on the real canonical source, so a broken
+# validator cannot be mistaken for a healthy one.
+add_test(NAME protrail_release_defaults_gate_accepts_canonical
+    COMMAND "${CMAKE_COMMAND}"
+            -D DEFAULTS_FILE=${PROTRAIL_RELEASE_DEFAULTS}
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/validate_release_defaults.cmake")
+
+# T-48: the two script-driven gate tests above are registered OUTSIDE the
+# executables loop below, so they would otherwise carry CTest's default
+# infinite timeout -- a validator that never returns would hang the suite
+# instead of failing it. The finite bound is applied to EVERY registration.
+set_tests_properties(
+    protrail_release_defaults_gate
+    protrail_release_defaults_gate_accepts_canonical
+    PROPERTIES TIMEOUT 300)
+
+
+# through the in-memory registry backend (see the header comment of the test
+# file); the suite additionally proves the REAL per-user Run key is
+# byte-identical before and after, so a routine CTest run can never enroll
+# the developer's machine into Windows startup.
+qt_add_executable(protrail_autostart_tests
+    tests/test_autostart.cpp
+    src/platform/autostart.cpp
+    src/app/startup_mode.cpp
+)
+target_link_libraries(protrail_autostart_tests PRIVATE
+    Qt6::Core
+    Qt6::Test
+    advapi32
+)
+target_include_directories(protrail_autostart_tests PRIVATE .)
+set_target_properties(protrail_autostart_tests PROPERTIES
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
+)
+add_test(NAME protrail_autostart_tests COMMAND protrail_autostart_tests)
+
+# W2-004: bounded per-request identity dedup for the single-instance channels.
+qt_add_executable(protrail_request_dedup_tests
+    tests/test_request_dedup.cpp
+)
+target_link_libraries(protrail_request_dedup_tests PRIVATE Qt6::Core Qt6::Test)
+target_include_directories(protrail_request_dedup_tests PRIVATE .)
+set_target_properties(protrail_request_dedup_tests PROPERTIES
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
+)
+add_test(NAME protrail_request_dedup_tests COMMAND protrail_request_dedup_tests)
+
+# T-018R1: single-instance protocol regressions. Unique per-test kernel
+# object names; no production globals.
+qt_add_executable(protrail_single_instance_tests
+    tests/test_single_instance.cpp
+    src/app/single_instance.cpp
+    src/core/log.cpp
+)
+target_link_libraries(protrail_single_instance_tests PRIVATE Qt6::Core Qt6::Test user32)
+target_include_directories(protrail_single_instance_tests PRIVATE .)
+set_target_properties(protrail_single_instance_tests PROPERTIES
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
+)
+add_test(NAME protrail_single_instance_tests COMMAND protrail_single_instance_tests)
+
+# T-019: CTest-launched executables need Qt runtime DLLs on PATH regardless
+# of the ambient agent shell (which does not export the Qt bin directory).
+# ENVIRONMENT_MODIFICATION prepends without clobbering the per-test
+# QT_QPA_PLATFORM=offscreen ENVIRONMENT properties above.
+get_target_property(_qt_core_dll Qt6::Core LOCATION)
+get_filename_component(_qt_bin_dir "${_qt_core_dll}" DIRECTORY)
+foreach(_test protrail_tests protrail_history_tests protrail_timestamp_tests
+             protrail_button_flags_tests protrail_input_dispatch
+             protrail_trail_tests protrail_stroke_policy_tests
+             protrail_click_tests protrail_hold_wake_tests
+             protrail_gui_tests protrail_main_window_tests protrail_config_tests
+             protrail_scheduler_tests protrail_multimonitor_tests
+             protrail_tray_tests protrail_single_instance_tests
+             protrail_trail_lifecycle_tests protrail_sparkle_tests
+             protrail_release_defaults_tests
+             protrail_autostart_tests
+             protrail_request_dedup_tests)
+    set_tests_properties(${_test} PROPERTIES
+        TIMEOUT 300
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_qt_bin_dir}")
+endforeach()
+
 

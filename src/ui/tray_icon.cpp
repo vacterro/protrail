@@ -46,8 +46,10 @@ TrayIcon::TrayIcon(bool master_enabled, QObject* parent)
       tray_icon_(std::make_unique<QSystemTrayIcon>(this)),
       menu_(std::make_unique<QMenu>()) {
 
-    // Action 1: Settings
-    action_settings_ = menu_->addAction(QStringLiteral("Settings"));
+    // Product home is the primary tray action; advanced editing remains explicit.
+    action_home_ = menu_->addAction(QStringLiteral("Open ProTrail"));
+    connect(action_home_, &QAction::triggered, this, &TrayIcon::home_requested);
+    action_settings_ = menu_->addAction(QStringLiteral("Settings..."));
     connect(action_settings_, &QAction::triggered, this, &TrayIcon::settings_requested);
 
     // Action 2: Enable / Disable
@@ -65,7 +67,7 @@ TrayIcon::TrayIcon(bool master_enabled, QObject* parent)
     connect(tray_icon_.get(), &QSystemTrayIcon::activated,
             this, [this](QSystemTrayIcon::ActivationReason reason) {
                 if (reason == QSystemTrayIcon::DoubleClick) {
-                    emit settings_requested();
+                    emit home_requested();
                 }
             });
 
@@ -120,6 +122,10 @@ QString TrayIcon::tooltip() const {
 
 QString TrayIcon::toggle_action_text() const {
     return action_toggle_ ? action_toggle_->text() : QString();
+}
+
+QAction* TrayIcon::action_home() const {
+    return action_home_;
 }
 
 QAction* TrayIcon::action_settings() const {

@@ -1,7 +1,7 @@
 {
-  "content_xor": "791018d54e96da5f4ecd7e4562b0c95f",
-  "inventory_xor": "5227cadacec798fd5fc32f141b35266d",
-  "lineage_hash": "a9b6731fcfc1f22e6d515ad98447cd45043967e6f24a688b25f2a2d430c92aa6",
+  "content_xor": "3983aabf6bcc23c4ca200be6eed46dab",
+  "inventory_xor": "ef26a4a930831fa16a4d3414d727d693",
+  "lineage_hash": "04acc5fe9fa102592b3ee980ff8d670601a39ef391f1b0afa5f5ec4a203b7fb8",
   "members": [
     [
       "2026-09-10T23_51_41.511657Z_receipt-c64387cdde78_core_FAIL.json",
@@ -166,9 +166,85 @@
     [
       "2026-09-11T22_22_30.081500Z_receipt-9a4ce93c879c_core_PASS.json",
       "08b2dbe0f2d58950d0233e9dcc5227f5"
+    ],
+    [
+      "2026-09-11T22_24_21.812794Z_receipt-fd670051f899_core_PASS.json",
+      "4b540c6e631a60494a0a676bc5dc1983"
+    ],
+    [
+      "2026-09-12T03_27_10.277747Z_receipt-abefc0f92027_core_FAIL.json",
+      "4393cf9da61655c4897304954cacba38"
+    ],
+    [
+      "2026-09-12T03_27_19.664897Z_receipt-b7408610c0a3_core_FAIL.json",
+      "59dc56cf90b9fa2c5770453d2987e9af"
+    ],
+    [
+      "2026-09-12T03_28_38.569865Z_receipt-fefe7e44819c_core_FAIL.json",
+      "1d1e32367aaf5b698b6f89aaeecd7f52"
+    ],
+    [
+      "2026-09-12T03_28_54.652014Z_receipt-0bbaeaf1ea27_core_FAIL.json",
+      "9176425149e0daaab28a49d0dfad8eb5"
+    ],
+    [
+      "2026-09-12T03_31_59.701829Z_receipt-c548dcae4144_core_FAIL.json",
+      "797c90881a89dfb5824d42315cc81b48"
+    ],
+    [
+      "2026-09-12T03_32_14.378510Z_receipt-d7ab95a8cd84_core_PASS.json",
+      "15c590927fc3ad9d90cc444755955945"
+    ],
+    [
+      "2026-09-12T03_32_21.361935Z_receipt-aa84215a7d74_core_PASS.json",
+      "8c5bba5ec9601498da95a34ebfbdce3d"
+    ],
+    [
+      "2026-09-12T03_33_28.361427Z_receipt-3cbf020d2b37_core_PASS.json",
+      "73fdcc9f287715ad4ce87262688828f2"
+    ],
+    [
+      "2026-09-12T03_53_17.562812Z_receipt-c9c736e026c2_core_PASS.json",
+      "cc47dfac11e8e58ba2c9d19d99d1bc99"
+    ],
+    [
+      "2026-09-12T08_30_15.328327Z_receipt-3e3b2dd4fa19_core_FAIL.json",
+      "c00fedeb1b24e976c4e8fe914153d695"
+    ],
+    [
+      "2026-09-12T08_30_19.183398Z_receipt-85c913a12bb0_core_FAIL.json",
+      "7e44da0e1bf5dcd23ea3e13aee0e20d3"
+    ],
+    [
+      "2026-09-12T08_30_34.124892Z_receipt-28e1174112ee_core_FAIL.json",
+      "d3ff76f90564164f3c7984c334429f53"
+    ],
+    [
+      "2026-09-12T08_30_50.649351Z_receipt-3cc5417cd409_core_PASS.json",
+      "be5acc2a6ce7997cddb119edd5eb179f"
+    ],
+    [
+      "2026-09-12T09_22_48.700775Z_receipt-4f0c279f7052_core_FAIL.json",
+      "c4d1d3d813ccd33cf75ff845424dba73"
+    ],
+    [
+      "2026-09-12T09_23_48.489615Z_receipt-14a8305e16e6_core_FAIL.json",
+      "10cc77e3208b94a27273f90f2fc69fa8"
+    ],
+    [
+      "2026-09-12T09_24_09.130953Z_receipt-60545fe0ada4_core_FAIL.json",
+      "6f62374035b4543525bb4cddd811cec2"
+    ],
+    [
+      "2026-09-12T09_24_39.023595Z_receipt-4e8ef3c58861_core_FAIL.json",
+      "cbd10a08af432c7e1431fea2c7a97623"
+    ],
+    [
+      "2026-09-12T09_25_58.622917Z_receipt-86cfe88fbabc_core_PASS.json",
+      "61f8ea0316f7a42da011a46d668de4ec"
     ]
   ],
-  "receipt_count": 41,
-  "receipt_dir_mtime_ns": 1789165351484597300,
+  "receipt_count": 60,
+  "receipt_dir_mtime_ns": 1789205159571570500,
   "version": 1
 }

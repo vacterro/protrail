@@ -2,12 +2,13 @@
 
 #include "../effects/trail_config.h"
 #include "../effects/click_config.h"
+#include "../config/app_config.h"
 
 #include <QWidget>
+#include <optional>
 
 class QPushButton;
 class QCheckBox;
-class QComboBox;
 
 namespace ptd {
 namespace ui {
@@ -59,6 +60,16 @@ public:
     void apply_color(int r, int g, int b);
     QPushButton* swatch_button() const;
 
+    // T-020: the visible meaning of this editor changes with the trail
+    // color mode (Solid/Head/Tail/Gradient relabel which role each editor
+    // plays). Label-only; never touches the stored RGB values.
+    void set_label(const QString& text);
+
+    // T-020R1: the editor's interactive controls in the order they are drawn
+    // (swatch, R/G/B, palette row by row). Used to declare an explicit tab
+    // order after the COLOR section reorders its editors.
+    QList<QWidget*> focusable_children() const;
+
     // Palette inspection helpers (T-015 Phase 8 / 16)
     int palette_count() const;
     QPushButton* palette_button(int index) const;
@@ -92,6 +103,7 @@ public:
     explicit SettingsWindow(const ptd::TrailConfig& trail,
                             const ptd::ClickConfig& click,
                             bool master_enabled = true,
+                            bool start_with_windows = false,
                             QWidget* parent = nullptr);
     // Defined in the .cpp after Impl is complete: unique_ptr<Impl> requires
     // a complete type at destructor instantiation, and the Q_OBJECT-generated
@@ -105,18 +117,59 @@ signals:
     void trail_enabled_changed(bool);
     void click_enabled_changed(bool);
     void preset_applied(const ptd::TrailConfig&, const ptd::ClickConfig&);
+    // CORE-003 + W2-002: ONE bulk publication for a whole-AppConfig operation
+    // (Restore All / apply_config / dev preset). Application applies it as a
+    // single transaction with one persistence commit, instead of observing a
+    // sequence of unrelated partial updates.
+    void app_config_applied(const ptd::AppConfig&);
+    // T-032: the application-level Start with Windows preference. One
+    // boolean, one owner (Application applies the registry side effect);
+    // the window only reports the user's intent.
+    void start_with_windows_changed(bool);
+    void set_current_as_release_defaults_requested();
 
 public slots:
     // Called by Application when master disable clears visible effects;
     // keeps checkboxes in sync if needed.
     void set_master_enabled(bool);
+    // T-032: silent programmatic population (no publication), so a config
+    // load or a Main-surface edit can never loop back into a save.
+    void set_start_with_windows(bool);
+
+public:
+    // T-032: current Start with Windows state as shown to the user.
+    bool start_with_windows() const;
+
+    // T-34: Developer defaults & presets interface
+    ptd::AppConfig capture_current_settings() const;
+    void apply_config(const ptd::AppConfig& cfg);
+    bool has_dev_tab() const;
+    QWidget* dev_tab() const;
+    std::optional<ptd::AppConfig> captured_config() const;
+    void show_dev_status(const QString& text);
+    void set_developer_defaults_controller(bool enabled);
+
+    // T-37: SILENT cross-surface synchronization. Applies a canonical
+    // AppConfig to every widget with signals blocked and emits NOTHING, so
+    // the Main Essentials surface (or any other authority) can push state
+    // into Settings without a callback loop, a duplicate save or a
+    // publication storm. Distinct from apply_config(), which is the explicit
+    // whole-config USER operation and publishes ONE transaction.
+    void sync_from_app_config(const ptd::AppConfig& cfg);
 
 private slots:
     void on_master_toggled(bool);
     void on_trail_toggled(bool);
     void on_click_toggled(bool);
+    // T-032: the user turned the Start with Windows control.
+    void on_start_with_windows_toggled(bool);
+    // T-027: Hold FX / Motion Wake toggles re-evaluate the Hold block's
+    // interactive state and publish one coherent ClickConfig.
+    void on_hold_toggled(bool);
     void on_trail_slider(double);
     void on_click_slider(double);
+    // T-36: Turn/Stop Accent toggles publish one coherent ClickConfig.
+    void on_motion_accent_toggled(bool);
     void on_trail_color(int, int, int);
     void on_click_color(int, int, int);
     void on_preset_clicked(int index);
@@ -125,14 +178,41 @@ private slots:
     void on_restore_click();
     void emit_trail_config();
     void emit_click_config();
+    // T-020: selector buttons (one user click = one coherent publication).
+    // idClicked fires only on real user activation, never on programmatic
+    // selection, so config loading stays silent.
+    void on_trail_mode_clicked(int id);
+    void on_trail_style_clicked(int id);
+    void on_trail_fade_clicked(int id);
+    // T-021: sparkle mode selector (user click = visibility + one publish).
+    void on_trail_sparkle_clicked(int id);
+    void on_click_style_clicked(int id);
+    void on_click_easing_clicked(int id);
+
+    // T-34: Developer tab slots
+    void on_dev_capture();
+    void on_dev_save_preset();
+    void on_dev_apply_preset();
+    void on_dev_apply_defaults();
+    void on_dev_show_diff();
+    void on_dev_promote();
 
 private:
     void apply_preset(int index);
     void build_general_tab();
     void build_trail_tab();
     void build_click_tab();
+    void build_dev_tab();
+    void refresh_dev_presets();
+    std::optional<ptd::AppConfig> resolve_dev_selected_config() const;
     void setup_connections();
     void set_object_names();
+
+    // T-020 contextual surfaces: silent visibility/label updates driven by
+    // the selected mode/style. Never publish, never reset stored values.
+    void update_trail_visibility();
+    void update_color_section();
+    void update_click_visibility();
 
     // Single explicit initialization path: copy validated config -> widgets
     // while blocking widget signals, so programmatic setup never publishes.
@@ -142,8 +222,13 @@ private:
     void apply_enable_states();
 
     bool master_enabled_ = true;
+    // T-032: persisted application preference; not part of TrailConfig or
+    // ClickConfig because it is not an effect setting.
+    bool start_with_windows_ = false;
     ptd::TrailConfig trail_cfg_;
     ptd::ClickConfig click_cfg_;
+    std::optional<ptd::AppConfig> captured_config_;
+    bool developer_defaults_controller_ = false;
 
     struct Impl;
     std::unique_ptr<Impl> d_;

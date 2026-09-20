@@ -12,9 +12,12 @@
 #include <dcomp.h>
 #include <dxgi1_2.h>
 #include <wrl/client.h>
+#include <cstdint>
 #include <functional>
 
 #include "screen_map.h"
+#include "trail_stroke_policy.h"
+#include "frame_geometry.h"
 #include "../core/log.h"
 #include "../effects/trail_effect.h"
 #include "../effects/click_bubble_effect.h"
@@ -72,9 +75,9 @@ namespace ptd {
 // DEFERRED, coalesced notification through a small native mechanism
 // (PostMessage to this window, handled after WndProc returns), and the
 // manager/Application performs reconciliation afterward.
-class OverlayWindow : public TrailGeometrySink, public ClickBubbleSink {
+class OverlayWindow {
 public:
-    OverlayWindow() = default;
+    OverlayWindow();
     ~OverlayWindow();
 
     OverlayWindow(const OverlayWindow&) = delete;
@@ -85,9 +88,47 @@ public:
     void hide();
     void destroy();
 
-    // T-018: device loss recovery
-    void release_render_resources();
+    // ---- T-018R1 bounded device-recovery authority ----
+    // One recovery owner: this window. Device loss (EndDraw / Present /
+    // Commit) releases the whole render chain, enters RecoveryPending and
+    // is retried through ONE policy-gated path. No recursive
+    // init_render()/diagnostic/recreate chain exists anymore; the HWND
+    // always survives.
+    enum class RecoveryPhase { Ready, RecoveryPending };
+
+    RecoveryPhase recovery_phase() const {
+        return recovery_.pending ? RecoveryPhase::RecoveryPending
+                                 : RecoveryPhase::Ready;
+    }
+    // A window is only renderable when the full chain exists; a partially
+    // initialized chain is never treated as Ready.
+    bool has_render_resources() const {
+        return static_cast<bool>(d2d_context_) && static_cast<bool>(swap_chain_)
+            && static_cast<bool>(dcomp_device_);
+    }
+
+    // Recoverable device-loss classification. Non-device HRESULTs are
+    // logged but never request a full device-chain rebuild.
+    static bool is_device_loss_hresult(HRESULT hr);
+
+    // Enter RecoveryPending: release every render resource (so stale or
+    // partially initialized resources are never exposed) and schedule the
+    // first bounded retry.
+    void note_device_loss(const char* origin, HRESULT hr);
+
+    // Policy-gated retry: at most one recreate attempt per backoff window
+    // (250 ms doubling up to 5 s). Persistent failure therefore stays
+    // rate-limited (never a per-frame spin) and remains retryable.
+    bool try_recovery();
+
+    // Forced synchronous recovery attempt (explicit caller request / the
+    // integration smoke). Same single authority; never recursive.
     bool recreate_render_resources();
+
+    // Deterministic test seam: replace the recreate step and the clock.
+    // Passing nullptr restores the default step (full chain rebuild).
+    void set_recovery_hooks(std::function<bool()> recreate_step,
+                            std::function<int64_t()> clock);
 
     const RECT& bounds() const { return bounds_; }
     HWND hwnd() const { return hwnd_; }
@@ -99,51 +140,55 @@ public:
     // Diagnostic: redraw the test primitive. Called on demand.
     void draw_diagnostic_frame();
 
-    // Real frame path (B7). `effect`, `history`, `clicks` and configs live
-    // in the Application; this method never mutates them (single-threaded
-    // GUI-thread contract). `now_ns` is the monotonic timestamp for this
-    // frame (Phase A clock). Configs supply color/thickness for this
-    // frame; they are borrowed for the duration of the call only.
-    void render_frame(const TrailEffect& effect,
-                      const CursorHistory& history,
-                      const TrailConfig& trail_config,
-                      const ClickBubbleEffect& click_effect,
-                      const ClickConfig& click_config,
-                      int64_t now_ns);
+    // Real frame path (B7). PERF-001: the world-space frame geometry is built
+    // ONCE per scheduler frame by FrameGeometry::build() in OverlayManager and
+    // handed to every overlay. `intersects` is the conservative world-space
+    // bounding-box overlap of that frame with this overlay (computed by the
+    // manager); this method commits the dirty-state transition ONLY when it
+    // actually presents, so a device-recovery attempt is never suppressed by
+    // an overlay that merely LOOKED clean. It never runs the effects.
+    void render_frame(const FrameGeometry& frame, bool intersects, int64_t now_ns);
 
-    // TrailGeometrySink (consumed inside render_frame while the trail
-    // builds geometry). Coordinates arrive in virtual-screen pixels and
-    // are transformed to overlay-local here (B4). Thickness arrives per
-    // segment (MVP 05 Phase F): the effect owns width/taper math, this
-    // class only strokes it.
-    void reserve_hint(int segment_count) override;
-    void add_segment(float x1, float y1, float x2, float y2,
-                     float alpha, float thickness_px,
-                     TrailColorF color) override;
-
-    // ClickBubbleSink (consumed inside render_frame while the click
-    // effect emits bubble render state). Same transform contract (C8).
-    // Ring and fill alphas both arrive precomputed (Phase K): this class
-    // never re-derives the fill from the ring.
-    // Name kept distinct from the trail's reserve_hint on purpose: a
-    // renderer implementing both interfaces must never conflate the two
-    // preallocation contracts.
-    void reserve_bubbles_hint(int bubble_count) override;
-    void add_bubble(float cx, float cy, float radius_px,
-                    float outline_thickness_px,
-                    float r, float g, float b,
-                    float ring_alpha, float fill_alpha) override;
-
-    // T-017: particle dot for the burst click styles (same transform +
-    // cull contract as add_bubble).
-    void add_particle(float cx, float cy, float radius_px,
-                      float r, float g, float b, float alpha) override;
+    OverlayDirtyState& dirty_state() { return dirty_; }
+    const OverlayDirtyState& dirty_state() const { return dirty_; }
 
 private:
     static LRESULT CALLBACK wnd_proc_static(HWND, UINT, WPARAM, LPARAM);
     LRESULT wnd_proc(HWND, UINT, WPARAM, LPARAM);
 
+    // Pure resource creation. Never draws, never presents, never calls the
+    // recovery authority (that is what broke the init-time recursion).
+    // On any failure it releases its own partial resources and returns
+    // false, so a half-built chain is never exposed.
     bool init_render();
+    void release_render_resources();
+
+    // T-019 continuous-stroke cap policy: stroke-style lookup for a cap
+    // policy (all styles are cached in init_render(), never per frame).
+    ID2D1StrokeStyle1* stroke_style_for(TrailCapPolicy policy) const;
+
+    // PERF-001 frame-consumer primitives. Each transforms a world-space
+    // primitive from the immutable frame to overlay-local physical pixels,
+    // culls it against this overlay, and emits it to Direct2D. No effect
+    // model, no config, no geometry build happens here.
+    void emit_trail_segment(const FramePrimitive& segment);
+    void emit_sparkle(const FramePrimitive& sparkle);
+    void emit_bubble(const FramePrimitive& bubble);
+    void emit_particle(const FramePrimitive& particle);
+
+    // T-018R1 bounded recovery state.
+    static constexpr int64_t kRecoveryInitialDelayMs = 250;
+    static constexpr int64_t kRecoveryMaxDelayMs = 5000;
+    struct RecoveryState {
+        bool pending = false;
+        int consecutive_failures = 0;
+        int64_t delay_ms = kRecoveryInitialDelayMs;
+        int64_t next_attempt_ns = 0;
+    };
+    RecoveryState recovery_{};
+    std::function<bool()> recreate_step_;    // default: full chain rebuild
+    std::function<int64_t()> recovery_clock_; // default: QPC monotonic ns
+    int64_t recovery_now() const;
 
     HWND hwnd_ = nullptr;
     HINSTANCE instance_ = nullptr;
@@ -162,10 +207,8 @@ private:
     UINT dpi_y_ = 96;
     static std::function<void()> s_display_change_callback_;
 
-    // Borrowed for the duration of one render_frame() call (GUI thread
-    // only): the sink callbacks read color/thickness from them.
-    const TrailConfig* frame_trail_config_ = nullptr;
-    const ClickConfig* frame_click_config_ = nullptr;
+    // PERF-001 per-overlay visibility state (see frame_geometry.h).
+    OverlayDirtyState dirty_{};
 
     Microsoft::WRL::ComPtr<ID3D11Device> d3d_device_;
     Microsoft::WRL::ComPtr<IDXGIDevice> dxgi_device_;
@@ -185,7 +228,14 @@ private:
     Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> trail_brush_;
     Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> bubble_brush_;
     Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> bubble_fill_brush_;
+    Microsoft::WRL::ComPtr<ID2D1PathGeometry> triangle_geometry_;
     Microsoft::WRL::ComPtr<ID2D1StrokeStyle1> round_stroke_style_;
+    // T-019: continuous styles never round-cap internal subdivisions.
+    // flat-flat serves internal joints, flat-round the head segment;
+    // round-round stays for Dotted/Spark dot stubs, bubbles and the
+    // single-segment trail. All three are created once in init_render().
+    Microsoft::WRL::ComPtr<ID2D1StrokeStyle1> flat_flat_stroke_style_;
+    Microsoft::WRL::ComPtr<ID2D1StrokeStyle1> flat_round_stroke_style_;
 };
 
 } // namespace ptd

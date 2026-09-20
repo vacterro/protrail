@@ -1,8 +1,1 @@
-{
-  "gate": "core",
-  "receipt_dir_mtime_ns": 1789165351484597300,
-  "receipt_id": "receipt-9a4ce93c879c",
-  "receipt_path": ".saipen/recovery/conformance/2026-09-11T22_22_30.081500Z_receipt-9a4ce93c879c_core_PASS.json",
-  "timestamp_utc": "2026-09-11T22:22:30.081500Z",
-  "version": 1
-}
+{"content_sha256":"0da42c0602d4f347112d13454d0c61e094745c4491820af51e71293f64b2a3bd","gate":"core","generation_id":"active-gen","generation_root":"122aca84a2a0862937aaaee2f2242e708b11f6cb1f3c4db58666577264b2a793","receipt_id":"receipt-ca2aa4437fdf","receipt_path":".saipen/recovery/conformance/2026-09-14T09_13_32.022333Z_receipt-ca2aa4437fdf_core_FAIL.json","root":"208b70614a60ba2ea86ec8fe6a32b1b5eee3af12392126bf57b9fdf5fdb1db7e","schema_version":2,"timestamp_utc":"2026-09-14T09:13:32.022333Z"}

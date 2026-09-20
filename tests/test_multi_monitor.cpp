@@ -9,9 +9,11 @@
 #include "../src/platform/dpi_awareness.h"
 #include "../src/render/overlay_manager.h"
 #include "../src/render/screen_map.h"
+#include "../src/render/frame_geometry.h"
 #include "../src/render/deferred_coalescer.h"
 #include "../src/platform/mouse_input.h"
 #include "../src/render/overlay_window.h"
+#include "../src/core/cursor_history.h"
 
 #include <QtTest/QtTest>
 
@@ -37,6 +39,7 @@ private slots:
     void seam_horizontal_and_vertical_continuity();
     void segment_spanning_two_overlays_culling();
     void neon_and_softglow_conservative_culling_margin();
+    void sparkle_transform_and_culling();
     void bubble_close_to_edge_routing_and_culling();
     void mixed_dpi_metadata_does_not_alter_transform();
     void hardware_mixed_dpi_coordinate_invariant();
@@ -51,8 +54,27 @@ private slots:
     void replacement_hwnd_dpi_difference_snapshot_regression();
     void newly_added_monitor_dpi_normalizes_snapshot();
     void deferred_refresh_coalescing_contract();
+    void deferred_coalescer_cancel_is_real_cancellation();
+    void deferred_coalescer_destroy_before_drain_is_safe();
     void dpi_awareness_query_shape();
     void topology_notification_requests_deferred_work_only();
+    // T-018R1 Phase 14: deterministic bounded device-recovery tests.
+    void recovery_state_ready_after_create();
+    void recovery_loss_enters_pending_and_releases_resources();
+    void recovery_first_failure_stays_pending();
+    void recovery_no_immediate_unbounded_retry();
+    void recovery_later_retry_success_returns_ready();
+    void recovery_persistent_failure_stays_bounded();
+    void recovery_repeated_loss_and_recovery_cycles();
+    void recovery_real_forced_rebuild_restores_full_resources();
+    void recovery_hresult_classification_separates_device_loss();
+    void recovery_failed_attempt_exposes_no_stale_resources();
+    // PERF-001: one world-space frame build per scheduler frame, per-overlay
+    // dirty presentation, and frame bounding-box culling.
+    void perf001_single_effect_build_regardless_of_overlay_count();
+    void perf001_dirty_overlay_presents_then_skips_when_clear();
+    void perf001_frame_bounds_cull_unintersected_monitor();
+    void perf001_global_content_death_clears_each_dirty_overlay_once();
 };
 
 void TestMultiMonitor::monitor_enumeration_returns_valid_displays() {
@@ -993,6 +1015,57 @@ void TestMultiMonitor::deferred_refresh_coalescing_contract() {
     QVERIFY(!coalescer.pending());
 }
 
+// W2-003: cancel() must invalidate already-posted work, and a request accepted
+// after a cancel must belong to a new generation that the stale closure cannot
+// clear or execute.
+void TestMultiMonitor::deferred_coalescer_cancel_is_real_cancellation() {
+    ptd::DeferredCoalescer coalescer;
+    int work_count = 0;
+    std::vector<std::function<void()>> deferred;
+    const auto post = [&deferred](std::function<void()> work) {
+        deferred.push_back(std::move(work));
+    };
+
+    // request -> cancel -> drain: the queued closure executes nothing.
+    QVERIFY(coalescer.request(post, [&] { ++work_count; }));
+    coalescer.cancel();
+    QVERIFY(!coalescer.pending());
+    QCOMPARE(deferred.size(), std::size_t(1));
+    deferred.front()();
+    QCOMPARE(work_count, 0);
+    deferred.clear();
+
+    // request A -> cancel -> request B -> drain stale A -> B remains -> drain B.
+    QVERIFY(coalescer.request(post, [&] { ++work_count; }));   // A
+    coalescer.cancel();
+    QVERIFY(coalescer.request(post, [&] { ++work_count; }));   // B (new generation)
+    QCOMPARE(deferred.size(), std::size_t(2));                 // A still queued
+    deferred.front()();                                        // drain stale A
+    QCOMPARE(work_count, 0);
+    QVERIFY(coalescer.pending());                              // B unaffected by A
+    deferred.back()();                                         // drain B
+    QCOMPARE(work_count, 1);                                   // exactly one B execution
+    QVERIFY(!coalescer.pending());
+}
+
+// W2-003: destroying the coalescer before the posted closure drains must be
+// safe -- the closure holds shared state, never a raw `this`.
+void TestMultiMonitor::deferred_coalescer_destroy_before_drain_is_safe() {
+    int work_count = 0;
+    std::vector<std::function<void()>> deferred;
+    const auto post = [&deferred](std::function<void()> work) {
+        deferred.push_back(std::move(work));
+    };
+
+    {
+        ptd::DeferredCoalescer coalescer;
+        QVERIFY(coalescer.request(post, [&] { ++work_count; }));
+        QCOMPARE(deferred.size(), std::size_t(1));
+        // coalescer destroyed here
+    }
+    deferred.front()();   // must be safe and execute no work
+    QCOMPARE(work_count, 0);
+}
 void TestMultiMonitor::dpi_awareness_query_shape() {
     const auto awareness = ptd::dpi::current_process_awareness();
     const char* name = ptd::dpi::awareness_name(awareness);
@@ -1042,6 +1115,425 @@ void TestMultiMonitor::topology_notification_requests_deferred_work_only() {
 
     ptd::OverlayWindow::clear_display_change_callback();
     window.destroy();
+}
+
+// ---- T-018R1 Phase 14: deterministic bounded device-recovery tests ----
+// The recovery clock and the recreate step are injected, so no test resets
+// a real GPU and every policy boundary is exact.
+
+namespace {
+constexpr int64_t kNsPerMs = 1'000'000;
+
+// Creates a real overlay (real HWND + real D3D/D2D/DComp chain) and then
+// hands recovery control to the test through the seams.
+bool create_recovery_overlay(ptd::OverlayWindow& w) {
+    RECT r{0, 0, 320, 240};
+    return w.create(GetModuleHandleW(nullptr), false, &r);
+}
+} // namespace
+
+void TestMultiMonitor::recovery_state_ready_after_create() {
+    ptd::OverlayWindow w;
+    if (!create_recovery_overlay(w)) {
+        QSKIP("overlay HWND/D3D device unavailable in this session (environment)");
+    }
+    QCOMPARE(w.recovery_phase(), ptd::OverlayWindow::RecoveryPhase::Ready);
+    QVERIFY(w.has_render_resources());
+    QVERIFY(w.hwnd() != nullptr);
+    w.destroy();
+}
+
+void TestMultiMonitor::recovery_loss_enters_pending_and_releases_resources() {
+    ptd::OverlayWindow w;
+    if (!create_recovery_overlay(w)) {
+        QSKIP("overlay HWND/D3D device unavailable in this session (environment)");
+    }
+    int64_t t = 1'000'000'000;
+    int calls = 0;
+    w.set_recovery_hooks([&] { ++calls; return true; }, [&] { return t; });
+
+    w.note_device_loss("test", DXGI_ERROR_DEVICE_RESET);
+    QCOMPARE(w.recovery_phase(), ptd::OverlayWindow::RecoveryPhase::RecoveryPending);
+    QVERIFY(!w.has_render_resources());   // stale resources never exposed
+    QVERIFY(w.hwnd() != nullptr);         // HWND survives
+    QVERIFY(!w.try_recovery());           // gated: before first delay elapses
+    QCOMPARE(calls, 0);
+    w.destroy();
+}
+
+void TestMultiMonitor::recovery_first_failure_stays_pending() {
+    ptd::OverlayWindow w;
+    if (!create_recovery_overlay(w)) {
+        QSKIP("overlay HWND/D3D device unavailable in this session (environment)");
+    }
+    int64_t t = 0;
+    int calls = 0;
+    w.set_recovery_hooks([&] { ++calls; return false; }, [&] { return t; });
+
+    w.note_device_loss("test", D2DERR_RECREATE_TARGET);
+    t += 250 * kNsPerMs;                  // initial backoff elapsed
+    QVERIFY(!w.try_recovery());           // first recreate attempt fails
+    QCOMPARE(calls, 1);
+    QCOMPARE(w.recovery_phase(), ptd::OverlayWindow::RecoveryPhase::RecoveryPending);
+    QVERIFY(!w.has_render_resources());
+    w.destroy();
+}
+
+void TestMultiMonitor::recovery_no_immediate_unbounded_retry() {
+    ptd::OverlayWindow w;
+    if (!create_recovery_overlay(w)) {
+        QSKIP("overlay HWND/D3D device unavailable in this session (environment)");
+    }
+    int64_t t = 0;
+    int calls = 0;
+    w.set_recovery_hooks([&] { ++calls; return false; }, [&] { return t; });
+
+    w.note_device_loss("test", DXGI_ERROR_DEVICE_REMOVED);
+    t += 250 * kNsPerMs;
+    QVERIFY(!w.try_recovery());           // failure schedules next backoff
+    QCOMPARE(calls, 1);
+
+    // Ten "frames" later, still inside the doubled backoff window: zero
+    // further attempts. Persistent failure does not spin per frame.
+    for (int i = 0; i < 10; ++i) {
+        t += 16 * kNsPerMs;
+        QVERIFY(!w.try_recovery());
+    }
+    QCOMPARE(calls, 1);
+    w.destroy();
+}
+
+void TestMultiMonitor::recovery_later_retry_success_returns_ready() {
+    ptd::OverlayWindow w;
+    if (!create_recovery_overlay(w)) {
+        QSKIP("overlay HWND/D3D device unavailable in this session (environment)");
+    }
+    int64_t t = 0;
+    int calls = 0;
+    w.set_recovery_hooks([&] { ++calls; return false; }, [&] { return t; });
+
+    w.note_device_loss("test", DXGI_ERROR_DEVICE_RESET);
+    t += 250 * kNsPerMs;
+    QVERIFY(!w.try_recovery());           // first failure
+    QCOMPARE(w.recovery_phase(), ptd::OverlayWindow::RecoveryPhase::RecoveryPending);
+
+    // A LATER controlled attempt succeeds (transient failure resolved).
+    w.set_recovery_hooks([&] { ++calls; return true; }, [&] { return t; });
+    t += 500 * kNsPerMs;                  // doubled backoff elapsed
+    QVERIFY(w.try_recovery());
+    QCOMPARE(w.recovery_phase(), ptd::OverlayWindow::RecoveryPhase::Ready);
+    w.destroy();
+}
+
+void TestMultiMonitor::recovery_persistent_failure_stays_bounded() {
+    ptd::OverlayWindow w;
+    if (!create_recovery_overlay(w)) {
+        QSKIP("overlay HWND/D3D device unavailable in this session (environment)");
+    }
+    int64_t t = 0;
+    int calls = 0;
+    w.set_recovery_hooks([&] { ++calls; return false; }, [&] { return t; });
+
+    // Enter the pending state first: while Ready, try_recovery is a no-op
+    // success and must never touch the recreate step.
+    w.note_device_loss("test", DXGI_ERROR_DEVICE_RESET);
+    QCOMPARE(w.recovery_phase(), ptd::OverlayWindow::RecoveryPhase::RecoveryPending);
+
+    // ~16.7 s of virtual time, one 60 Hz frame per step: with 250 ms -> 5 s
+    // doubling backoff the attempt count stays a small bounded number,
+    // nowhere near the frame count. Retryable forever, never a spin.
+    for (int i = 0; i < 1000; ++i) {
+        t += 16'666'667; // ~16.667 ms
+        w.try_recovery();
+    }
+    QVERIFY(calls >= 3);
+    QVERIFY(calls <= 10);
+    QCOMPARE(w.recovery_phase(), ptd::OverlayWindow::RecoveryPhase::RecoveryPending);
+    w.destroy();
+}
+
+void TestMultiMonitor::recovery_repeated_loss_and_recovery_cycles() {
+    ptd::OverlayWindow w;
+    if (!create_recovery_overlay(w)) {
+        QSKIP("overlay HWND/D3D device unavailable in this session (environment)");
+    }
+    int64_t t = 0;
+    bool succeed = false;
+    w.set_recovery_hooks([&] { return succeed; }, [&] { return t; });
+
+    for (int cycle = 0; cycle < 3; ++cycle) {
+        w.note_device_loss("test", D2DERR_RECREATE_TARGET);
+        QCOMPARE(w.recovery_phase(), ptd::OverlayWindow::RecoveryPhase::RecoveryPending);
+        succeed = true;
+        t += 250 * kNsPerMs;
+        QVERIFY(w.try_recovery());
+        QCOMPARE(w.recovery_phase(), ptd::OverlayWindow::RecoveryPhase::Ready);
+        succeed = false;
+    }
+    w.destroy();
+}
+
+void TestMultiMonitor::recovery_real_forced_rebuild_restores_full_resources() {
+    ptd::OverlayWindow w;
+    if (!create_recovery_overlay(w)) {
+        QSKIP("overlay HWND/D3D device unavailable in this session (environment)");
+    }
+    w.note_device_loss("test", DXGI_ERROR_DEVICE_RESET);
+    QVERIFY(!w.has_render_resources());
+
+    // Forced synchronous rebuild with the REAL default step: the controlled
+    // attempt recreates the whole chain and returns to Ready.
+    QVERIFY(w.recreate_render_resources());
+    QCOMPARE(w.recovery_phase(), ptd::OverlayWindow::RecoveryPhase::Ready);
+    QVERIFY(w.has_render_resources());
+    QVERIFY(w.hwnd() != nullptr);
+    w.destroy();
+}
+
+void TestMultiMonitor::recovery_hresult_classification_separates_device_loss() {
+    QVERIFY(ptd::OverlayWindow::is_device_loss_hresult(D2DERR_RECREATE_TARGET));
+    QVERIFY(ptd::OverlayWindow::is_device_loss_hresult(DXGI_ERROR_DEVICE_REMOVED));
+    QVERIFY(ptd::OverlayWindow::is_device_loss_hresult(DXGI_ERROR_DEVICE_RESET));
+    // Non-device results must NOT request a full device-chain rebuild.
+    QVERIFY(!ptd::OverlayWindow::is_device_loss_hresult(S_OK));
+    QVERIFY(!ptd::OverlayWindow::is_device_loss_hresult(E_FAIL));
+    QVERIFY(!ptd::OverlayWindow::is_device_loss_hresult(E_INVALIDARG));
+    QVERIFY(!ptd::OverlayWindow::is_device_loss_hresult(DXGI_ERROR_INVALID_CALL));
+}
+
+void TestMultiMonitor::recovery_failed_attempt_exposes_no_stale_resources() {
+    ptd::OverlayWindow w;
+    if (!create_recovery_overlay(w)) {
+        QSKIP("overlay HWND/D3D device unavailable in this session (environment)");
+    }
+    int64_t t = 0;
+    int calls = 0;
+    w.set_recovery_hooks([&] { ++calls; return false; }, [&] { return t; });
+
+    w.note_device_loss("test", DXGI_ERROR_DEVICE_REMOVED);
+    t += 250 * kNsPerMs;
+    QVERIFY(!w.try_recovery());
+
+    // The frame path must refuse to render (no partial/stale chain) and may
+    // only touch the bounded policy gate.
+    ptd::TrailEffect trail;
+    ptd::ClickBubbleEffect click;
+    ptd::TrailConfig tc{};
+    ptd::CursorHistory history;
+    const int64_t now = 123'456'789;
+    ptd::FrameGeometry frame;
+    frame.build(trail, history, tc, click, now);
+    w.render_frame(frame, /*intersects=*/true, now);
+    QCOMPARE(calls, 1);                    // exactly the gated attempt
+    QCOMPARE(w.recovery_phase(), ptd::OverlayWindow::RecoveryPhase::RecoveryPending);
+    w.destroy();
+}
+
+// T-021 Phase 11 (audit): sparkle primitives share the production
+// OverlayTransform contract -- no DPI multiplication anywhere, virtual-
+// screen physical pixels in, overlay-local physical pixels out, culling
+// envelope = the conservative outer radius used by add_sparkle.
+void TestMultiMonitor::sparkle_transform_and_culling() {
+    // Left/top monitor with negative coordinates.
+    RECT left_rect{0, 0, 1920, 1080};
+    RECT top_rect{-1920, -1080, 0, 0};
+    RECT right_rect{1920, 0, 3840, 1080};
+    const auto left = ptd::OverlayTransform::from_bounds(left_rect);
+    const auto top = ptd::OverlayTransform::from_bounds(top_rect);
+    const auto right = ptd::OverlayTransform::from_bounds(right_rect);
+
+    // Negative virtual coordinates transform without any scaling: a
+    // sparkle at (-960, -540) is the exact overlay center of the top
+    // monitor (no DPI multiplication, pure translation).
+    QCOMPARE(top.to_local_x(-960.0f), 960.0f);
+    QCOMPARE(top.to_local_y(-540.0f), 540.0f);
+    QCOMPARE(left.to_local_x(100.0f), 100.0f);
+
+    // Seam: a sparkle just inside the seam is visible on both overlays.
+    QVERIFY(!left.cull_circle(1915.0f, 500.0f, 8.0f));
+    QVERIFY(!right.cull_circle(1925.0f, 500.0f, 8.0f));
+    // Culling: far outside each overlay.
+    QVERIFY(left.cull_circle(3000.0f, 500.0f, 8.0f));
+    QVERIFY(right.cull_circle(100.0f, 500.0f, 8.0f));
+    QVERIFY(top.cull_circle(500.0f, 500.0f, 8.0f));
+    // Edge-crossing sparkle: center outside but envelope inside -> drawn.
+    QVERIFY(!right.cull_circle(3845.0f, 500.0f, 8.0f));
+    QVERIFY(right.cull_circle(3855.0f, 500.0f, 8.0f));
+
+    // Mixed-DPI invariant: the transform is per-monitor physical px, so
+    // the same virtual point maps consistently regardless of DPI, exactly
+    // like the trail segments (no per-sparkle special case exists).
+    RECT lo_rect{0, 0, 3840, 2160};   // 150% scaled virtual geometry
+    const auto lo = ptd::OverlayTransform::from_bounds(lo_rect);
+    QCOMPARE(lo.to_local_x(1000.0f), 1000.0f);
+    QCOMPARE(lo.to_local_y(1000.0f), 1000.0f);
+}
+
+// ---- PERF-001: one world-space build per frame + dirty overlays ----
+
+namespace {
+
+std::vector<ptd::MonitorInfo> perf001_row() {
+    auto add = [](const wchar_t* name, const RECT& b) {
+        ptd::MonitorInfo info{};
+        info.device_name = name;
+        info.bounds = b;
+        info.work_area = b;
+        info.dpi_x = 96;
+        info.dpi_y = 96;
+        info.scale = 1.0f;
+        return info;
+    };
+    return {
+        add(L"\\\\.\\DISPLAY_A", RECT{-1920, 0, 0, 1080}),
+        add(L"\\\\.\\DISPLAY_B", RECT{0, 0, 1920, 1080}),
+        add(L"\\\\.\\DISPLAY_C", RECT{1920, 0, 3840, 1080}),
+    };
+}
+
+void perf001_push_span(ptd::CursorHistory& history, int32_t x0, int32_t x1,
+                       int32_t y, int64_t base_ns) {
+    for (int32_t x = x0, i = 0; x <= x1; ++x, ++i) {
+        ptd::CursorSample s{};
+        s.timestamp_ns = base_ns + i * 1'000'000;  // 1 ms apart
+        s.x = x;
+        s.y = y;
+        history.push(s);
+    }
+}
+
+} // namespace
+
+void TestMultiMonitor::perf001_single_effect_build_regardless_of_overlay_count() {
+    // PERF-001: OverlayManager::render_frame must run the world-space effect
+    // models exactly ONCE, no matter how many overlays are live. Before the
+    // repair each overlay ran TrailEffect::build_geometry + Click draw, so the
+    // build count scaled with monitor count.
+    auto synthetic = perf001_row();
+    ptd::OverlayManager manager;
+    manager.set_enumeration_for_test([synthetic] { return synthetic; });
+    manager.set_create_window_for_test(
+        [](const ptd::MonitorInfo&, HINSTANCE, bool)
+            -> std::unique_ptr<ptd::OverlayWindow> {
+            return std::make_unique<ptd::OverlayWindow>();
+        });
+    QVERIFY(manager.create(GetModuleHandleW(nullptr), false));
+    QCOMPARE(manager.overlay_count(), std::size_t(3));
+
+    ptd::CursorHistory history;
+    const int64_t base = 1'000'000'000LL;
+    perf001_push_span(history, 100, 500, 300, base);
+    const int64_t now = base + 500 * 1'000'000;
+
+    ptd::TrailEffect trail;
+    ptd::TrailConfig tc{};
+    tc.enabled = true;
+    tc.lifetime_ms = 3000.0f;  // hold the whole span inside the window
+    trail.set_config(tc);
+    ptd::ClickBubbleEffect click;
+    ptd::ClickConfig cc{};
+
+    manager.render_frame(trail, history, tc, click, cc, now);
+    manager.render_frame(trail, history, tc, click, cc, now);
+    // Two global frames -> exactly two world-space builds, independent of the
+    // three live overlays that share the frame.
+    QCOMPARE(manager.frame_build_count(), 2ULL);
+
+    ptd::OverlayWindow::clear_display_change_callback();
+}
+
+void TestMultiMonitor::perf001_dirty_overlay_presents_then_skips_when_clear() {
+    ptd::OverlayDirtyState dirty;
+
+    // Known clear, no intersection: nothing to do.
+    QCOMPARE(dirty.decide(false), ptd::OverlayDirtyState::Decision::Skip);
+
+    // Intersected: present content, overlay becomes dirty.
+    QCOMPARE(dirty.decide(true), ptd::OverlayDirtyState::Decision::PresentContent);
+    QVERIFY(!dirty.is_clear());
+
+    // Content gone: exactly ONE transparent clear.
+    QCOMPARE(dirty.decide(false), ptd::OverlayDirtyState::Decision::PresentClear);
+    QVERIFY(dirty.is_clear());
+
+    // Already clear and still empty: skip forever until intersected again.
+    QCOMPARE(dirty.decide(false), ptd::OverlayDirtyState::Decision::Skip);
+    QCOMPARE(dirty.decide(false), ptd::OverlayDirtyState::Decision::Skip);
+
+    // Re-intersected: content again.
+    QCOMPARE(dirty.decide(true), ptd::OverlayDirtyState::Decision::PresentContent);
+
+    // peek() does not mutate; commit() only after a real present.
+    ptd::OverlayDirtyState fresh;  // starts clear
+    QCOMPARE(fresh.peek(false), ptd::OverlayDirtyState::Decision::Skip);
+    QVERIFY(fresh.is_clear());
+    QCOMPARE(fresh.peek(true), ptd::OverlayDirtyState::Decision::PresentContent);
+    QVERIFY(fresh.is_clear());
+    fresh.commit(true);
+    QVERIFY(!fresh.is_clear());
+}
+
+void TestMultiMonitor::perf001_frame_bounds_cull_unintersected_monitor() {
+    ptd::FrameGeometry frame;
+    ptd::TrailColorF color{1.0f, 1.0f, 0.0f};
+    frame.append_segment(100.0f, 300.0f, 800.0f, 300.0f, 0.9f, 3.0f, color);
+    const RECT mon_a{-1920, 0, 0, 1080};
+    const RECT mon_b{0, 0, 1920, 1080};
+    const RECT mon_c{1920, 0, 3840, 1080};
+    QVERIFY(!frame.intersects(mon_a));
+    QVERIFY(frame.intersects(mon_b));
+    QVERIFY(!frame.intersects(mon_c));
+
+    // A seam-crossing segment intersects BOTH neighbours, never only the
+    // "cursor" monitor: x from 1850 (B) through 1990 (C).
+    ptd::FrameGeometry seam;
+    seam.append_segment(1850.0f, 500.0f, 1990.0f, 500.0f, 0.9f, 3.0f, color);
+    QVERIFY(!seam.intersects(mon_a));
+    QVERIFY(seam.intersects(mon_b));
+    QVERIFY(seam.intersects(mon_c));
+
+    // Negative-coordinate monitor is handled by the same pure box math.
+    ptd::FrameGeometry negative;
+    negative.append_segment(-1500.0f, 400.0f, -1400.0f, 400.0f, 0.9f, 3.0f, color);
+    QVERIFY(negative.intersects(mon_a));
+    QVERIFY(!negative.intersects(mon_b));
+
+    // Empty frame: no bounds, intersects nothing, so every overlay skips.
+    ptd::FrameGeometry empty;
+    QVERIFY(!empty.has_bounds());
+    QVERIFY(!empty.intersects(mon_b));
+}
+
+void TestMultiMonitor::perf001_global_content_death_clears_each_dirty_overlay_once() {
+    // Global content death: an empty world-space frame must make every
+    // previously-visible overlay present ONE clear and then stop presenting.
+    ptd::FrameGeometry frame;
+    const RECT mon_a{-1920, 0, 0, 1080};
+    const RECT mon_b{0, 0, 1920, 1080};
+    QVERIFY(!frame.intersects(mon_a));
+    QVERIFY(!frame.intersects(mon_b));
+
+    ptd::OverlayDirtyState a;
+    ptd::OverlayDirtyState b;
+    a.decide(true);   // both were visible last frame
+    b.decide(true);
+    QVERIFY(!a.is_clear());
+    QVERIFY(!b.is_clear());
+
+    // Frame with no content: each dirty overlay clears exactly once...
+    QCOMPARE(a.decide(frame.intersects(mon_a)),
+             ptd::OverlayDirtyState::Decision::PresentClear);
+    QCOMPARE(b.decide(frame.intersects(mon_b)),
+             ptd::OverlayDirtyState::Decision::PresentClear);
+    QVERIFY(a.is_clear());
+    QVERIFY(b.is_clear());
+
+    // ...and from then on both skip: the scheduler can reach Idle without a
+    // transparent-frame storm on unrelated monitors.
+    QCOMPARE(a.decide(frame.intersects(mon_a)),
+             ptd::OverlayDirtyState::Decision::Skip);
+    QCOMPARE(b.decide(frame.intersects(mon_b)),
+             ptd::OverlayDirtyState::Decision::Skip);
 }
 
 QTEST_MAIN(TestMultiMonitor)

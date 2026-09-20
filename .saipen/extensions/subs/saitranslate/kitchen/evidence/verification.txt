@@ -1,0 +1,41 @@
+source: README.md sha256:0b904f769d59910f (4875 bytes)
+
+ok   en  English      digest=match mirror=- bytes=5105
+ok   ru  Russian      digest=match mirror=identical bytes=7641
+ok   et  Estonian     digest=match mirror=identical bytes=5466
+ok   uk  Ukrainian    digest=match mirror=identical bytes=7563
+ok   ja  Japanese     digest=match mirror=identical bytes=6322
+ok   ded Дед          digest=match mirror=identical bytes=5447
+
+delivered locales: 6/33
+missing locales: 27
+  pending de (German)
+  pending fr (French)
+  pending es (Spanish)
+  pending it (Italian)
+  pending pt (Portuguese)
+  pending nl (Dutch)
+  pending pl (Polish)
+  pending sv (Swedish)
+  pending da (Danish)
+  pending fi (Finnish)
+  pending no (Norwegian)
+  pending zh (Chinese)
+  pending ko (Korean)
+  pending th (Thai)
+  pending vi (Vietnamese)
+  pending ar (Arabic)
+  pending he (Hebrew)
+  pending tr (Turkish)
+  pending hi (Hindi)
+  pending id (Indonesian)
+  pending el (Greek)
+  pending cs (Czech)
+  pending ro (Romanian)
+  pending hu (Hungarian)
+  pending bg (Bulgarian)
+  pending sk (Slovak)
+  pending hr (Croatian)
+
+VERIFY: PASS (0 failing surface(s))
+VERDICT: draft -- default set (en, ru, et, uk, ja, ded) currently; 27 locales remain

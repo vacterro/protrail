@@ -1,0 +1,14 @@
+{
+  "clauses": {
+    "SRC-004:R1": {
+      "actionable": true,
+      "class": "acceptance-criterion",
+      "text": "T-23ShardsUserAcceptance"
+    }
+  },
+  "derived_at": "2026-09-16T06:49:25Z",
+  "derived_from": "SRC-004",
+  "interpretation_revision": 1,
+  "schema_version": 1,
+  "source_sha256": "afa5806f089be8150d14f5e70ad23a334db53a2439e2e823fb8998ce997c0b75"
+}

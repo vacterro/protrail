@@ -30,6 +30,7 @@ public:
     QString tooltip() const;
     QString toggle_action_text() const;
 
+    QAction* action_home() const;
     QAction* action_settings() const;
     QAction* action_toggle() const;
     QAction* action_exit() const;
@@ -39,6 +40,7 @@ public:
     static QIcon create_icon(bool enabled);
 
 signals:
+    void home_requested();
     void settings_requested();
     void master_enabled_toggled(bool enabled);
     void exit_requested();
@@ -52,6 +54,7 @@ private:
     bool master_enabled_ = true;
     std::unique_ptr<QSystemTrayIcon> tray_icon_;
     std::unique_ptr<QMenu> menu_;
+    QAction* action_home_ = nullptr;
     QAction* action_settings_ = nullptr;
     QAction* action_toggle_ = nullptr;
     QAction* action_exit_ = nullptr;

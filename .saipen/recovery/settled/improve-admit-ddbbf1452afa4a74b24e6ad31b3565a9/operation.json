@@ -1,0 +1,35 @@
+{
+  "op_id": "improve-admit-ddbbf1452afa4a74b24e6ad31b3565a9",
+  "operation": "improve_admit",
+  "created_at": "2026-09-16T17:22:05Z",
+  "agent": "antigravity-01",
+  "project_identity": "v:\\___vac\\__k\\__code\\__main__\\protrail",
+  "project_lineage": "lineage-6a51dcf887de4de492b000b2cad0e980",
+  "semantic_payload_hash": "3ceea5d1d729c84a",
+  "preconditions": {
+    ".saipen/improve/imp-vacterro-protrail-20260916-1/MANIFEST.md": "",
+    ".saipen/improve/imp-vacterro-protrail-20260916-1/antigravity-01/saipen_improve_SAIPEN.md": ""
+  },
+  "read_preconditions": {},
+  "verification_policy": "improve_atomic_file",
+  "status": "COMMITTED",
+  "progress_index": 2,
+  "targets": [
+    {
+      "path": ".saipen/improve/imp-vacterro-protrail-20260916-1/MANIFEST.md",
+      "role": "manifest",
+      "action": "write",
+      "before_hash": "",
+      "after_hash": "8013a37c872dd45b",
+      "applied": true
+    },
+    {
+      "path": ".saipen/improve/imp-vacterro-protrail-20260916-1/antigravity-01/saipen_improve_SAIPEN.md",
+      "role": "report",
+      "action": "write",
+      "before_hash": "",
+      "after_hash": "4986f96ea9080e18",
+      "applied": true
+    }
+  ]
+}

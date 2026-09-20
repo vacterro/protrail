@@ -1,0 +1,20 @@
+{
+  "externalization_event": {
+    "event_id": "E-224",
+    "operation_id": "ticket-90e2fb5aebd249788dbfd891659a47bf",
+    "reason": "existing/proposed oversized BOARD record requires canonical ticket block update"
+  },
+  "lossless": true,
+  "metadata_path": ".saipen/recovery/board-compaction/T-27/T-27-b0cffd027faa90ef872e5f8b.json",
+  "operation": "board_legacy_compaction",
+  "original_record_bytes": 1367,
+  "original_record_path": ".saipen/recovery/board-compaction/T-27/T-27-b0cffd027faa90ef872e5f8b.BOARD.md",
+  "original_record_sha256": "b0cffd027faa90ef872e5f8b02037243dc8a24d41acaf0b39544989131eda204",
+  "project_identity": "v:\\___vac\\__k\\__code\\__main__\\protrail",
+  "project_lineage": "lineage-6a51dcf887de4de492b000b2cad0e980",
+  "schema_version": 1,
+  "source": ".saipen/BOARD.md",
+  "status": "COMMITTED",
+  "supersedes_detail_ref": ".saipen/recovery/board-compaction/T-27/T-27-080d6a0927ae624ab5fcaec1.json",
+  "ticket_id": "T-27"
+}

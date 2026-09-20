@@ -79,10 +79,10 @@ QLabel#hintLabel {
 QPushButton {
     background: %5;
     border: 2px solid;
-    border-top-color: %8;
-    border-left-color: %8;
-    border-bottom-color: %7;
-    border-right-color: %7;
+    border-top-color: %7;
+    border-left-color: %7;
+    border-bottom-color: %8;
+    border-right-color: %8;
     padding: 2px 6px;
     min-height: 16px;
     min-width: 24px;
@@ -92,20 +92,70 @@ QPushButton:hover {
 }
 QPushButton:pressed {
     background: %4;
-    border-top-color: %7;
-    border-left-color: %7;
-    border-bottom-color: %8;
-    border-right-color: %8;
+    border-top-color: %8;
+    border-left-color: %8;
+    border-bottom-color: %7;
+    border-right-color: %7;
     padding-left: 7px;
     padding-top: 3px;
     padding-right: 5px;
     padding-bottom: 1px;
 }
-QPushButton:focus {
+/* ---- T-020R1 selector contract (explicit; never the generic :checked) ----
+   These buttons are mutually exclusive selectors, so all three of their
+   states are declared here instead of being inherited from the ordinary
+   button rules. The first T-020 pass let them fall through to a generic
+   checked rule, which read inside-out: the selected button looked like an
+   ordinary button somebody had accidentally pressed. The contract is:
+
+     UNSELECTED neutral raised Golden button, standard bevel, no highlight.
+     SELECTED   stable lighter Golden surface + borderHighlight on the lit
+                (top/left) edges + borderDark on the shadow (bottom/right)
+                edges. The bevel DIRECTION is unchanged, so a selected
+                button still reads raised -- never pressed.
+     FOCUS      additive and secondary: only the label color changes. Focus
+                never touches the four bevel colors or the surface, so both
+                the bevel geometry and the selected/unselected distinction
+                survive focus. (No font-weight change either: a bold label
+                re-measures and would reflow the row, and at 520 px that can
+                clip. Text emphasis is colour-only.)
+
+   Hover must never impersonate selection: unselected hover only lifts the
+   surface, it never lights the bevel. Press keeps the sanctioned instant 1px
+   shift from the shared QPushButton:pressed padding rule; the bevel inverts
+   only for the duration of the press, then the resting reading returns. */
+QPushButton[selector="true"] {
+    background: %5;
+    color: %11;
+    border-top-color: %7;
+    border-left-color: %7;
+    border-bottom-color: %8;
+    border-right-color: %8;
+}
+QPushButton[selector="true"]:hover {
+    background: %6;
+}
+QPushButton[selector="true"]:checked,
+QPushButton[selector="true"]:checked:hover {
+    background: %6;
     border-top-color: %9;
     border-left-color: %9;
-    border-bottom-color: %9;
-    border-right-color: %9;
+    border-bottom-color: %8;
+    border-right-color: %8;
+}
+/* Focus last: the selected surface must win over hover, but the focus cue
+   must survive on top of a selected button too. */
+QPushButton[selector="true"]:focus {
+    color: %9;
+}
+/* A real press is still a press: momentary sunken feedback, exactly like an
+   ordinary button, then back to the resting selected/unselected reading. */
+QPushButton[selector="true"]:pressed {
+    background: %4;
+    border-top-color: %8;
+    border-left-color: %8;
+    border-bottom-color: %7;
+    border-right-color: %7;
 }
 QPushButton:disabled {
     color: %13;

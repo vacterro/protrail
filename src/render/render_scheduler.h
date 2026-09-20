@@ -4,7 +4,7 @@
 #include <functional>
 #include <memory>
 
-class QTimer;
+class QChronoTimer;
 class QObject;
 
 namespace ptd {
@@ -96,6 +96,7 @@ public:
 private:
     void transition_to(SchedulerState new_state);
     void update_pacing_interval();
+    void schedule_timer();
     void emit_perf_diag_if_due(int64_t now_ns);
     void sample_memory();
 
@@ -104,7 +105,7 @@ private:
     int frame_interval_ms_ = 16;
     int64_t frame_interval_ns_ = 16'666'666;
 
-    QTimer* timer_ = nullptr;
+    QChronoTimer* timer_ = nullptr;
     FrameCallback callback_;
     ContentCheck content_check_;
     bool diag_enabled_ = false;

@@ -1,0 +1,9 @@
+{
+  "created_at": "2026-09-17T14:42:27Z",
+  "op_id": "converge_intent-b053a6a3c38b4ca4bb745e15fc447478",
+  "operation": "crew_epoch",
+  "project_lineage": "lineage-6a51dcf887de4de492b000b2cad0e980",
+  "schema_version": 1,
+  "status": "COMMITTED",
+  "target": "crew"
+}

@@ -1,0 +1,14 @@
+{
+  "requirements": {
+    "SRC-002:R1": {
+      "actionable": true,
+      "class": "acceptance-criterion",
+      "disposition": "VERIFIED",
+      "evidence": "E-181",
+      "text": "T-24HoldFX_CTEST15-15",
+      "verification": "CombinedArtifact",
+      "work": "T-24"
+    }
+  },
+  "schema_version": 1
+}

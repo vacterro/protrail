@@ -1,0 +1,20 @@
+{
+  "externalization_event": {
+    "event_id": "E-145",
+    "operation_id": "board-compact-f1a8f910c9ab462ba5dfc332faf804ce",
+    "reason": "explicit canonical legacy BOARD compaction"
+  },
+  "lossless": true,
+  "metadata_path": ".saipen/recovery/board-compaction/T-23/T-23-cada2e34c8e58f632fc49d6f.json",
+  "operation": "board_legacy_compaction",
+  "original_record_bytes": 5106,
+  "original_record_path": ".saipen/recovery/board-compaction/T-23/T-23-cada2e34c8e58f632fc49d6f.BOARD.md",
+  "original_record_sha256": "cada2e34c8e58f632fc49d6fbd4d253a7bdbab3eed36051fcb48475290f43426",
+  "project_identity": "v:\\___vac\\__k\\__code\\__main__\\protrail",
+  "project_lineage": "lineage-6a51dcf887de4de492b000b2cad0e980",
+  "schema_version": 1,
+  "source": ".saipen/BOARD.md",
+  "status": "COMMITTED",
+  "supersedes_detail_ref": "",
+  "ticket_id": "T-23"
+}

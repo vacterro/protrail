@@ -334,9 +334,28 @@ void OverlayManager::render_frame(const TrailEffect& effect,
                                   const ClickBubbleEffect& click_effect,
                                   const ClickConfig& click_config,
                                   int64_t now_ns) {
+    // PERF-001: build the world-space frame ONCE per scheduler frame -- the
+    // effect models are monitor-independent, so running them per overlay was
+    // pure multiplication by monitor count. The frame's scope is exactly this
+    // call; it is never cached across a different now_ns.
+    frame_geometry_.build(effect, history, trail_config,
+                          click_effect, now_ns);
+    (void)click_config;  // ClickBubbleEffect::draw() carries its own config
+    ++frame_builds_;
+
+    last_presenting_ = 0;
     for (auto& overlay : overlays_) {
-        overlay.window->render_frame(effect, history, trail_config,
-                                     click_effect, click_config, now_ns);
+        // Monitor transform + culling happen inside the window. The dirty
+        // contract (frame_geometry.h) is committed by the window only after a
+        // successful present, so a frame with no primitives clears every
+        // dirty overlay exactly once and then stops presenting clean monitors.
+        const bool intersects = frame_geometry_.intersects(overlay.monitor.bounds);
+        const OverlayDirtyState::Decision decision =
+            overlay.window->dirty_state().peek(intersects);
+        overlay.window->render_frame(frame_geometry_, intersects, now_ns);
+        if (decision == OverlayDirtyState::Decision::PresentContent) {
+            ++last_presenting_;
+        }
     }
 }
 

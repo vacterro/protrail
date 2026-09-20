@@ -1,6 +1,7 @@
 #pragma once
 
 #include "overlay_window.h"
+#include "frame_geometry.h"
 
 #include <Windows.h>
 #include <vector>
@@ -68,6 +69,15 @@ public:
                       const ClickConfig& click_config,
                       int64_t now_ns);
 
+    // PERF-001 instrumentation seam: the number of times a world-space effect
+    // geometry build has run. Exactly ONE per render_frame call regardless of
+    // live overlay count; read by the boundedness regression.
+    unsigned long long frame_build_count() const { return frame_builds_; }
+    // PERF-001: how many overlays presented a non-empty frame on the last
+    // render_frame (i.e. were intersected by the frame). Monitor transform
+    // and culling stay per-overlay.
+    std::size_t last_presenting_overlays() const { return last_presenting_; }
+
     // Enumerated topology may include a monitor whose overlay failed; live
     // overlays always carry their own MonitorInfo directly.
     const std::vector<MonitorInfo>& monitors() const { return monitors_; }
@@ -110,6 +120,10 @@ private:
     bool diagnostic_ = false;
     std::vector<MonitorInfo> monitors_;
     std::vector<MonitorOverlay> overlays_;
+    // PERF-001: ONE reusable world-space frame built per render_frame call.
+    FrameGeometry frame_geometry_;
+    unsigned long long frame_builds_ = 0;
+    std::size_t last_presenting_ = 0;
     std::function<void()> on_topology_changed_;
     CreateWindowFn create_window_;
     EnumerateFn enumerate_;

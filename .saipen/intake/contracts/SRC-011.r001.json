@@ -1,0 +1,14 @@
+{
+  "clauses": {
+    "SRC-011:R001": {
+      "actionable": true,
+      "class": "requirement",
+      "text": "ProTrail final closure wave (source-only v0.1.0): the compact Main Essentials window must be the real manual-launch product home with the advanced SettingsWindow reachable from it, developer Set Current as Release Defaults must capture the complete canonical AppConfig, the home/settings lifecycle must be covered by direct deterministic regressions, the repository must be presented as a professional GitHub source project, and a source-only v0.1.0 release must be prepared while the final executable/binary release stays blocked until the user supplies the product icon"
+    }
+  },
+  "derived_at": "2026-09-20T22:38:38Z",
+  "derived_from": "SRC-011",
+  "interpretation_revision": 1,
+  "schema_version": 1,
+  "source_sha256": "3c4a6f83298b4fbd84efd72e0abc60dd1442223747a36c84927f6e5142696718"
+}

@@ -1,0 +1,32 @@
+{
+  "requirements": {
+    "SRC-004:R1": {
+      "actionable": true,
+      "class": "acceptance-criterion",
+      "disposition": "VERIFIED",
+      "evidence": "E-190",
+      "text": "T-23ShardsUserAcceptance",
+      "verification": "user visual acceptance of the combined T-23 + T-24 + T-25 artifact, recorded as SRC-004 and closed through the canonical REVIEW -> SHIP -> DONE path with E-190 MANUAL-VERIFY RESULT: PASS",
+      "work": "T-23"
+    },
+    "SRC-004:R2": {
+      "actionable": true,
+      "class": "requirement",
+      "disposition": "BLOCKED",
+      "evidence": null,
+      "text": "Hold Motion Wake / world-space style emissions: an ActiveHold that moves must continuously shed style-specific emissions into WORLD SPACE with immutable birth anchors, distance-based spacing, interpolated birth timestamps, bounded per-sample and global caps, bounded motion energy, style and colour snapshots taken at birth, and a distinct wake grammar per ClickStyle, with the active-only scheduler awake while any wake is alive.",
+      "verification": null,
+      "work": "T-26"
+    },
+    "SRC-004:R3": {
+      "actionable": true,
+      "class": "requirement",
+      "disposition": "BLOCKED",
+      "evidence": null,
+      "text": "Hold FX controls: a compact HOLD section with Hold FX, Motion Wake, Hold Intensity, Wake Density, Wake Life and Release Strength; Wake Density maps to spatial emission spacing rather than particles per frame; Wake Life is snapshotted at birth; Release Strength transforms the existing charge model; schema 8 -> 9 preserves historical HOLD behaviour with Motion Wake off by default while a fresh schema-9 install defaults both toggles on; ClickStyle remains the only style authority and the activation threshold stays unexposed.",
+      "verification": null,
+      "work": "T-27"
+    }
+  },
+  "schema_version": 1
+}

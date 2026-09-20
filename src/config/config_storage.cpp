@@ -1,4 +1,5 @@
 #include "config_storage.h"
+#include "release_defaults.h"
 #include "../core/log.h"
 
 #include <Windows.h>
@@ -14,22 +15,79 @@
 
 namespace ptd {
 
+namespace {
+// CORE-001 test seam: one path whose open/read is forced to fail. Empty in
+// production; never consulted unless a test armed it.
+std::wstring g_forced_read_failure_path;
+// W2-005 test seam: durable load attempt counter.
+int g_load_count = 0;
+
+// Extracts the numeric schema_version from raw JSON bytes without applying any
+// current-schema semantics. Used to detect a future schema BEFORE it is
+// treated as ordinary/corrupt content. Returns std::nullopt when the document
+// is not an object or carries no numeric schema_version.
+std::optional<int> peek_schema_version(const QByteArray& json) {
+    QJsonParseError err{};
+    const QJsonDocument doc = QJsonDocument::fromJson(json, &err);
+    if (doc.isNull() || !doc.isObject()) return std::nullopt;
+    const QJsonObject root = doc.object();
+    if (root.contains("schema_version") && root["schema_version"].isDouble()) {
+        return root["schema_version"].toInt();
+    }
+    return std::nullopt;
+}
+} // namespace
+
+void ConfigStorage::set_read_failure_path_for_tests(const std::wstring& path) {
+    g_forced_read_failure_path = path;
+}
+
+void ConfigStorage::clear_read_failure_path_for_tests() {
+    g_forced_read_failure_path.clear();
+}
+
+// W2-005 test seam.
+void ConfigStorage::reset_load_count_for_tests() {
+    g_load_count = 0;
+}
+
+int ConfigStorage::load_count_for_tests() {
+    return g_load_count;
+}
+
 std::wstring ConfigStorage::default_config_path() {
-    wchar_t* raw = nullptr;
-    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &raw))) {
-        std::filesystem::path dir = raw;
-        CoTaskMemFree(raw);
+    std::wstring base;
+    if (ptd::local_app_data_folder(base) && !base.empty()) {
+        std::filesystem::path dir = base;
         dir /= L"ProTrail";
         dir /= L"config.json";
         return dir.wstring();
     }
-    return L"config.json";
+    // T-030: a known-folder failure must never silently turn user config into
+    // a working-directory-relative file (the process working directory is
+    // launcher-controlled and can differ between launches). Log the failure
+    // and use the ONE documented deterministic fallback: beside the
+    // executable.
+    const std::wstring exe_dir = ptd::executable_directory();
+    const std::filesystem::path fallback =
+        (exe_dir.empty() ? std::filesystem::path(L".")
+                         : std::filesystem::path(exe_dir)) / L"config.json";
+    const std::u8string u8 = fallback.u8string();
+    ptd::log_write(ptd::LogLevel::Warn,
+        std::string("config: %LOCALAPPDATA% unavailable; using "
+                    "executable-relative fallback ") +
+            std::string(reinterpret_cast<const char*>(u8.data()), u8.size()));
+    return fallback.wstring();
 }
 
 QByteArray ConfigStorage::serialize_json(const AppConfig& config) {
     QJsonObject root;
     root["schema_version"] = config.schema_version;
     root["master_enabled"] = config.master_enabled;
+    // T-032 schema 10: the persisted Start with Windows PREFERENCE. The
+    // registered command and the executable path are machine state and are
+    // deliberately not written here.
+    root["start_with_windows"] = config.start_with_windows;
 
     QJsonObject trail;
     trail["enabled"] = config.trail.enabled;
@@ -51,6 +109,11 @@ QByteArray ConfigStorage::serialize_json(const AppConfig& config) {
     trail["smoothing"] = static_cast<double>(config.trail.smoothing);
     trail["fade_start"] = static_cast<double>(config.trail.fade_start);
     trail["fade_curve"] = static_cast<int>(config.trail.fade_curve);
+    // T-021 schema 5: sparkle decoration overlay.
+    trail["sparkle_mode"] = static_cast<int>(config.trail.sparkle_mode);
+    trail["sparkle_amount"] = static_cast<double>(config.trail.sparkle_amount);
+    trail["sparkle_size_px"] = static_cast<double>(config.trail.sparkle_size_px);
+    trail["sparkle_spread_px"] = static_cast<double>(config.trail.sparkle_spread_px);
     root["trail"] = trail;
 
     QJsonObject click;
@@ -63,6 +126,25 @@ QByteArray ConfigStorage::serialize_json(const AppConfig& config) {
     click["color_b"] = config.click.color_b;
     click["style"] = static_cast<int>(config.click.style);
     click["particle_amount"] = config.click.particle_amount;
+    click["element_tint"] = config.click.element_tint;  // T-022 schema 6
+    click["hold_enabled"] = config.click.hold_enabled;  // T-024 schema 8
+    // T-026/T-027 schema 9: Hold Controls / Motion Wake.
+    click["hold_wake_enabled"] = config.click.hold_wake_enabled;
+    click["hold_intensity"] = static_cast<double>(config.click.hold_intensity);
+    click["hold_wake_density"] = static_cast<double>(config.click.hold_wake_density);
+    click["hold_wake_lifetime_ms"] =
+        static_cast<double>(config.click.hold_wake_lifetime_ms);
+    click["hold_release_strength"] =
+        static_cast<double>(config.click.hold_release_strength);
+    // T-36 schema 11: Advanced Motion Wake.
+    click["wake_strength"] = static_cast<double>(config.click.wake_strength);
+    click["wake_size"] = static_cast<double>(config.click.wake_size);
+    click["wake_spread"] = static_cast<double>(config.click.wake_spread);
+    click["speed_response"] = static_cast<double>(config.click.speed_response);
+    click["min_motion_speed_px_s"] =
+        static_cast<double>(config.click.min_motion_speed_px_s);
+    click["turn_accent"] = config.click.turn_accent;
+    click["stop_accent"] = config.click.stop_accent;
     click["start_radius_px"] = static_cast<double>(config.click.start_radius_px);
     click["end_radius_px"] = static_cast<double>(config.click.end_radius_px);
     click["duration_ms"] = static_cast<double>(config.click.duration_ms);
@@ -99,6 +181,18 @@ std::optional<AppConfig> ConfigStorage::deserialize_json(const QByteArray& json,
     }
     if (root.contains("master_enabled") && root["master_enabled"].isBool()) {
         cfg.master_enabled = root["master_enabled"].toBool();
+    }
+    // T-032 schema 10: Start with Windows. An explicit key is honoured at any
+    // source schema -- it is a decision the user's own machine recorded.
+    // When the key is absent the configuration predates the feature (or is
+    // being created fresh) and the value stays OFF: upgrading the executable
+    // must never enroll an existing user into Windows startup. ConfigStorage
+    // owns the enforcement; AppConfig::kStartWithWindowsSchema documents the
+    // boundary.
+    if (root.contains("start_with_windows") && root["start_with_windows"].isBool()) {
+        cfg.start_with_windows = root["start_with_windows"].toBool();
+    } else if (cfg.schema_version < AppConfig::kStartWithWindowsSchema) {
+        cfg.start_with_windows = false;
     }
 
     if (root.contains("trail") && root["trail"].isObject()) {
@@ -181,6 +275,39 @@ std::optional<AppConfig> ConfigStorage::deserialize_json(const QByteArray& json,
             if (fc >= 0 && fc <= 2)
                 cfg.trail.fade_curve = static_cast<FadeCurve>(fc);
         }
+
+        // T-021 schema 5: sparkle decoration fields. A schema-4 file simply
+        // has none of these keys, so the struct defaults stand (mode Off +
+        // default amount/size/spread) -- that IS the documented 4 -> 5
+        // migration, and it touches no pre-existing field. Invalid enum
+        // values are repaired by TrailConfig::validated() below.
+        //
+        // T-023 schema 7: TrailSparkleMode::Shards (5) is NEW. Before
+        // schema 7 the only legitimate sparkle modes were 0..4, and the
+        // documented safety contract repaired anything else to Off. So a
+        // file WRITTEN BY AN OLDER SCHEMA that carries sparkle_mode 5 is
+        // corruption, not Shards, and must keep repairing to Off --
+        // otherwise adding an enumerator silently rewrites the meaning of
+        // configurations that already exist on disk. The accepted range is
+        // therefore keyed to the SOURCE schema, never to the current enum.
+        if (t.contains("sparkle_mode") && t["sparkle_mode"].isDouble()) {
+            const int sm = t["sparkle_mode"].toInt();
+            const int max_sparkle_mode =
+                cfg.schema_version >= AppConfig::kShardsSparkleModeSchema
+                    ? static_cast<int>(TrailSparkleMode::Shards)
+                    : static_cast<int>(TrailSparkleMode::Firefly);
+            if (sm >= 0 && sm <= max_sparkle_mode) {
+                cfg.trail.sparkle_mode = static_cast<TrailSparkleMode>(sm);
+            }
+            // Out of range for the SOURCE schema: the struct default (Off)
+            // stands, which is exactly the pre-T-023 repair behavior.
+        }
+        if (t.contains("sparkle_amount") && t["sparkle_amount"].isDouble())
+            cfg.trail.sparkle_amount = static_cast<float>(t["sparkle_amount"].toDouble());
+        if (t.contains("sparkle_size_px") && t["sparkle_size_px"].isDouble())
+            cfg.trail.sparkle_size_px = static_cast<float>(t["sparkle_size_px"].toDouble());
+        if (t.contains("sparkle_spread_px") && t["sparkle_spread_px"].isDouble())
+            cfg.trail.sparkle_spread_px = static_cast<float>(t["sparkle_spread_px"].toDouble());
     }
 
     if (root.contains("click") && root["click"].isObject()) {
@@ -212,14 +339,111 @@ std::optional<AppConfig> ConfigStorage::deserialize_json(const QByteArray& json,
         if (c.contains("fill_opacity") && c["fill_opacity"].isDouble())
             cfg.click.fill_opacity = static_cast<float>(c["fill_opacity"].toDouble());
         if (c.contains("style") && c["style"].isDouble()) {
+            // T-022: the valid range widens from 0..6 to 0..10 for the four
+            // elemental styles (Air 7, Fire 8, Water 9, Earth 10). Anything
+            // outside the range is ignored here and additionally repaired by
+            // ClickConfig::validated() -> Ring.
+            //
+            // T-023: that widening is gated on the SOURCE schema for the
+            // same reason as sparkle_mode above. A schema <= 5 writer had no
+            // elemental styles at all, so 7..10 in such a file is corruption
+            // and repairs to Ring; only schema >= 6 may load them.
             const int st = c["style"].toInt();
-            if (st >= 0 && st <= 6) {
+            const int max_click_style =
+                cfg.schema_version >= AppConfig::kElementalClickStyleSchema
+                    ? static_cast<int>(ClickStyle::Earth)
+                    : static_cast<int>(ClickStyle::DotRing);
+            if (st >= 0 && st <= max_click_style) {
                 cfg.click.style = static_cast<ClickStyle>(st);
             }
         }
         if (c.contains("particle_amount") && c["particle_amount"].isDouble())
             cfg.click.particle_amount = static_cast<uint8_t>(
                 std::clamp(c["particle_amount"].toInt(), 0, 255));
+        // T-022 schema 6: elemental hue-bias strength. A schema-5 file has no
+        // such key, so the struct default (0.65) stands -- that IS the
+        // documented 5 -> 6 migration, and it touches no pre-existing field.
+        // Out-of-range values are clamped by ClickConfig::validated() below.
+        if (c.contains("element_tint") && c["element_tint"].isDouble())
+            cfg.click.element_tint = static_cast<float>(c["element_tint"].toDouble());
+        // T-024 schema 8: press-and-hold. The MIGRATION is asymmetric on
+        // purpose and is the whole reason this needs a schema bump at all --
+        // hold_enabled changes how the mouse BEHAVES, not just how it looks.
+        //
+        //   key present            -> honour it (the user's own choice)
+        //   key absent, schema <=7 -> OFF, because that config was written
+        //                             before the gesture existed and its
+        //                             owner never agreed to it
+        //   key absent, schema  >=8 -> the struct default (ON), which is the
+        //                             fresh-install case
+        //
+        // Reading the absent key as the struct default in the schema <= 7
+        // case would hand an existing user a brand-new gesture purely for
+        // upgrading the executable. That is exactly what this avoids.
+        if (c.contains("hold_enabled") && c["hold_enabled"].isBool()) {
+            cfg.click.hold_enabled = c["hold_enabled"].toBool();
+        } else if (cfg.schema_version < AppConfig::kHoldFxSchema) {
+            cfg.click.hold_enabled = false;
+        }
+        // T-027 schema 9: Hold Controls / Motion Wake. The SOURCE SCHEMA is
+        // authoritative for the whole block, exactly like the enum boundaries
+        // above: every key below was introduced at schema 9, so a key that
+        // appears in a file written by a schema <= 8 writer is corruption or
+        // an unknown field and must never acquire T-027 semantics after an
+        // executable upgrade.
+        //
+        //   source schema <= 8 -> the entire block is ignored: Motion Wake
+        //                         stays OFF (a materially new behaviour is
+        //                         never handed to an existing user), and the
+        //                         four multipliers keep their documented
+        //                         identity defaults (1.0 / baseline Wake Life)
+        //   source schema >= 9 -> every key is honoured; absent keys keep the
+        //                         schema-9 struct defaults, and ClickConfig::
+        //                         validated() clamps whatever was loaded
+        if (cfg.schema_version >= AppConfig::kHoldWakeSchema) {
+            if (c.contains("hold_wake_enabled") && c["hold_wake_enabled"].isBool())
+                cfg.click.hold_wake_enabled = c["hold_wake_enabled"].toBool();
+            if (c.contains("hold_intensity") && c["hold_intensity"].isDouble())
+                cfg.click.hold_intensity =
+                    static_cast<float>(c["hold_intensity"].toDouble());
+            if (c.contains("hold_wake_density") && c["hold_wake_density"].isDouble())
+                cfg.click.hold_wake_density =
+                    static_cast<float>(c["hold_wake_density"].toDouble());
+            if (c.contains("hold_wake_lifetime_ms") && c["hold_wake_lifetime_ms"].isDouble())
+                cfg.click.hold_wake_lifetime_ms =
+                    static_cast<float>(c["hold_wake_lifetime_ms"].toDouble());
+            if (c.contains("hold_release_strength") && c["hold_release_strength"].isDouble())
+                cfg.click.hold_release_strength =
+                    static_cast<float>(c["hold_release_strength"].toDouble());
+        } else {
+            cfg.click.hold_wake_enabled = false;
+        }
+        // T-36 schema 11: Advanced Motion Wake. SOURCE SCHEMA AUTHORITATIVE,
+        // exactly like the T-27 block above: a schema <= 10 writer cannot
+        // carry these semantics, so the keys are ignored there and the
+        // struct defaults (identity multipliers, 0 gate, accents OFF)
+        // reproduce the accepted T-26/T-27 appearance for an upgraded user.
+        if (cfg.schema_version >= AppConfig::kAdvancedMotionWakeSchema) {
+            if (c.contains("wake_strength") && c["wake_strength"].isDouble())
+                cfg.click.wake_strength =
+                    static_cast<float>(c["wake_strength"].toDouble());
+            if (c.contains("wake_size") && c["wake_size"].isDouble())
+                cfg.click.wake_size = static_cast<float>(c["wake_size"].toDouble());
+            if (c.contains("wake_spread") && c["wake_spread"].isDouble())
+                cfg.click.wake_spread =
+                    static_cast<float>(c["wake_spread"].toDouble());
+            if (c.contains("speed_response") && c["speed_response"].isDouble())
+                cfg.click.speed_response =
+                    static_cast<float>(c["speed_response"].toDouble());
+            if (c.contains("min_motion_speed_px_s")
+                && c["min_motion_speed_px_s"].isDouble())
+                cfg.click.min_motion_speed_px_s =
+                    static_cast<float>(c["min_motion_speed_px_s"].toDouble());
+            if (c.contains("turn_accent") && c["turn_accent"].isBool())
+                cfg.click.turn_accent = c["turn_accent"].toBool();
+            if (c.contains("stop_accent") && c["stop_accent"].isBool())
+                cfg.click.stop_accent = c["stop_accent"].toBool();
+        }
         if (c.contains("easing") && c["easing"].isDouble()) {
             const int ea = c["easing"].toInt();
             if (ea >= 0 && ea <= 2)
@@ -236,33 +460,104 @@ std::optional<AppConfig> ConfigStorage::deserialize_json(const QByteArray& json,
     return AppConfig::validated(cfg);
 }
 
-AppConfig ConfigStorage::load_from_file(const std::wstring& path) {
+ConfigLoadResult ConfigStorage::load_from_file_result(const std::wstring& path) {
+    ++g_load_count;  // W2-005 test seam
+    ConfigLoadResult result;
+    result.config = release_defaults();
+
+    // CORE-001 test seam: a forced read failure is a ReadFailure, never a
+    // silent fallback that would then be persisted over the source.
+    if (!g_forced_read_failure_path.empty() && path == g_forced_read_failure_path) {
+        ptd::log_write(ptd::LogLevel::Error,
+                       "config: forced read failure (test seam); persistence disabled");
+        result.status = ConfigLoadStatus::ReadFailure;
+        result.persistence_allowed = false;
+        return result;
+    }
+
     std::error_code ec;
     if (!std::filesystem::exists(path, ec)) {
-        return AppConfig{};
+        // T-33: a fresh configuration is the canonical Release Defaults, not
+        // the C++ struct initializers. One semantic source of truth. A fresh
+        // install is ordinary writable state.
+        result.status = ConfigLoadStatus::MissingFresh;
+        result.persistence_allowed = true;
+        return result;
     }
 
     std::ifstream in(path, std::ios::in | std::ios::binary);
     if (!in.is_open()) {
-        ptd::log_write(ptd::LogLevel::Warn, "config: failed to open file for reading, returning defaults");
-        return AppConfig{};
+        // CORE-001: an unreadable existing config is PROTECTED. The fallback
+        // is a runtime convenience only and must never overwrite the source.
+        ptd::log_write(ptd::LogLevel::Error,
+                       "config: failed to open file for reading; persistence "
+                       "disabled to protect the unread source");
+        result.status = ConfigLoadStatus::ReadFailure;
+        result.persistence_allowed = false;
+        return result;
     }
 
     std::string data((std::istreambuf_iterator<char>(in)),
                       std::istreambuf_iterator<char>());
     in.close();
 
-    QString err;
-    auto opt = deserialize_json(QByteArray::fromRawData(data.data(), static_cast<qsizetype>(data.size())), &err);
-    if (!opt) {
-        ptd::log_write(ptd::LogLevel::Warn, "config: malformed JSON, backing up to .corrupt and returning defaults");
-        const std::wstring corrupt_path = path + L".corrupt";
-        std::filesystem::remove(corrupt_path, ec);
-        std::filesystem::rename(path, corrupt_path, ec);
-        return AppConfig{};
+    const QByteArray bytes =
+        QByteArray::fromRawData(data.data(), static_cast<qsizetype>(data.size()));
+
+    // CORE-001: a future schema is valid-but-unsupported, NOT corrupt. Detect
+    // it BEFORE any current-schema interpretation so an older executable can
+    // never rewrite schema 11+ as schema 10, discard unknown future fields, or
+    // rename the file to .corrupt.
+    const std::optional<int> source_schema = peek_schema_version(bytes);
+    if (source_schema && *source_schema > AppConfig::kCurrentSchemaVersion) {
+        ptd::log_write(ptd::LogLevel::Warn,
+                       "config: file schema " + std::to_string(*source_schema) +
+                           " is newer than supported schema " +
+                           std::to_string(AppConfig::kCurrentSchemaVersion) +
+                           "; loaded as unsupported future schema, persistence "
+                           "disabled, original bytes preserved");
+        result.status = ConfigLoadStatus::UnsupportedFutureSchema;
+        result.persistence_allowed = false;
+        return result;
     }
 
-    return *opt;
+    QString err;
+    auto opt = deserialize_json(bytes, &err);
+    if (!opt) {
+        const std::wstring corrupt_path = path + L".corrupt";
+        std::error_code remove_ec;
+        std::filesystem::remove(corrupt_path, remove_ec);
+        std::error_code rename_ec;
+        std::filesystem::rename(path, corrupt_path, rename_ec);
+        if (rename_ec) {
+            // CORE-001: the malformed original is now the ONLY copy. It must
+            // remain byte-identical; persistence is disabled.
+            ptd::log_write(ptd::LogLevel::Error,
+                           "config: malformed JSON, failed to back up to .corrupt; "
+                           "persistence disabled to protect the original");
+            result.status = ConfigLoadStatus::MalformedBackupFailed;
+            result.persistence_allowed = false;
+            return result;
+        }
+        ptd::log_write(ptd::LogLevel::Warn,
+                       "config: malformed JSON, backing up to .corrupt and returning defaults");
+        result.status = ConfigLoadStatus::MalformedBackedUp;
+        result.persistence_allowed = true;
+        return result;
+    }
+
+    result.config = *opt;
+    if (opt->schema_version < AppConfig::kCurrentSchemaVersion) {
+        result.status = ConfigLoadStatus::LoadedMigrated;
+    } else {
+        result.status = ConfigLoadStatus::LoadedCurrent;
+    }
+    result.persistence_allowed = true;
+    return result;
+}
+
+AppConfig ConfigStorage::load_from_file(const std::wstring& path) {
+    return load_from_file_result(path).config;
 }
 
 bool ConfigStorage::save_to_file(const AppConfig& config, const std::wstring& path) {

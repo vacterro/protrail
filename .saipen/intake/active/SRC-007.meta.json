@@ -1,0 +1,30 @@
+{
+  "linked_work": "T-44",
+  "receipt_id": "SRC-007",
+  "received_at": "2026-09-17T20:04:28Z",
+  "redaction": {
+    "applied": false,
+    "authoritative": false,
+    "original_sha256": "6606183566b9ba50aa9e1e4983a786f27655807819642e195023b950e98d17a1",
+    "sanitized_sha256": "6606183566b9ba50aa9e1e4983a786f27655807819642e195023b950e98d17a1"
+  },
+  "request_provenance": {
+    "compared_digest": "9f92603cbad4ffd61b5e2499e5ccff75fa59482e635b465c89da0ed1f759798a",
+    "witness": "transport_obligation"
+  },
+  "schema_version": 1,
+  "sensitive": false,
+  "source_authority": {
+    "body_sha256": "6606183566b9ba50aa9e1e4983a786f27655807819642e195023b950e98d17a1",
+    "mode": "exact",
+    "original_available": true
+  },
+  "source_kind": "user_instruction",
+  "source_sha256": "6606183566b9ba50aa9e1e4983a786f27655807819642e195023b950e98d17a1",
+  "status": "ACTIVE",
+  "transport": {
+    "newline_normalization": "none",
+    "source_encoding": "utf-8",
+    "transport_transform": "none"
+  }
+}

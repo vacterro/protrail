@@ -1,0 +1,21 @@
+saitranslate SAIT-001 package -- payload file digests (sha256)
+regenerated: 2026-09-16 (force-fresh `ee` run; previous header said "T-020R1", a package label stale since 12.09.26)
+source README.md sha256:0b904f769d59910f (4875 bytes)
+
+Re-verification result: all eleven payload documents are BYTE-IDENTICAL to the
+12.09.26 run. Nothing was re-translated, because nothing needed to be -- the
+source digest is unchanged, so the delivered prose was already correct.
+This file re-records the digests to prove the payload was re-read and compared,
+not assumed.
+
+4cdf25f0bd14101b46585ca54b57ee243f3bbdade9efcc10697203d266879410  locales/ded/README.md
+c22ad6cf87e5e495dbb9418468cb3b6d13f3a4fec19208f0b233a3d6946c7348  locales/en/README.md
+9fd3d9a5943afd79086e96ba4fa116b318bec7b8eb29a0f5b036615fd7b15177  locales/et/README.md
+1b594b097aab005493ae5b59e457acff6763dc716acda8e25361339bc7c5207a  locales/ja/README.md
+1446eb16bca4c3e8a3733442571a6002de23a351be0e98d02125214f1c5ebffc  locales/ru/README.md
+9b134fed5161dc0df300ca960159652cf18c61a48ee5cf27f92f4732e933b430  locales/uk/README.md
+4cdf25f0bd14101b46585ca54b57ee243f3bbdade9efcc10697203d266879410  mirrors/README.ded.md
+9fd3d9a5943afd79086e96ba4fa116b318bec7b8eb29a0f5b036615fd7b15177  mirrors/README.ee.md
+1b594b097aab005493ae5b59e457acff6763dc716acda8e25361339bc7c5207a  mirrors/README.ja.md
+1446eb16bca4c3e8a3733442571a6002de23a351be0e98d02125214f1c5ebffc  mirrors/README.ru.md
+9b134fed5161dc0df300ca960159652cf18c61a48ee5cf27f92f4732e933b430  mirrors/README.uk.md

@@ -1,0 +1,26 @@
+{
+  "op_id": "debt.snapshot-a7e1a424fbf5",
+  "operation": "debt.snapshot",
+  "created_at": "2026-09-17T21:19:40Z",
+  "agent": "antigravity",
+  "project_identity": "v:\\___vac\\__k\\__code\\__main__\\protrail",
+  "project_lineage": "lineage-6a51dcf887de4de492b000b2cad0e980",
+  "semantic_payload_hash": "b9fc57ddb42912b3",
+  "preconditions": {
+    ".saipen/recovery/conformance/debt/DEBT-000019.json": ""
+  },
+  "read_preconditions": {},
+  "verification_policy": "none",
+  "status": "COMMITTED",
+  "progress_index": 1,
+  "targets": [
+    {
+      "path": ".saipen/recovery/conformance/debt/DEBT-000019.json",
+      "role": "report",
+      "action": "write",
+      "before_hash": "",
+      "after_hash": "6d63ee6c4f8c86ab",
+      "applied": true
+    }
+  ]
+}

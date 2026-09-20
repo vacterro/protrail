@@ -1,0 +1,19 @@
+{
+  "event_id": "E-313",
+  "externalization_event": {
+    "operation_id": "checkpoint-69c1c96dd9e74dd694b4cdfd88b4a528",
+    "reason": "new LOG event exceeds the live cap; canonical detail externalization"
+  },
+  "lossless": true,
+  "metadata_path": ".saipen/recovery/log-detail/E-313-6ffdb4a7f69bfbd59f3d09cd.json",
+  "operation": "log_event_externalization",
+  "original_event_bytes": 1757,
+  "original_event_path": ".saipen/recovery/log-detail/E-313-6ffdb4a7f69bfbd59f3d09cd.LOG.md",
+  "original_event_sha256": "6ffdb4a7f69bfbd59f3d09cd57bd7367e2f7e85644544fec616123c1621e510e",
+  "project_identity": "v:\\___vac\\__k\\__code\\__main__\\protrail",
+  "project_lineage": "lineage-6a51dcf887de4de492b000b2cad0e980",
+  "schema_version": 1,
+  "source": ".saipen/LOG.md",
+  "status": "COMMITTED",
+  "ticket_id": null
+}

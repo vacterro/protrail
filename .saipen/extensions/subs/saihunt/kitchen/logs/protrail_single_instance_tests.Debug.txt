@@ -1,0 +1,24 @@
+[2026-09-17 18:28:40] [ERROR] single_instance: CreateEventW activate_event failed with error 6
+[2026-09-17 18:28:40] [INFO ] single_instance: owner shutdown began; readiness revoked
+[2026-09-17 18:28:40] [INFO ] single_instance: owner shutdown began; readiness revoked
+[2026-09-17 18:28:40] [INFO ] single_instance: owner shutdown began; readiness revoked
+[2026-09-17 18:28:40] [ERROR] single_instance: mark_ready without ownership/ready_event
+[2026-09-17 18:28:40] [INFO ] single_instance: activation request 95728738766501 acknowledged
+[2026-09-17 18:28:40] [WARN ] single_instance: activation request 95728738867634 not acknowledged within 300 ms; NOT claiming delivery
+[2026-09-17 18:28:40] [INFO ] single_instance: owner shutdown began; readiness revoked
+[2026-09-17 18:28:40] [INFO ] single_instance: ownership reclaimed after previous owner released; starting ProTrail
+[2026-09-17 18:28:40] [INFO ] single_instance: ownership reclaimed after previous owner abnormally terminated; starting ProTrail
+[2026-09-17 18:28:40] [INFO ] single_instance: ownership reclaimed after previous owner abnormally terminated; starting ProTrail
+[2026-09-17 18:28:41] [WARN ] single_instance: owner not ready within 300 ms; activation intent retained
+[2026-09-17 18:28:41] [WARN ] single_instance: owner not ready within 300 ms; activation intent retained
+[2026-09-17 18:28:41] [INFO ] single_instance: activation request 95728749049332 acknowledged
+[2026-09-17 18:28:41] [INFO ] single_instance: activation request 95728749048904 acknowledged
+[2026-09-17 18:28:41] [ERROR] single_instance: acknowledge_request called with zero request id
+[2026-09-17 18:28:41] [ERROR] single_instance: ACK open failed for request 81985529216486895 with error 2
+[2026-09-17 18:28:41] [WARN ] single_instance: bounded handoff expired; a live owner still owns the protocol, launch exits without starting a second runtime
+[2026-09-17 18:28:41] [INFO ] single_instance: ownership reclaimed after previous owner released; starting ProTrail
+[2026-09-17 18:28:41] [INFO ] single_instance: owner shutdown began; readiness revoked
+[2026-09-17 18:28:41] [INFO ] single_instance: ownership reclaimed after previous owner released; starting ProTrail
+[2026-09-17 18:28:41] [INFO ] single_instance: owner shutdown began; readiness revoked
+[2026-09-17 18:28:41] [INFO ] single_instance: ownership reclaimed after previous owner released; starting ProTrail
+[2026-09-17 18:28:41] [INFO ] single_instance: ownership reclaimed after previous owner abnormally terminated; starting ProTrail

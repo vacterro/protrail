@@ -1,0 +1,54 @@
+{
+  "clauses": {
+    "SRC-009:R001": {
+      "actionable": true,
+      "class": "requirement",
+      "text": "CORE-001: ConfigStorage::load_from_file must carry load provenance (MissingFresh/LoadedCurrent/LoadedMigrated/MalformedBackedUp/MalformedBackupFailed/UnsupportedFutureSchema/ReadFailure); reject schema_version > kCurrentSchemaVersion as valid-but-unsupported without rewriting it; disable persistence for protected states so no save path can destroy the source."
+    },
+    "SRC-009:R002": {
+      "actionable": true,
+      "class": "requirement",
+      "text": "CORE-002: startup reconciliation must enforce the persisted autostart DESIRED state in both directions -- ON reconciles the owned Run value to the current exe, OFF idempotently removes ProTrail's own value -- so a transient disable failure cannot leave config OFF while HKCU Run still launches ProTrail."
+    },
+    "SRC-009:R003": {
+      "actionable": true,
+      "class": "requirement",
+      "text": "CORE-003: every publication path that can change TrailConfig::enabled (direct checkbox, color preset, Restore All, apply_config/dev preset) must compare old vs new and run the ONE canonical history-hygiene transition exactly once, so stale disabled-period movement can never render after re-enable."
+    },
+    "SRC-009:R004": {
+      "actionable": true,
+      "class": "requirement",
+      "text": "W2-001: readiness and ACK wait sets must be built by appending only non-null handles to a compact array, recording each real handle index at append time, so the protocol mutex stays watched even when the shutdown beacon cannot be opened; one shared helper for both phases."
+    },
+    "SRC-009:R005": {
+      "actionable": true,
+      "class": "requirement",
+      "text": "W2-002: a whole-AppConfig operation (Restore All / apply_config / dev preset) must be ONE Application-level controller transaction: capture old state, install the validated new config, apply Master/Trail/Click enable-edge invariants exactly once, reconcile Start-with-Windows desired state, and persist ONCE instead of serializing intermediate hybrids."
+    },
+    "SRC-009:R006": {
+      "actionable": true,
+      "class": "requirement",
+      "text": "W2-003: DeferredCoalescer cancel/destruction must invalidate already-posted work (generation/alive shared state), so a queued callback can never execute after teardown or dereference a destroyed coalescer, and a request accepted after cancel belongs to a new generation."
+    },
+    "SRC-009:R007": {
+      "actionable": true,
+      "class": "requirement",
+      "text": "W2-004: activation dedup must guarantee exactly-once per request across interleaved HWND_BROADCAST fan-out using bounded recent-request identity tracking shared by the interactive and quiet channels, marking a request processed before invoking user-visible handling."
+    },
+    "SRC-009:R008": {
+      "actionable": true,
+      "class": "requirement",
+      "text": "W2-005: durable configuration must be loaded exactly once during initialize() and retained through run(), removing the second independent ConfigStorage::load_from_file() from run() so startup side effects and runtime/UI never derive from different snapshots."
+    },
+    "SRC-009:R009": {
+      "actionable": true,
+      "class": "requirement",
+      "text": "PERF-001: world-space effect geometry (Trail segments/sparkles, Click bubbles/particles, Hold/Wake) must be built ONCE per global scheduler frame into one bounded reusable frame record; each OverlayWindow consumes it with only transform, culling, Direct2D emission and presentation, and per-overlay dirty state skips BeginDraw/Clear/Present/Commit when already clear and not intersected (exactly one transparent clear on the frame content disappears)."
+    }
+  },
+  "derived_at": "2026-09-18T17:48:43Z",
+  "derived_from": "SRC-009",
+  "interpretation_revision": 9,
+  "schema_version": 1,
+  "source_sha256": "b917026e290d669e96150711d5883efc4462d5b62e250f73115b3f42f65a3f06"
+}

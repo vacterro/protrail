@@ -1,0 +1,6 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+    <qresource prefix="/defaults">
+        <file>release_defaults.json</file>
+    </qresource>
+</RCC>

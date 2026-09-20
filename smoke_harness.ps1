@@ -1,5 +1,8 @@
 param(
-    [string]$DeployDir = "artifacts\ProTrail-T017-Test-x64"
+    [string]$DeployDir = "artifacts\ProTrail-T017-Test-x64",
+    # T-021R1: also prove the deployed binary really constructs and can
+    # display its Settings window. Skip only for legacy packages.
+    [switch]$NoSettingsCheck
 )
 
 $ErrorActionPreference = "Stop"
@@ -28,17 +31,64 @@ foreach ($f in $requiredFiles) {
     }
 }
 
-# Clean slate: kill any pre-existing orphans from previous runs (allowed before test run)
-$preExisting = Get-Process -Name protrail -ErrorAction SilentlyContinue
-if ($preExisting) {
-    Stop-Process -Name protrail -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Milliseconds 1000
+# --- T-021R1: Win32 window inspection (Settings-window verification) ---
+Add-Type @'
+using System;
+using System.Text;
+using System.Runtime.InteropServices;
+public class ProTrailSmokeWin {
+  public delegate bool EnumProc(IntPtr h, IntPtr l);
+  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc cb, IntPtr l);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowTextW(IntPtr h, StringBuilder s, int n);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
 }
-$survived = Get-Process -Name protrail -ErrorAction SilentlyContinue
-if ($survived) {
-    [Console]::Error.WriteLine("SMOKE_FAIL_PREEXISTING_ORPHAN: protrail.exe could not be killed before smoke test")
-    exit 1
+'@
+
+function Get-SmokeWindows([int]$targetPid) {
+    $acc = New-Object System.Collections.ArrayList
+    $cb = [ProTrailSmokeWin+EnumProc]{
+        param($h, $l)
+        $owner = 0
+        [void][ProTrailSmokeWin]::GetWindowThreadProcessId($h, [ref]$owner)
+        if ($owner -eq $targetPid) {
+            $t = New-Object System.Text.StringBuilder 256
+            [void][ProTrailSmokeWin]::GetWindowTextW($h, $t, 256)
+            [void]$acc.Add([pscustomobject]@{
+                hwnd    = $h
+                title   = $t.ToString()
+                visible = [ProTrailSmokeWin]::IsWindowVisible($h)
+            })
+        }
+        return $true
+    }
+    [void][ProTrailSmokeWin]::EnumWindows($cb, [IntPtr]::Zero)
+    return $acc
 }
+
+# --- T-021R1: production state must not be touched by the smoke run ---
+function Get-ProductionStateSnapshot {
+    $dir = Join-Path $env:LOCALAPPDATA 'ProTrail'
+    if (-not (Test-Path $dir)) { return @{} }
+    $snap = @{}
+    foreach ($f in Get-ChildItem -Path $dir -Recurse -File -ErrorAction SilentlyContinue) {
+        $snap[$f.FullName] = ('{0}|{1}|{2}' -f $f.Length,
+            $f.LastWriteTimeUtc.Ticks,
+            (Get-FileHash $f.FullName -Algorithm SHA256).Hash)
+    }
+    return $snap
+}
+$productionBefore = Get-ProductionStateSnapshot
+
+# Smoke mode bypasses the production single-instance protocol. Preserve any
+# user's already-running ProTrail and track only processes launched from this
+# deployment after the baseline snapshot.
+$preExistingIds = @(
+    Get-Process -Name protrail -ErrorAction SilentlyContinue |
+        Where-Object { $_.Path -eq $exe } |
+        ForEach-Object { $_.Id }
+)
 
 # Prepare isolated temporary state directory (T-017R2: no access to real user state)
 $smokeStateDir = Join-Path ([System.IO.Path]::GetTempPath()) ("protrail_smoke_" + [System.Guid]::NewGuid().ToString("N"))
@@ -56,11 +106,12 @@ function Fail-Smoke([string]$message, [int]$code = 1) {
 }
 
 # Set test-only smoke auto-exit interval (3000 ms) and isolated state directory
-$env:PROTRAIL_SMOKE_AUTO_EXIT_MS = "3000"
+$autoExitMs = if ($NoSettingsCheck) { 3000 } else { 7000 }
+$env:PROTRAIL_SMOKE_AUTO_EXIT_MS = "$autoExitMs"
 $env:PROTRAIL_SMOKE_STATE_DIR = $smokeStateDir
 
 # Launch deployed executable via Start-Process -PassThru
-$proc = Start-Process -FilePath $exe -WorkingDirectory $fullDeployDir -PassThru
+$proc = Start-Process -FilePath $exe -WorkingDirectory $fullDeployDir -PassThru -WindowStyle Hidden
 
 # Wait 1.5 seconds to observe initial liveness
 Start-Sleep -Milliseconds 1500
@@ -70,8 +121,32 @@ if ($proc.HasExited) {
 }
 Write-Output "SMOKE_RUNNING_OK"
 
+# T-021R1 Phase 6: the deployed binary must construct its Settings window,
+# and that window must be displayable. Smoke mode runs without the
+# single-instance activation receiver, so the tray/menu open path cannot be
+# driven from outside the process: this step verifies the real
+# "ProTrail Settings" top-level window of THIS deployed process, shows it,
+# confirms it became visible, and hides it again. The in-app open paths
+# (tray double-click, tray menu "Settings") are covered by
+# protrail_tray_tests / protrail_gui_tests in CTest.
+if (-not $NoSettingsCheck) {
+    $settings = (Get-SmokeWindows $proc.Id) |
+        Where-Object { $_.title -eq 'ProTrail Settings' } | Select-Object -First 1
+    if (-not $settings) {
+        Fail-Smoke "SMOKE_FAIL_NO_SETTINGS_WINDOW: deployed process exposes no 'ProTrail Settings' window"
+    }
+    [void][ProTrailSmokeWin]::ShowWindow([IntPtr]$settings.hwnd, 5)   # SW_SHOW
+    Start-Sleep -Milliseconds 600
+    $shown = [ProTrailSmokeWin]::IsWindowVisible([IntPtr]$settings.hwnd)
+    [void][ProTrailSmokeWin]::ShowWindow([IntPtr]$settings.hwnd, 0)   # SW_HIDE
+    if (-not $shown) {
+        Fail-Smoke "SMOKE_FAIL_SETTINGS_NOT_DISPLAYABLE: 'ProTrail Settings' window did not become visible"
+    }
+    Write-Output "SETTINGS_WINDOW_OPEN_OK (hwnd $($settings.hwnd))"
+}
+
 # Wait for natural application termination (auto-exit set to 3000ms, total timeout 7000ms)
-$naturalExit = $proc.WaitForExit(7000)
+$naturalExit = $proc.WaitForExit($autoExitMs + 6000)
 
 if (-not $naturalExit) {
     Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
@@ -87,10 +162,11 @@ if ($exitCode -ne 0) {
 }
 Write-Output "PROCESS_EXIT_CODE_0_OK (exit code: 0)"
 
-# Verify zero protrail.exe processes remain (no orphans)
-$remaining = Get-Process -Name protrail -ErrorAction SilentlyContinue
+# Verify zero NEW processes from this deployment remain (no smoke orphans).
+$remaining = @(Get-Process -Name protrail -ErrorAction SilentlyContinue |
+    Where-Object { $_.Path -eq $exe -and $_.Id -notin $preExistingIds })
 if ($remaining) {
-    Stop-Process -Name protrail -Force -ErrorAction SilentlyContinue
+    $remaining | Stop-Process -Force -ErrorAction SilentlyContinue
     [Console]::Error.WriteLine("FORCED_CLEANUP_USED")
     Fail-Smoke "SMOKE_FAIL_ORPHAN: protrail.exe process still present after exit"
 }
@@ -135,6 +211,23 @@ Write-Output "CONFIG_PERSISTENCE_EVIDENCE_OK"
 Remove-Item -Recurse -Force -Path $smokeStateDir -ErrorAction SilentlyContinue
 Remove-Item env:PROTRAIL_SMOKE_AUTO_EXIT_MS -ErrorAction SilentlyContinue
 Remove-Item env:PROTRAIL_SMOKE_STATE_DIR -ErrorAction SilentlyContinue
+
+# T-021R1 Phase 6: prove the run mutated no production config and no
+# production log (every byte under %LOCALAPPDATA%\ProTrail is unchanged).
+$productionAfter = Get-ProductionStateSnapshot
+$mutated = @()
+foreach ($k in $productionBefore.Keys) {
+    if (-not $productionAfter.ContainsKey($k)) { $mutated += "REMOVED $k" }
+    elseif ($productionAfter[$k] -ne $productionBefore[$k]) { $mutated += "MODIFIED $k" }
+}
+foreach ($k in $productionAfter.Keys) {
+    if (-not $productionBefore.ContainsKey($k)) { $mutated += "CREATED $k" }
+}
+if ($mutated.Count -gt 0) {
+    Fail-Smoke ("SMOKE_FAIL_PRODUCTION_STATE_MUTATED: " + ($mutated -join '; '))
+}
+Write-Output "NO_PRODUCTION_CONFIG_MUTATION_OK"
+Write-Output "NO_PRODUCTION_LOG_MUTATION_OK"
 
 Write-Output "SMOKE_NATURAL_SHUTDOWN_PASS"
 Write-Output "SMOKE_CLEAN_EXIT"

@@ -1,0 +1,135 @@
+{
+  "op_id": "board-compact-f1a8f910c9ab462ba5dfc332faf804ce",
+  "operation": "board_legacy_compaction",
+  "created_at": "2026-09-14T20:07:31Z",
+  "agent": "antigravity",
+  "project_identity": "v:\\___vac\\__k\\__code\\__main__\\protrail",
+  "project_lineage": "lineage-6a51dcf887de4de492b000b2cad0e980",
+  "semantic_payload_hash": "a662b817ac161ef5",
+  "preconditions": {
+    ".saipen/STATE.md": "22a427fd38b5f433",
+    ".saipen/BOARD.md": "27d61d9d8da0fb16",
+    ".saipen/LOG.md": "a3bf5b09caa40361"
+  },
+  "read_preconditions": {
+    ".saipen/logs": "tree-missing-v1"
+  },
+  "verification_policy": "core_fast",
+  "status": "COMMITTED",
+  "progress_index": 13,
+  "targets": [
+    {
+      "path": ".saipen/recovery/board-compaction/T-23/T-23-cada2e34c8e58f632fc49d6f.BOARD.md",
+      "role": "generic",
+      "action": "write",
+      "before_hash": "",
+      "after_hash": "cada2e34c8e58f63",
+      "applied": true
+    },
+    {
+      "path": ".saipen/recovery/board-compaction/T-23/T-23-cada2e34c8e58f632fc49d6f.json",
+      "role": "generic",
+      "action": "write",
+      "before_hash": "",
+      "after_hash": "2e56461cabf00106",
+      "applied": true
+    },
+    {
+      "path": ".saipen/recovery/board-compaction/T-022/T-022-c6aacc96c125392dd822f56f.BOARD.md",
+      "role": "generic",
+      "action": "write",
+      "before_hash": "",
+      "after_hash": "c6aacc96c125392d",
+      "applied": true
+    },
+    {
+      "path": ".saipen/recovery/board-compaction/T-022/T-022-c6aacc96c125392dd822f56f.json",
+      "role": "generic",
+      "action": "write",
+      "before_hash": "",
+      "after_hash": "8006c074a19f8c61",
+      "applied": true
+    },
+    {
+      "path": ".saipen/recovery/board-compaction/T-021/T-021-0e70ba894d7bd6c8f1d16c56.BOARD.md",
+      "role": "generic",
+      "action": "write",
+      "before_hash": "",
+      "after_hash": "0e70ba894d7bd6c8",
+      "applied": true
+    },
+    {
+      "path": ".saipen/recovery/board-compaction/T-021/T-021-0e70ba894d7bd6c8f1d16c56.json",
+      "role": "generic",
+      "action": "write",
+      "before_hash": "",
+      "after_hash": "6a998e78c5c6d3d1",
+      "applied": true
+    },
+    {
+      "path": ".saipen/recovery/board-compaction/T-020/T-020-4720082aedf855d1ea111c4e.BOARD.md",
+      "role": "generic",
+      "action": "write",
+      "before_hash": "",
+      "after_hash": "4720082aedf855d1",
+      "applied": true
+    },
+    {
+      "path": ".saipen/recovery/board-compaction/T-020/T-020-4720082aedf855d1ea111c4e.json",
+      "role": "generic",
+      "action": "write",
+      "before_hash": "",
+      "after_hash": "a47a533eb8f1ef5d",
+      "applied": true
+    },
+    {
+      "path": ".saipen/recovery/board-compaction/T-018/T-018-c2818677786d3233aecd90cb.BOARD.md",
+      "role": "generic",
+      "action": "write",
+      "before_hash": "",
+      "after_hash": "c2818677786d3233",
+      "applied": true
+    },
+    {
+      "path": ".saipen/recovery/board-compaction/T-018/T-018-c2818677786d3233aecd90cb.json",
+      "role": "generic",
+      "action": "write",
+      "before_hash": "",
+      "after_hash": "bd1d842ca4d043aa",
+      "applied": true
+    },
+    {
+      "path": ".saipen/LOG.md",
+      "role": "log",
+      "action": "write",
+      "before_hash": "a3bf5b09caa40361",
+      "after_hash": "6bf19102bada183e",
+      "applied": true
+    },
+    {
+      "path": ".saipen/BOARD.md",
+      "role": "board",
+      "action": "write",
+      "before_hash": "27d61d9d8da0fb16",
+      "after_hash": "633c4ac51c258357",
+      "applied": true
+    },
+    {
+      "path": ".saipen/STATE.md",
+      "role": "state",
+      "action": "write",
+      "before_hash": "22a427fd38b5f433",
+      "after_hash": "f556508b26774f71",
+      "applied": true
+    }
+  ],
+  "receipt_metadata": {
+    "operation": "board_legacy_compaction",
+    "status": "COMMITTED",
+    "ticket": "T-23",
+    "detail_ref": ".saipen/recovery/board-compaction/T-23/T-23-cada2e34c8e58f632fc49d6f.json",
+    "original_record_sha256": "cada2e34c8e58f632fc49d6fbd4d253a7bdbab3eed36051fcb48475290f43426",
+    "event_id": "E-145",
+    "reason": "lossless historical BOARD repair"
+  }
+}

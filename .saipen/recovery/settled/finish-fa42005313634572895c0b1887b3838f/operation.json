@@ -1,0 +1,46 @@
+{
+  "op_id": "finish-fa42005313634572895c0b1887b3838f",
+  "operation": "finish",
+  "created_at": "2026-09-17T21:10:01Z",
+  "agent": "antigravity",
+  "project_identity": "v:\\___vac\\__k\\__code\\__main__\\protrail",
+  "project_lineage": "lineage-6a51dcf887de4de492b000b2cad0e980",
+  "semantic_payload_hash": "fc6cfc32c4a2a4c9",
+  "preconditions": {
+    ".saipen/STATE.md": "847c5e072ef83497",
+    ".saipen/BOARD.md": "8976f262ea55b204",
+    ".saipen/LOG.md": "c8c4eb761d79b70d"
+  },
+  "read_preconditions": {
+    ".saipen/logs": "tree-missing-v1"
+  },
+  "verification_policy": "core_fast",
+  "status": "COMMITTED",
+  "progress_index": 3,
+  "targets": [
+    {
+      "path": ".saipen/LOG.md",
+      "role": "log",
+      "action": "write",
+      "before_hash": "c8c4eb761d79b70d",
+      "after_hash": "08bfe91962f35f42",
+      "applied": true
+    },
+    {
+      "path": ".saipen/BOARD.md",
+      "role": "board",
+      "action": "write",
+      "before_hash": "8976f262ea55b204",
+      "after_hash": "2bcf66289f0cb8ff",
+      "applied": true
+    },
+    {
+      "path": ".saipen/STATE.md",
+      "role": "state",
+      "action": "write",
+      "before_hash": "847c5e072ef83497",
+      "after_hash": "88d55b689d15c677",
+      "applied": true
+    }
+  ]
+}

@@ -2,12 +2,14 @@
 #include "render_color.h"
 
 #include "../platform/dpi_awareness.h"
+#include "../platform/timestamp.h"
 
 #include <Windows.h>
 #include <d2d1_1helper.h>
 #include <dxgi1_2.h>
 
 #include <cstdint>
+#include <cmath>
 #include <string>
 #include <algorithm>
 
@@ -37,8 +39,104 @@ void OverlayWindow::clear_display_change_callback() {
     s_display_change_callback_ = nullptr;
 }
 
+OverlayWindow::OverlayWindow() {
+    // Default recreate step: full chain rebuild via the pure init_render().
+    // The recovery authority is the ONLY caller after a loss; init_render
+    // itself never re-enters anything.
+    recreate_step_ = [this] {
+        release_render_resources();
+        return init_render();
+    };
+}
+
 OverlayWindow::~OverlayWindow() {
     destroy();
+}
+
+// T-018R1: single device-loss classification used by every terminal
+// HRESULT site (EndDraw / Present / Commit). Non-device failures never
+// enter the rebuild authority.
+bool OverlayWindow::is_device_loss_hresult(HRESULT hr) {
+    return hr == D2DERR_RECREATE_TARGET
+        || hr == DXGI_ERROR_DEVICE_REMOVED
+        || hr == DXGI_ERROR_DEVICE_RESET;
+}
+
+int64_t OverlayWindow::recovery_now() const {
+    if (recovery_clock_) return recovery_clock_();
+    LARGE_INTEGER freq{};
+    LARGE_INTEGER ticks{};
+    QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&ticks);
+    return ptd::ticks_to_ns(ticks.QuadPart, freq.QuadPart);
+}
+
+void OverlayWindow::set_recovery_hooks(std::function<bool()> recreate_step,
+                                       std::function<int64_t()> clock) {
+    recreate_step_ = std::move(recreate_step);
+    recovery_clock_ = std::move(clock);
+}
+
+void OverlayWindow::note_device_loss(const char* origin, HRESULT hr) {
+    // Capture the D3D removed reason while the device object still lives.
+    if (hr == DXGI_ERROR_DEVICE_REMOVED && d3d_device_) {
+        const HRESULT reason = d3d_device_->GetDeviceRemovedReason();
+        overlay_log(ptd::LogLevel::Warn,
+                    std::string("overlay: D3D removed reason hr=") + std::to_string(reason)
+                        + " (" + origin + ")");
+    }
+    // Old COM resources are released eagerly: stale resources are never
+    // exposed after a detected loss. The HWND is untouched.
+    release_render_resources();
+    recovery_.pending = true;
+    recovery_.consecutive_failures = 0;
+    recovery_.delay_ms = kRecoveryInitialDelayMs;
+    recovery_.next_attempt_ns = recovery_now() + recovery_.delay_ms * 1'000'000;
+    overlay_log(ptd::LogLevel::Warn,
+                std::string("overlay: recoverable device loss in ") + origin
+                    + " (hr=" + std::to_string(hr) + "); recovery pending");
+}
+
+bool OverlayWindow::try_recovery() {
+    if (!recovery_.pending) return has_render_resources();
+
+    // Policy gate: at most one attempt per backoff window. Persistent
+    // failure stays bounded (250 ms doubling to 5 s), never a per-frame
+    // spin, and always retryable.
+    const int64_t now = recovery_now();
+    if (now < recovery_.next_attempt_ns) return false;
+
+    if (recreate_step_ && recreate_step_()) {
+        const int failed_attempts = recovery_.consecutive_failures;
+        recovery_ = RecoveryState{};
+        overlay_log(ptd::LogLevel::Info,
+                    "overlay: render resources recovered after " +
+                        std::to_string(failed_attempts) + " failed attempt(s); Ready");
+        return true;
+    }
+
+    ++recovery_.consecutive_failures;
+    recovery_.delay_ms = std::min(recovery_.delay_ms * 2, kRecoveryMaxDelayMs);
+    recovery_.next_attempt_ns = recovery_now() + recovery_.delay_ms * 1'000'000;
+    overlay_log(ptd::LogLevel::Warn,
+                "overlay: recovery attempt " +
+                    std::to_string(recovery_.consecutive_failures) +
+                    " failed; next bounded retry in " +
+                    std::to_string(recovery_.delay_ms) + " ms");
+    return false;
+}
+
+bool OverlayWindow::recreate_render_resources() {
+    overlay_log(ptd::LogLevel::Info, "overlay: recreating render resources");
+    if (recreate_step_ && recreate_step_()) {
+        recovery_ = RecoveryState{};
+        return true;
+    }
+    recovery_.pending = true;
+    ++recovery_.consecutive_failures;
+    recovery_.delay_ms = std::min(recovery_.delay_ms * 2, kRecoveryMaxDelayMs);
+    recovery_.next_attempt_ns = recovery_now() + recovery_.delay_ms * 1'000'000;
+    return false;
 }
 
 LRESULT CALLBACK OverlayWindow::wnd_proc_static(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
@@ -165,9 +263,17 @@ bool OverlayWindow::create(HINSTANCE instance, bool diagnostic, const RECT* expl
     }
 
     if (!init_render()) {
+        // init_render released its own partial resources; the recovery
+        // authority can still rebuild later through recreate paths, but a
+        // failed initial creation reports failure honestly.
         overlay_log(ptd::LogLevel::Info, "overlay: render init failed");
         return false;
     }
+
+    // T-018R1: initialization-time present is NOT recursive. A device loss
+    // on this first frame enters the bounded recovery authority instead of
+    // re-entering full initialization on the same call stack.
+    draw_diagnostic_frame();
     return true;
 }
 
@@ -190,6 +296,8 @@ bool OverlayWindow::init_render() {
 
     auto fail = [&](const char* what) {
         overlay_log(ptd::LogLevel::Error, std::string(what) + " hr=" + std::to_string(hr));
+        // Never expose a partially initialized chain as usable.
+        release_render_resources();
         return false;
     };
 
@@ -263,7 +371,14 @@ bool OverlayWindow::init_render() {
     d2d_context_->SetDpi(96.0f, 96.0f);
 
     // Cached reusable resources (B7/B10): brush color is the only per-frame
-    // mutation; stroke style and target bitmaps are stable.
+    // mutation; stroke styles and target bitmaps are stable.
+    //
+    // T-019 continuous-stroke cap policy: three cached stroke styles, all
+    // created here and never per frame.
+    //   round-round  Dotted/Spark dot stubs, bubbles, single-segment trail
+    //   flat-flat    internal joints of continuous styles (no repeated
+    //                round-cap alpha coverage at Catmull-Rom subdivisions)
+    //   flat-round   head segment of a continuous multi-segment trail
     D2D1_STROKE_STYLE_PROPERTIES1 stroke{};
     stroke.startCap = D2D1_CAP_STYLE_ROUND;
     stroke.endCap = D2D1_CAP_STYLE_ROUND;
@@ -273,9 +388,40 @@ bool OverlayWindow::init_render() {
     hr = d2d_factory->CreateStrokeStyle(stroke, nullptr, 0, round_stroke_style_.GetAddressOf());
     if (FAILED(hr)) return fail("CreateStrokeStyle");
 
+    stroke.startCap = D2D1_CAP_STYLE_FLAT;
+    stroke.endCap = D2D1_CAP_STYLE_FLAT;
+    stroke.dashCap = D2D1_CAP_STYLE_FLAT;
+    hr = d2d_factory->CreateStrokeStyle(stroke, nullptr, 0, flat_flat_stroke_style_.GetAddressOf());
+    if (FAILED(hr)) return fail("CreateStrokeStyle(flat-flat)");
+
+    stroke.startCap = D2D1_CAP_STYLE_FLAT;
+    stroke.endCap = D2D1_CAP_STYLE_ROUND;
+    stroke.dashCap = D2D1_CAP_STYLE_ROUND;
+    hr = d2d_factory->CreateStrokeStyle(stroke, nullptr, 0, flat_round_stroke_style_.GetAddressOf());
+    if (FAILED(hr)) return fail("CreateStrokeStyle(flat-round)");
+
     hr = d2d_context_->CreateSolidColorBrush(D2D1::ColorF(0, 0, 0, 0),
                                              trail_brush_.GetAddressOf());
     if (FAILED(hr)) return fail("CreateSolidColorBrush");
+
+    // T-023: one normalized filled triangle reused by every Shard. The
+    // geometry belongs to the D2D resource chain and is recreated on loss;
+    // no geometry or sink is allocated per sparkle.
+    hr = d2d_factory->CreatePathGeometry(triangle_geometry_.GetAddressOf());
+    if (FAILED(hr)) return fail("CreatePathGeometry(triangle)");
+    ComPtr<ID2D1GeometrySink> triangle_sink;
+    hr = triangle_geometry_->Open(triangle_sink.GetAddressOf());
+    if (FAILED(hr)) return fail("OpenPathGeometry(triangle)");
+    const D2D1_POINT_2F triangle_points[] = {
+        D2D1::Point2F(0.0f, -0.58f),
+        D2D1::Point2F(-0.50f, 0.42f),
+        D2D1::Point2F(0.50f, 0.42f),
+    };
+    triangle_sink->BeginFigure(triangle_points[0], D2D1_FIGURE_BEGIN_FILLED);
+    triangle_sink->AddLines(&triangle_points[1], 2);
+    triangle_sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+    hr = triangle_sink->Close();
+    if (FAILED(hr)) return fail("ClosePathGeometry(triangle)");
 
     // Bubble brushes (T-009 C7): cached once, only SetColor mutates per
     // frame/bubble -- no per-bubble resource creation.
@@ -303,17 +449,21 @@ bool OverlayWindow::init_render() {
     hr = dcomp_target_->SetRoot(dcomp_visual_.Get());
     if (FAILED(hr)) return fail("SetRoot");
 
-    draw_diagnostic_frame();
-
-    hr = dcomp_device_->Commit();
-    if (FAILED(hr)) return fail("Commit");
+    // T-018R1: init_render is pure resource creation. No diagnostic draw,
+    // no present, no Commit here -- the initial present happens once in
+    // create() through the non-recursive path, and device loss anywhere
+    // enters the bounded recovery authority. This removes the
+    // init_render -> draw_diagnostic_frame -> recreate -> init_render
+    // recursion entirely.
 
     overlay_log(ptd::LogLevel::Info, "overlay: render chain initialized (D3D11 -> DXGI flip -> D2D -> DComp)");
     return true;
 }
 
 void OverlayWindow::draw_diagnostic_frame() {
-    if (!d2d_context_) return;
+    // Never renders with pending recovery or a partial chain; never
+    // re-enters init_render() from this call stack (T-018R1).
+    if (recovery_.pending || !d2d_context_ || !swap_chain_ || !dcomp_device_) return;
 
     RECT rc{};
     GetClientRect(hwnd_, &rc);
@@ -347,198 +497,309 @@ void OverlayWindow::draw_diagnostic_frame() {
     }
 
     HRESULT hr = d2d_context_->EndDraw();
-    if (hr == D2DERR_RECREATE_TARGET || hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
-        overlay_log(ptd::LogLevel::Warn, "overlay: device loss in draw_diagnostic_frame EndDraw, recreating render target");
-        recreate_render_resources();
+    if (is_device_loss_hresult(hr)) {
+        note_device_loss("diagnostic EndDraw", hr);
         return;
     }
     if (FAILED(hr)) {
-        overlay_log(ptd::LogLevel::Error, std::string("EndDraw hr=") + std::to_string(hr));
+        overlay_log(ptd::LogLevel::Error, std::string("diagnostic EndDraw hr=") + std::to_string(hr));
         return;
     }
-    if (swap_chain_) {
-        hr = swap_chain_->Present(0, 0);
-        if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
-            overlay_log(ptd::LogLevel::Warn, "overlay: device loss in draw_diagnostic_frame Present, recreating render target");
-            recreate_render_resources();
-            return;
-        }
+    hr = swap_chain_->Present(0, 0);
+    if (is_device_loss_hresult(hr)) {
+        note_device_loss("diagnostic Present", hr);
+        return;
     }
-    if (dcomp_device_) dcomp_device_->Commit();
+    if (FAILED(hr)) {
+        overlay_log(ptd::LogLevel::Error, std::string("diagnostic Present hr=") + std::to_string(hr));
+        return;
+    }
+    hr = dcomp_device_->Commit();
+    if (is_device_loss_hresult(hr)) {
+        note_device_loss("diagnostic Commit", hr);
+        return;
+    }
+    if (FAILED(hr)) {
+        overlay_log(ptd::LogLevel::Warn, std::string("diagnostic Commit hr=") + std::to_string(hr));
+    }
     // No manual flip-model rebind here: D2D device contexts handle the
     // back-buffer rotation internally across BeginDraw/EndDraw cycles, and
     // every frame begins with a full Clear (see init_render rationale).
 }
 
-void OverlayWindow::render_frame(const TrailEffect& effect,
-                                 const CursorHistory& history,
-                                 const TrailConfig& config,
-                                 const ClickBubbleEffect& click_effect,
-                                 const ClickConfig& click_config,
+void OverlayWindow::render_frame(const FrameGeometry& frame, bool intersects,
                                  int64_t now_ns) {
-    if (!d2d_context_ || !swap_chain_ || !dcomp_device_) return;
+    (void)now_ns;
+    if (recovery_.pending || !has_render_resources()) {
+        // T-018R1: absent resources after a recoverable device failure keep
+        // RecoveryPending and retry ONLY when the bounded policy permits. A
+        // transient GPU failure must not permanently disable rendering, and
+        // a persistent one must not spin per frame. This runs BEFORE any
+        // dirty-state skip so a clean overlay never suppresses an already-due
+        // device recovery attempt.
+        try_recovery();
+        return;
+    }
 
-    frame_trail_config_ = &config;
-    frame_click_config_ = &click_config;
+    // PERF-001 dirty-overlay contract. Asked BEFORE presenting, committed only
+    // after a successful present (see the early returns below): a frame that
+    // fails mid-present must not record the overlay as clear. Known-clear and
+    // not intersected: skip BeginDraw/Clear/Present/Commit entirely. Previous
+    // content, none now: present exactly ONE transparent clear.
+    const OverlayDirtyState::Decision decision = dirty_.peek(intersects);
+    if (decision == OverlayDirtyState::Decision::Skip) return;
+    const bool clear_only = decision == OverlayDirtyState::Decision::PresentClear;
 
     d2d_context_->BeginDraw();
     // Frame-exact content: full transparent clear every frame. Nothing is
     // accumulated across frames; buffer state is irrelevant by design.
     d2d_context_->Clear(D2D1::ColorF(0, 0.0f));
 
-    // Optional diagnostics (PROTRAIL_DIAG=1): border ring only, so the
-    // effect visuals themselves stay unobstructed.
-    if (diagnostic_) {
-        RECT rc{};
-        GetClientRect(hwnd_, &rc);
-        const float fw = static_cast<float>(rc.right - rc.left);
-        const float fh = static_cast<float>(rc.bottom - rc.top);
-        ComPtr<ID2D1SolidColorBrush> ring;
-        d2d_context_->CreateSolidColorBrush(D2D1::ColorF(255, 255, 255, 0.15f),
-                                            ring.GetAddressOf());
-        D2D1_RECT_F border{0.5f, 0.5f, fw - 0.5f, fh - 0.5f};
-        d2d_context_->DrawRectangle(border, ring.Get(), 1.0f);
+    if (!clear_only) {
+        // Optional diagnostics (PROTRAIL_DIAG=1): border ring only, so the
+        // effect visuals themselves stay unobstructed.
+        if (diagnostic_) {
+            RECT rc{};
+            GetClientRect(hwnd_, &rc);
+            const float fw = static_cast<float>(rc.right - rc.left);
+            const float fh = static_cast<float>(rc.bottom - rc.top);
+            ComPtr<ID2D1SolidColorBrush> ring;
+            d2d_context_->CreateSolidColorBrush(D2D1::ColorF(255, 255, 255, 0.15f),
+                                                ring.GetAddressOf());
+            D2D1_RECT_F border{0.5f, 0.5f, fw - 0.5f, fh - 0.5f};
+            d2d_context_->DrawRectangle(border, ring.Get(), 1.0f);
+        }
+
+        // PERF-001: replay the immutable world-space frame in canonical
+        // emission order. No effect model, no geometry build and no config
+        // is touched here -- every overlay consumes the same primitives.
+        for (const FramePrimitive& primitive : frame.primitives()) {
+            switch (primitive.kind) {
+                case FramePrimitiveKind::TrailSegment: emit_trail_segment(primitive); break;
+                case FramePrimitiveKind::TrailSparkle: emit_sparkle(primitive); break;
+                case FramePrimitiveKind::Bubble:       emit_bubble(primitive); break;
+                case FramePrimitiveKind::Particle:     emit_particle(primitive); break;
+            }
+        }
     }
 
-    // TrailEffect decides the trail geometry (B1); this class only
-    // presents it, applying the virtual-screen -> overlay-local transform
-    // in add_segment() (B4).
-    effect.build_geometry(history, now_ns, nullptr,
-                          static_cast<int>(history.max_samples()), *this);
-
-    // Click bubbles (T-009 C7): the effect emits per-bubble render state
-    // (pure function of elapsed time); this class issues the Direct2D
-    // calls via add_bubble() with the same transform contract. draw() is
-    // const and never mutates the effect; the Application prunes expired
-    // bubbles on the scheduler side (C9).
-    click_effect.draw(now_ns, *this);
-
-    frame_trail_config_ = nullptr;
-    frame_click_config_ = nullptr;
-
     HRESULT hr = d2d_context_->EndDraw();
-    if (hr == D2DERR_RECREATE_TARGET || hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
-        overlay_log(ptd::LogLevel::Warn, "overlay: device loss in render_frame EndDraw (hr=" + std::to_string(hr) + "), recreating render target");
-        recreate_render_resources();
+    if (is_device_loss_hresult(hr)) {
+        note_device_loss("render_frame EndDraw", hr);
         return;
     }
     if (FAILED(hr)) {
+        // Non-device failure: logged, no blind full device-chain rebuild.
         overlay_log(ptd::LogLevel::Error, std::string("render_frame EndDraw hr=") + std::to_string(hr));
         return;
     }
-    if (swap_chain_) {
-        hr = swap_chain_->Present(0, 0);
-        if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
-            overlay_log(ptd::LogLevel::Warn, "overlay: device loss in render_frame Present (hr=" + std::to_string(hr) + "), recreating render target");
-            recreate_render_resources();
-            return;
-        }
+    hr = swap_chain_->Present(0, 0);
+    if (is_device_loss_hresult(hr)) {
+        note_device_loss("render_frame Present", hr);
+        return;
     }
-    if (dcomp_device_) dcomp_device_->Commit();
+    if (FAILED(hr)) {
+        overlay_log(ptd::LogLevel::Error, std::string("render_frame Present hr=") + std::to_string(hr));
+        return;
+    }
+    // The frame reached the swap chain: NOW record the dirty-state transition
+    // that this present performed. A frame that failed before here returned
+    // without committing, so the overlay is not falsely marked clear.
+    dirty_.commit(intersects);
+    hr = dcomp_device_->Commit();
+    if (is_device_loss_hresult(hr)) {
+        note_device_loss("render_frame Commit", hr);
+        return;
+    }
+    if (FAILED(hr)) {
+        overlay_log(ptd::LogLevel::Warn, std::string("render_frame Commit hr=") + std::to_string(hr));
+    }
     // No manual flip-model rebind: see init_render rationale (D2D device
     // context rebinds internally; full-frame Clear keeps buffers exact).
 }
 
-void OverlayWindow::reserve_hint(int segment_count) {
-    // Fixed resource set: nothing to reserve (B10 -- no per-frame churn).
-    (void)segment_count;
+ID2D1StrokeStyle1* OverlayWindow::stroke_style_for(TrailCapPolicy policy) const {
+    switch (policy) {
+        case TrailCapPolicy::FlatFlat:  return flat_flat_stroke_style_.Get();
+        case TrailCapPolicy::FlatRound: return flat_round_stroke_style_.Get();
+        case TrailCapPolicy::RoundRound:
+        default:                        return round_stroke_style_.Get();
+    }
 }
 
-void OverlayWindow::reserve_bubbles_hint(int bubble_count) {
-    // Fixed resource set: brushes are created once in init_render(); the
-    // hint exists so sinks CAN preallocate (tests do) -- the renderer
-    // needs no per-frame allocation (C7).
-    (void)bubble_count;
-}
-
-void OverlayWindow::add_segment(float x1, float y1, float x2, float y2,
-                                float alpha, float thickness_px,
-                                TrailColorF color) {
-    if (!d2d_context_ || !trail_brush_ || !round_stroke_style_) return;
-    if (!(alpha > 0.0f)) return; // fully faded: skip the draw call
+// PERF-001: one trail segment of the frame -- transform, conservative cull,
+// optional SoftGlow/Neon outer pass, core stroke. The cap policy and the
+// outer glow factors arrive RESOLVED in the primitive (FrameGeometry), so
+// every overlay strokes the segment identically and no config is consulted
+// here. Cached resources only.
+void OverlayWindow::emit_trail_segment(const FramePrimitive& segment) {
+    if (!d2d_context_ || !trail_brush_) return;
+    if (!(segment.alpha > 0.0f)) return; // fully faded: skip the draw call
+    ID2D1StrokeStyle1* const stroke_style = stroke_style_for(segment.caps);
+    if (!stroke_style) return;
 
     // MVP 08 production transform: virtual-screen physical pixels ->
     // overlay-local physical pixels. No DPI multiplication.
-    const float lx1 = transform_.to_local_x(x1);
-    const float ly1 = transform_.to_local_y(y1);
-    const float lx2 = transform_.to_local_x(x2);
-    const float ly2 = transform_.to_local_y(y2);
+    const float lx1 = transform_.to_local_x(segment.x1);
+    const float ly1 = transform_.to_local_y(segment.y1);
+    const float lx2 = transform_.to_local_x(segment.x2);
+    const float ly2 = transform_.to_local_y(segment.y2);
 
     // Keep seam-crossing segments: each adjacent overlay draws/culls the
-    // same canonical virtual segment independently.
-    //
-    // T-016 culling repair: the margin must be derived from the LARGEST
-    // stroke that can actually be drawn for this segment, not from the
-    // core thickness alone. SoftGlow/Neon stroke a much wider low-alpha
-    // outer pass first (Neon up to core * (3 + 3 * glow) = 6x at glow 1.0);
-    // culling with the core-only margin clipped the glow while the outer
-    // stroke still intersected the overlay (visible hard edge at overlay
-    // borders / multi-monitor seams). The conservative margin below uses
-    // the same constants as the stroke policy underneath.
-    float draw_thickness_max = thickness_px;
-    if (frame_trail_config_
-        && (frame_trail_config_->style == ptd::TrailStyle::SoftGlow
-            || frame_trail_config_->style == ptd::TrailStyle::Neon)) {
-        const bool neon = frame_trail_config_->style == ptd::TrailStyle::Neon;
-        const float glow = frame_trail_config_->glow_strength;
-        draw_thickness_max = thickness_px * (neon ? 3.0f + 3.0f * glow
-                                                  : 2.0f + 2.0f * glow);
-    }
-    // Half the widest stroke (round caps extend thickness/2) plus a small
-    // epsilon headroom; the legacy 2x core margin is kept as the floor so
-    // Classic and every existing baseline case is unchanged.
-    const float margin = thickness_px * 2.0f > draw_thickness_max * 0.5f + 1.0f
-                       ? thickness_px * 2.0f
+    // same canonical virtual segment independently. The conservative margin
+    // mirrors FrameGeometry's bounding-box extent -- the widest stroke this
+    // segment can draw (core, or the SoftGlow/Neon outer pass) -- so the
+    // frame box never admits a segment whose stroke is then clipped at a
+    // seam. The legacy 2x core margin stays as the floor, unchanged.
+    const float draw_thickness_max = segment.has_outer
+        ? (segment.outer_width_px > segment.thickness
+               ? segment.outer_width_px : segment.thickness)
+        : segment.thickness;
+    const float margin = segment.thickness * 2.0f > draw_thickness_max * 0.5f + 1.0f
+                       ? segment.thickness * 2.0f
                        : draw_thickness_max * 0.5f + 1.0f;
     if (transform_.cull_segment(lx1, ly1, lx2, ly2, margin)) return;
 
-    trail_brush_->SetColor(D2D1::ColorF(color.r, color.g, color.b, alpha));
+    trail_brush_->SetColor(D2D1::ColorF(segment.color.r, segment.color.g,
+                                        segment.color.b, segment.alpha));
 
     // T-016 stroke policy: SoftGlow/Neon add ONE wide low-alpha outer pass
-    // under the core stroke (weight = config glow_strength). The effect
-    // owns per-segment math; the renderer only decides HOW a segment is
-    // stroked. No shaders, no per-frame resource creation.
-    if (frame_trail_config_
-        && (frame_trail_config_->style == ptd::TrailStyle::SoftGlow
-            || frame_trail_config_->style == ptd::TrailStyle::Neon)) {
-        const bool neon = frame_trail_config_->style == ptd::TrailStyle::Neon;
-        const float glow = frame_trail_config_->glow_strength;
-        const float outer_w = thickness_px * (neon ? 3.0f + 3.0f * glow
-                                                   : 2.0f + 2.0f * glow);
-        const float outer_a = alpha * (neon ? 0.45f * glow : 0.30f * glow);
-        trail_brush_->SetColor(D2D1::ColorF(color.r, color.g, color.b, outer_a));
+    // under the core stroke. T-019: the outer pass uses the SAME cap policy
+    // as the core, so glow joints cannot keep beading after the core is
+    // smooth. No shaders, no per-frame resource creation.
+    if (segment.has_outer && segment.outer_alpha > 0.0f) {
+        trail_brush_->SetColor(D2D1::ColorF(segment.color.r, segment.color.g,
+                                            segment.color.b, segment.outer_alpha));
         d2d_context_->DrawLine(D2D1::Point2F(lx1, ly1), D2D1::Point2F(lx2, ly2),
-                               trail_brush_.Get(), outer_w,
-                               round_stroke_style_.Get());
-        trail_brush_->SetColor(D2D1::ColorF(color.r, color.g, color.b, alpha));
+                               trail_brush_.Get(), segment.outer_width_px, stroke_style);
+        trail_brush_->SetColor(D2D1::ColorF(segment.color.r, segment.color.g,
+                                            segment.color.b, segment.alpha));
     }
 
     d2d_context_->DrawLine(D2D1::Point2F(lx1, ly1), D2D1::Point2F(lx2, ly2),
-                           trail_brush_.Get(), thickness_px,
-                           round_stroke_style_.Get());
+                           trail_brush_.Get(), segment.thickness, stroke_style);
 }
 
 
+
+// T-021: one sparkle decoration. Same virtual-screen -> overlay-local
+// transform and cull contract as every other primitive; only cached
+// resources are touched (trail brush + the three cached stroke styles),
+// so any sparkle count stays allocation-free per frame.
+void OverlayWindow::emit_sparkle(const FramePrimitive& sparkle) {
+    const float x = sparkle.x1;
+    const float y = sparkle.y1;
+    const float size_px = sparkle.size_px;
+    const float rotation_rad = sparkle.rotation_rad;
+    const float alpha = sparkle.alpha;
+    const TrailColorF color = sparkle.color;
+    const TrailSparkleShape shape = sparkle.shape;
+    if (!d2d_context_ || !trail_brush_) return;
+    if (!(alpha > 0.0f) || !(size_px > 0.0f)) return;
+    if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(size_px)
+        || !std::isfinite(alpha)) return;
+
+    // Cull with a conservative outer radius (rotated Cross/Diamond arms
+    // reach size_px/2 from the center; size_px covers every shape plus
+    // stroke half-width headroom).
+    if (transform_.cull_circle(x, y, size_px)) return;
+
+    const float lx = transform_.to_local_x(x);
+    const float ly = transform_.to_local_y(y);
+    trail_brush_->SetColor(
+        D2D1::ColorF(color.r, color.g, color.b, alpha));
+
+    switch (shape) {
+        case TrailSparkleShape::Dot: {
+            const float radius = size_px * 0.5f;
+            d2d_context_->FillEllipse(
+                D2D1::Ellipse(D2D1::Point2F(lx, ly), radius, radius),
+                trail_brush_.Get());
+            break;
+        }
+        case TrailSparkleShape::Cross: {
+            // Two short cached-style lines through the center, rotated.
+            // Round caps give the star its soft arm tips.
+            const float half = size_px * 0.5f;
+            const float thickness = size_px * 0.28f;
+            const float c = std::cos(rotation_rad);
+            const float s = std::sin(rotation_rad);
+            const float ax = c * half, ay = s * half;
+            const float bx = s * half, by = -c * half;
+            d2d_context_->DrawLine(D2D1::Point2F(lx - ax, ly - ay),
+                                   D2D1::Point2F(lx + ax, ly + ay),
+                                   trail_brush_.Get(), thickness,
+                                   round_stroke_style_.Get());
+            d2d_context_->DrawLine(D2D1::Point2F(lx - bx, ly - by),
+                                   D2D1::Point2F(lx + bx, ly + by),
+                                   trail_brush_.Get(), thickness,
+                                   round_stroke_style_.Get());
+            break;
+        }
+        case TrailSparkleShape::Diamond: {
+            // A small rotated square drawn as four cached-style lines --
+            // a bounded line representation with zero COM allocation.
+            const float r = size_px * 0.5f;
+            const float thickness = size_px * 0.22f;
+            const float c = std::cos(rotation_rad);
+            const float s = std::sin(rotation_rad);
+            const D2D1_POINT_2F p[4] = {
+                D2D1::Point2F(lx + c * r,        ly + s * r),
+                D2D1::Point2F(lx - s * r,        ly + c * r),
+                D2D1::Point2F(lx - c * r,        ly - s * r),
+                D2D1::Point2F(lx + s * r,        ly - c * r),
+            };
+            for (int i = 0; i < 4; ++i) {
+                const D2D1_POINT_2F& a = p[i];
+                const D2D1_POINT_2F& b = p[(i + 1) % 4];
+                d2d_context_->DrawLine(a, b, trail_brush_.Get(), thickness,
+                                       round_stroke_style_.Get());
+            }
+            break;
+        }
+        case TrailSparkleShape::Triangle: {
+            if (!triangle_geometry_) break;
+            D2D1_MATRIX_3X2_F previous{};
+            d2d_context_->GetTransform(&previous);
+            const D2D1_MATRIX_3X2_F local =
+                D2D1::Matrix3x2F::Scale(size_px, size_px)
+                * D2D1::Matrix3x2F::Rotation(rotation_rad)
+                * D2D1::Matrix3x2F::Translation(lx, ly);
+            d2d_context_->SetTransform(local);
+            d2d_context_->FillGeometry(triangle_geometry_.Get(),
+                                       trail_brush_.Get());
+            d2d_context_->SetTransform(previous);
+            break;
+        }
+    }
+}
+
 // T-017: one particle dot (small filled disc), same transform/cull
-// contract as add_bubble; cached brush only, no per-particle resources.
-void OverlayWindow::add_particle(float cx, float cy, float radius_px,
-                                 float r, float g, float b, float alpha) {
+// contract as emit_bubble; cached brush only, no per-particle resources.
+void OverlayWindow::emit_particle(const FramePrimitive& particle) {
+    const float cx = particle.x1;
+    const float cy = particle.y1;
+    const float radius_px = particle.radius_px;
+    const float alpha = particle.alpha;
     if (!d2d_context_ || !bubble_brush_) return;
     if (!(alpha > 0.0f) || !(radius_px > 0.0f)) return;
     const float lx = transform_.to_local_x(cx);
     const float ly = transform_.to_local_y(cy);
     if (transform_.cull_circle(cx, cy, radius_px)) return;
-    const auto norm = normalize_click_rgb(r, g, b);
+    const auto norm = normalize_click_rgb(particle.r, particle.g, particle.b);
     bubble_brush_->SetColor(D2D1::ColorF(norm.r, norm.g, norm.b, alpha));
     d2d_context_->FillEllipse(
         D2D1::Ellipse(D2D1::Point2F(lx, ly), radius_px, radius_px),
         bubble_brush_.Get());
 }
 
-void OverlayWindow::add_bubble(float cx, float cy, float radius_px,
-                               float outline_thickness_px,
-                               float r, float g, float b,
-                               float ring_alpha, float fill_alpha) {
+void OverlayWindow::emit_bubble(const FramePrimitive& bubble) {
+    const float cx = bubble.x1;
+    const float cy = bubble.y1;
+    const float radius_px = bubble.radius_px;
+    const float outline_thickness_px = bubble.outline_px;
+    const float ring_alpha = bubble.ring_alpha;
+    const float fill_alpha = bubble.fill_alpha;
     // C7/C6/Phase K: one antialiased circular outline + a subtle
     // translucent inner fill (kept cheap: same ellipse, two cached
     // brushes, no per-bubble resource creation). Ring and fill alphas
@@ -550,13 +811,13 @@ void OverlayWindow::add_bubble(float cx, float cy, float radius_px,
     if (!(radius_px > 0.0f)) return;
 
     // C8 transform: virtual-screen physical pixels -> overlay-local (same
-    // contract as add_segment/unit-correct culling helper).
+    // contract as emit_trail_segment/unit-correct culling helper).
     const float lx = transform_.to_local_x(cx);
     const float ly = transform_.to_local_y(cy);
     if (transform_.cull_circle(cx, cy, radius_px + outline_thickness_px))
         return;
 
-    const auto norm = normalize_click_rgb(r, g, b);
+    const auto norm = normalize_click_rgb(bubble.r, bubble.g, bubble.b);
     const D2D1_POINT_2F center = D2D1::Point2F(lx, ly);
     const D2D1_ELLIPSE ellipse = D2D1::Ellipse(center, radius_px, radius_px);
 
@@ -586,9 +847,12 @@ void OverlayWindow::hide() {
 void OverlayWindow::release_render_resources() {
     const bool had_render_resources = static_cast<bool>(dcomp_device_) || static_cast<bool>(d3d_device_);
     if (round_stroke_style_) round_stroke_style_.Reset();
+    if (flat_flat_stroke_style_) flat_flat_stroke_style_.Reset();
+    if (flat_round_stroke_style_) flat_round_stroke_style_.Reset();
     if (trail_brush_) trail_brush_.Reset();
     if (bubble_brush_) bubble_brush_.Reset();
     if (bubble_fill_brush_) bubble_fill_brush_.Reset();
+    if (triangle_geometry_) triangle_geometry_.Reset();
     if (dcomp_visual_) dcomp_visual_.Reset();
     if (dcomp_target_) dcomp_target_.Reset();
     if (dcomp_device_) dcomp_device_.Reset();
@@ -604,14 +868,10 @@ void OverlayWindow::release_render_resources() {
     }
 }
 
-bool OverlayWindow::recreate_render_resources() {
-    overlay_log(ptd::LogLevel::Info, "overlay: recreating render resources");
-    release_render_resources();
-    return init_render();
-}
-
 void OverlayWindow::destroy() {
     release_render_resources();
+    // No recovery without an HWND; drop pending state with the window.
+    recovery_ = RecoveryState{};
     if (hwnd_) {
         DestroyWindow(hwnd_);
         hwnd_ = nullptr;

@@ -1,0 +1,72 @@
+{
+  "surface": "ui-strings",
+  "integratable": false,
+  "reason": "ProTrail ships no locale layer (.ts/.qm absent, no QTranslator installation in the build), so there is no existing locale format to fill. This inventory is read-only evidence for a future Core i18n ticket; it is deliberately NOT a bundle and must not be integrated as one.",
+  "files": [
+    {
+      "path": "src/ui/settings_window.cpp",
+      "sha256": "50f711ecabe7a8a391b011af757df68beacd5fad975dfbc697e257be425f3b0d",
+      "literal_count": 31,
+      "literals": [
+        "L293: Choose color",
+        "L294: Choose color",
+        "L576: ProTrail Settings",
+        "L622: ENABLE",
+        "L623: Enable ProTrail",
+        "L624: Enable Trail",
+        "L625: Enable Click Effect",
+        "L634: QUICK COLOR PRESETS",
+        "L650: Applies Trail + Click colors only.",
+        "L655: Restore All Defaults",
+        "L680: STYLE",
+        "L726: COLOR",
+        "L729: Mode",
+        "L741: Color",
+        "L757: SHAPE",
+        "L774: TRAIL",
+        "L795: Fade curve",
+        "L810: SPARKLES",
+        "L856: Restore Trail Defaults",
+        "L882: STYLE",
+        "L937: TRIGGERS",
+        "L940: Left",
+        "L941: Right",
+        "L942: Middle",
+        "L957: HOLD",
+        "L960: Hold FX",
+        "L961: Motion Wake",
+        "L991: COLOR",
+        "L998: ANIMATION",
+        "L1041: Easing",
+        "L1050: Restore Click Defaults"
+      ]
+    },
+    {
+      "path": "src/ui/tray_icon.cpp",
+      "sha256": "09be73ad02a0538f1b0964664ec932b73fbfe702c37662406eb12c8e10c29c7e",
+      "literal_count": 6,
+      "literals": [
+        "L50: Settings",
+        "L54: Disable",
+        "L54: Enable",
+        "L60: Exit",
+        "L101: Disable",
+        "L101: Enable"
+      ]
+    },
+    {
+      "path": "src/app/application.cpp",
+      "sha256": "7d10adbd674d3ec2f86d0d8598c35eccd80d2c616cd11d707b116042f72953cc",
+      "literal_count": 0,
+      "literals": []
+    },
+    {
+      "path": "src/app/main.cpp",
+      "sha256": "4385c286ad5753db53ac457a4cd0f099e9b2a6f8cc91e6293e96a2b8f819f6fc",
+      "literal_count": 0,
+      "literals": []
+    }
+  ],
+  "literal_count": 37,
+  "method": "line-based scan of the declared source files for literals in UI contexts; a multi-line literal is recorded on its first line"
+}

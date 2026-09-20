@@ -1,0 +1,53 @@
+{
+  "op_id": "converge_intent-b053a6a3c38b4ca4bb745e15fc447478",
+  "operation": "converge_intent",
+  "created_at": "2026-09-17T14:42:28Z",
+  "agent": "antigravity",
+  "project_identity": "v:\\___vac\\__k\\__code\\__main__\\protrail",
+  "project_lineage": "lineage-6a51dcf887de4de492b000b2cad0e980",
+  "semantic_payload_hash": "cae5ca0968811ce9",
+  "preconditions": {
+    ".saipen/STATE.md": "fc4e8ccfff8df7bc",
+    ".saipen/LOG.md": "11895292dca6205a",
+    ".saipen/kitchen/crew_epoch.json": ""
+  },
+  "read_preconditions": {
+    ".saipen/BOARD.md": "f30b7e1727981a43",
+    ".saipen/logs": "tree-missing-v1"
+  },
+  "verification_policy": "core_fast",
+  "status": "COMMITTED",
+  "progress_index": 3,
+  "targets": [
+    {
+      "path": ".saipen/LOG.md",
+      "role": "log",
+      "action": "write",
+      "before_hash": "11895292dca6205a",
+      "after_hash": "fa7e8c23ccce950c",
+      "applied": true
+    },
+    {
+      "path": ".saipen/STATE.md",
+      "role": "state",
+      "action": "write",
+      "before_hash": "fc4e8ccfff8df7bc",
+      "after_hash": "8fd371180346befb",
+      "applied": true
+    },
+    {
+      "path": ".saipen/kitchen/crew_epoch.json",
+      "role": "report",
+      "action": "write",
+      "before_hash": "",
+      "after_hash": "6cf093154e57a239",
+      "applied": true
+    }
+  ],
+  "receipt_metadata": {
+    "operation": "converge_intent",
+    "target": "crew",
+    "status": "COMMITTED",
+    "project_identity": "v:\\___vac\\__k\\__code\\__main__\\protrail"
+  }
+}

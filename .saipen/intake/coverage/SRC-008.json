@@ -1,0 +1,14 @@
+{
+  "requirements": {
+    "SRC-008:R001": {
+      "actionable": true,
+      "class": "requirement",
+      "disposition": "VERIFIED",
+      "evidence": "T-45 closed with verification evidence in LOG: verify -> PASS [target: T-45] conf: high -- PERF-001 + PERF-003. Clean /W4 /WX Release+Debug RC=0 0 warn/0 err; ctest_safe 21/21 PASS Release and 21/21 PASS Debug; focused trail/stroke/sparkle/multimonitor/hold-wake/lifecycle/config PASS; 60s sparkle soak PASS (3750 frames, max 128/frame). Red control: retained fixed-12 reference oracle reproduces pre-fix 4188 (350 samples) and 6132 (512 samples).",
+      "text": "Continue ProTrail from supplied handoff: reconcile canonical SAIPEN state (CLEAN/stale BOARD), ingest audit/1.md 12 findings as canonical tickets, then repair serially starting CORE-001 config write-safety",
+      "verification": "the Work this request created reached its own verification gate; see the T-45 VERIFY cycle in .saipen/LOG.md",
+      "work": "T-45"
+    }
+  },
+  "schema_version": 1
+}

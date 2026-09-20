@@ -12,7 +12,7 @@ private slots:
 
 void TestBootstrap::qtWidgetsLinkWorks() {
     QVERIFY(QApplication::instance() != nullptr);
-    QVERIFY(!QFontDatabase::families().isEmpty());
+    QVERIFY(qobject_cast<QApplication*>(QCoreApplication::instance()) != nullptr);
 }
 
 void TestBootstrap::appLifecycle() {

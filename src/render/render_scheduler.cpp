@@ -2,7 +2,8 @@
 #include "../core/log.h"
 #include "../platform/mouse_input.h"
 
-#include <QTimer>
+#include <QChronoTimer>
+#include <chrono>
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -16,9 +17,13 @@
 namespace ptd {
 
 RenderScheduler::RenderScheduler(QObject* parent) {
-    timer_ = new QTimer(parent);
+    // PERF-004: QChronoTimer (Qt 6.8) schedules the EXACT chrono interval.
+    // The previous code computed a nanosecond interval and then discarded it
+    // for a rounded integer-millisecond start(), so 60 Hz ran at ~58.8 Hz and
+    // 120 Hz at 125 Hz. frame_interval_ns_ is the pacing authority now.
+    timer_ = new QChronoTimer(parent);
     timer_->setTimerType(Qt::PreciseTimer);
-    QObject::connect(timer_, &QTimer::timeout, [this]() {
+    QObject::connect(timer_, &QChronoTimer::timeout, [this]() {
         const int64_t now = now_ns();
         const bool live = content_check_ ? content_check_(now) : false;
         on_timer_tick(live);
@@ -54,8 +59,16 @@ void RenderScheduler::set_target_fps(int fps) {
 
 void RenderScheduler::update_pacing_interval() {
     frame_interval_ns_ = 1'000'000'000LL / target_fps_;
-    // Round to nearest integer ms; clamp minimum to 1 ms
+    // PERF-004: frame_interval_ms_ remains a diagnostic/legacy accessor only;
+    // it no longer drives runtime scheduling (see schedule_timer()).
     frame_interval_ms_ = std::max(1, static_cast<int>(1000.0 / target_fps_ + 0.5));
+}
+
+// PERF-004: schedule from the EXACT chrono interval. Active-only operation and
+// the immediate first frame on wake() are both preserved by the call sites.
+void RenderScheduler::schedule_timer() {
+    timer_->setInterval(std::chrono::nanoseconds(frame_interval_ns_));
+    timer_->start();
 }
 
 void RenderScheduler::wake() {
@@ -75,7 +88,7 @@ void RenderScheduler::wake() {
             log_write(LogLevel::Info, "render: active (scheduler wake)");
         }
 
-        timer_->start(frame_interval_ms_);
+        schedule_timer();
 
         // Render first frame immediately; do not wait for the first timer tick
         if (callback_) {

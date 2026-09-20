@@ -6,6 +6,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <chrono>
 #include <vector>
 
 namespace {
@@ -126,6 +127,10 @@ void build_three_point_path(ptd::TrailConfig cfg, PathData& pd) {
 // midpoint is the segment's own midpoint, i.e. chord endpoint of seg0).
 float span0_midpoint_deviation(const PathData& pd, ptd::TrailConfig cfg, RecordSink& sink) {
     ptd::TrailEffect e(cfg);
+    // PERF-003: this contract samples the exact u=0.5 point as segment[5],
+    // which is the fixed-12 reference tessellation. Adaptive production
+    // equivalence is proven by the dedicated PERF-003 regressions.
+    e.set_reference_tessellation_for_tests(true);
     sink.clear();
     e.build_geometry(pd.history, pd.now, nullptr, 512, sink);
     float mx, my;
@@ -217,6 +222,8 @@ int main() {
         // trail-side contract tested here: negative coords pass through
         // TrailEffect unmodified.
         TrailEffect e(make_cfg());
+        // PERF-003: assert the reference subdivision count for this contract.
+        e.set_reference_tessellation_for_tests(true);
         CursorHistory h(512);
         const int64_t now = 10'000 * kMs;
         h.push(move(now - 100 * kMs, -1920, -1080));
@@ -283,7 +290,7 @@ int main() {
                     "fade: pure function of elapsed time");
         // Deterministic across call order and frame count.
         expect_near(e.fade(0.5f), e.fade(0.5f), 0.0f, "fade: deterministic");
-        expect_near(e.fade(0.25f), 0.75f, 1e-6f, "fade: linear midpoint");
+        expect_near(e.fade(0.25f), 0.84375f, 1e-6f, "fade: smooth default quarter");
         expect_near(e.fade(2.0f), 0.0f, 1e-6f, "fade: clamped beyond lifetime");
     }
 
@@ -462,10 +469,21 @@ int main() {
         }
     }
 
+    // ---- T-019: Smooth is the intentional production default ----
+    {
+        TrailEffect e(ptd::TrailConfig{});
+        expect_near(e.fade(0.0f), 1.0f, 1e-6f, "T-019: smooth default at 0.0");
+        expect_near(e.fade(0.25f), 0.84375f, 1e-6f, "T-019: smooth default at 0.25");
+        expect_near(e.fade(0.5f), 0.5f, 1e-6f, "T-019: smooth default at 0.5");
+        expect_near(e.fade(0.75f), 0.15625f, 1e-6f, "T-019: smooth default at 0.75");
+        expect_near(e.fade(1.0f), 0.0f, 1e-6f, "T-019: smooth default at 1.0");
+    }
+
     // ---- MVP 05 Phase G: fade_start + fade curves ----
     {
         // fade_start 0 + Linear == the legacy always-fading behavior.
         ptd::TrailConfig c = make_cfg();
+        c.fade_curve = ptd::FadeCurve::Linear;
         TrailEffect e(c);
         expect_near(e.fade(0.0f), 1.0f, 1e-6f, "G: head full");
         expect_near(e.fade(0.5f), 0.5f, 1e-6f, "G: legacy linear midpoint");
@@ -625,29 +643,49 @@ int main() {
         expect_near(TrailEffect(classic).pulse_multiplier(1234567LL * kMs), 1.0f, 0.0f,
                     "style: non-pulse multiplier is exactly 1");
 
-        // Comet: strong monotone tail taper, head width preserved.
+        // Comet: a bright, enlarged head and thin visible middle/tail.
         ptd::TrailConfig comet = classic;
         comet.style = ptd::TrailStyle::Comet;
         {
             TrailEffect e(comet);
-            expect_near(e.style_width_at(1.0f), 3.0f, 1e-5f, "style: comet keeps head width");
+            expect_near(e.style_width_at(1.0f), 4.5f, 1e-5f, "style: comet enlarged head");
             expect_true(e.style_width_at(0.0f) < e.style_width_at(0.5f)
                         && e.style_width_at(0.5f) < e.style_width_at(1.0f),
                         "style: comet taper monotone toward head");
             expect_true(e.style_width_at(0.0f) < 3.0f * 0.2f,
                         "style: comet tail strongly tapered");
+            expect_true(e.style_width_at(0.5f) < 3.0f * 0.45f,
+                        "style: comet middle visibly thinner than Classic");
+            expect_true(e.style_alpha_multiplier(0.5f, 0) < 0.60f,
+                        "style: comet alpha emphasizes head across visible middle");
         }
 
-        // Ribbon: forced 25%..100% head profile.
+        // Ribbon: broad/narrow lobes alternate, not a monotonic taper.
         ptd::TrailConfig ribbon = classic;
         ribbon.style = ptd::TrailStyle::Ribbon;
         {
             TrailEffect e(ribbon);
-            expect_near(e.style_width_at(0.0f), 0.75f, 1e-5f, "style: ribbon tail 25% head");
-            expect_near(e.style_width_at(1.0f), 3.0f, 1e-5f, "style: ribbon head full");
+            float lo = 100.0f, hi = 0.0f;
+            int direction_changes = 0;
+            float prev = e.style_width_at(0.0f, 0);
+            int previous_direction = 0;
+            for (int i = 1; i <= 40; ++i) {
+                const float w = e.style_width_at(i / 40.0f, 0);
+                if (w < lo) lo = w;
+                if (w > hi) hi = w;
+                const int direction = w > prev ? 1 : -1;
+                if (previous_direction && direction != previous_direction) ++direction_changes;
+                previous_direction = direction;
+                prev = w;
+            }
+            expect_true(direction_changes >= 3,
+                        "style: ribbon profile has multiple twist lobes");
+            expect_true(hi / lo >= 2.0f,
+                        "style: ribbon broad/narrow ratio at least 2x");
         }
 
-        // Pulse: pure function of time, bounded 0.6..1.0.
+        // Pulse: spatial wave travels smoothly, with meaningful width and
+        // alpha contrast at the same instant.
         ptd::TrailConfig pulse = classic;
         pulse.style = ptd::TrailStyle::Pulse;
         {
@@ -655,13 +693,23 @@ int main() {
             for (int64_t ns = 0; ns <= static_cast<int64_t>(TrailEffect::kPulsePeriodMs) * kMs;
                  ns += 37 * kMs) {
                 const float m = e.pulse_multiplier(ns);
-                expect_true(m >= 0.6f - 1e-5f && m <= 1.0f + 1e-5f,
-                            "style: pulse multiplier bounded [0.6,1]");
+                expect_true(m >= 0.55f - 1e-5f && m <= 1.0f + 1e-5f,
+                            "style: pulse multiplier bounded [0.55,1]");
             }
-            expect_near(e.pulse_multiplier(0LL), 0.6f, 1e-5f, "style: pulse phase 0 = 0.6");
+            expect_near(e.pulse_multiplier(0LL), 1.0f, 1e-5f, "style: pulse head crest at phase 0");
             expect_near(e.pulse_multiplier(123'456'789LL),
                         e.pulse_multiplier(123'456'789LL), 0.0f,
                         "style: pulse deterministic");
+            const float crest = e.style_width_at(0.50f, 0);
+            const float trough = e.style_width_at(0.50f, 450 * kMs);
+            expect_true(std::abs(crest - trough) > 0.6f,
+                        "style: pulse width changes perceptibly over time");
+            expect_true(std::abs(e.style_width_at(0.50f, 0)
+                               - e.style_width_at(0.66f, 0)) > 0.6f,
+                        "style: pulse width varies along the trail");
+            expect_true(std::abs(e.style_alpha_multiplier(0.50f, 0)
+                               - e.style_alpha_multiplier(0.66f, 0)) > 0.25f,
+                        "style: pulse alpha varies along the trail");
         }
 
         // Spark flicker: deterministic, bounded, varies with dot index.
@@ -961,6 +1009,412 @@ int main() {
                             && std::isfinite(s.alpha) && std::isfinite(s.thickness),
                             "spacing: all emitted dot values finite");
             }
+        }
+    }
+
+    // ---- FADE CONTRACT REACHES THE SCREEN (repair regression) ----
+    //
+    // Defect: emit_polyline/emit_catmull_rom published a raw linear
+    // `base_opacity * t`, so the Fade start slider and the Fade curve
+    // selector were both wired all the way from Settings into TrailConfig
+    // and then silently discarded by the emitters. alpha_at()/fade() were
+    // correct and unit-tested in isolation, which hid it. These checks
+    // compare the EMITTED alpha against the documented contract.
+    {
+        // A straight path with distinct positions across the window.
+        auto make_path = [](ptd::CursorHistory& h, int64_t now,
+                            const ptd::TrailConfig& cfg) {
+            const int64_t lifetime_ns = static_cast<int64_t>(cfg.lifetime_ms * kMs);
+            for (int i = 0; i <= 10; ++i) {
+                h.push(move(now - lifetime_ns + (lifetime_ns * i) / 11,
+                            i * 20, 100));
+            }
+        };
+        const int64_t now = 10'000 * kMs;
+
+        // Polyline mode: segment alpha == alpha_at(newer endpoint).
+        {
+            ptd::TrailConfig cfg = make_cfg();
+            cfg.smoothing = 0.0f;
+            cfg.fade_start = 0.5f;
+            cfg.fade_curve = ptd::FadeCurve::Smooth;
+            CursorHistory h(512);
+            make_path(h, now, cfg);
+            TrailEffect e(cfg);
+            RecordSink sink;
+            e.build_geometry(h, now, nullptr, 512, sink);
+            expect_true(!sink.segs.empty(), "fade: polyline emitted segments");
+            bool any_plateau = false;
+            for (const auto& seg : sink.segs) {
+                // The newer endpoint drives alpha/width/color (documented).
+                // Recover t from the emitted width, not from geometry:
+                // instead assert the alpha is a value alpha_at() can produce
+                // and that the head segment matches alpha_at(1).
+                expect_true(seg.alpha <= cfg.base_opacity + 1e-5f,
+                            "fade: emitted alpha never exceeds base opacity");
+                if (seg.alpha > cfg.base_opacity - 1e-5f) any_plateau = true;
+            }
+            expect_near(sink.segs.back().alpha, e.alpha_at(1.0f), 1e-5f,
+                        "fade: head segment alpha == alpha_at(1)");
+            // fade_start 0.5 means the newest half of the window holds FULL
+            // base opacity. A linear emitter can only reach it at the very
+            // head, so this plateau is the discriminating evidence.
+            expect_true(any_plateau,
+                        "fade: fade_start plateau reaches the emitted stroke");
+            int plateau_segments = 0;
+            for (const auto& seg : sink.segs) {
+                if (seg.alpha > cfg.base_opacity - 1e-5f) ++plateau_segments;
+            }
+            expect_true(plateau_segments >= 3,
+                        "fade: plateau covers the newest part of the window");
+        }
+
+        // The FadeCurve selector must change what is drawn.
+        {
+            auto tail_alpha = [&](ptd::FadeCurve curve) {
+                ptd::TrailConfig cfg = make_cfg();
+                cfg.smoothing = 0.0f;
+                cfg.fade_start = 0.0f;
+                cfg.fade_curve = curve;
+                CursorHistory h(512);
+                make_path(h, now, cfg);
+                TrailEffect e(cfg);
+                RecordSink sink;
+                e.build_geometry(h, now, nullptr, 512, sink);
+                // An older-quarter segment: the curves disagree clearly
+                // there (at the exact window midpoint Linear and Smooth
+                // cross, which would make the comparison meaningless).
+                return sink.segs[sink.segs.size() / 4].alpha;
+            };
+            const float lin = tail_alpha(ptd::FadeCurve::Linear);
+            const float smo = tail_alpha(ptd::FadeCurve::Smooth);
+            const float eas = tail_alpha(ptd::FadeCurve::EaseOut);
+            expect_true(lin != smo, "fade: Linear and Smooth curves differ on screen");
+            expect_true(lin != eas, "fade: Linear and EaseOut curves differ on screen");
+            // fade = 1 - curve(p); EaseOut curve = 1-(1-p)^3, so the
+            // emitted alpha is (1-p)^3 -- it drops FASTER than Linear.
+            expect_true(eas < lin, "fade: EaseOut drops faster than Linear");
+            expect_true(smo < lin, "fade: Smooth trails Linear in the old quarter");
+        }
+
+        // Smoothed (Catmull-Rom) emission obeys the same contract.
+        {
+            ptd::TrailConfig cfg = make_cfg();
+            cfg.smoothing = 0.75f;
+            cfg.fade_start = 0.6f;
+            cfg.fade_curve = ptd::FadeCurve::EaseOut;
+            CursorHistory h(512);
+            make_path(h, now, cfg);
+            TrailEffect e(cfg);
+            RecordSink sink;
+            e.build_geometry(h, now, nullptr, 512, sink);
+            expect_true(!sink.segs.empty(), "fade: curve mode emitted segments");
+            expect_near(sink.segs.back().alpha, e.alpha_at(1.0f), 1e-5f,
+                        "fade: curve head alpha == alpha_at(1)");
+            int plateau_segments = 0;
+            for (const auto& seg : sink.segs) {
+                if (seg.alpha > cfg.base_opacity - 1e-5f) ++plateau_segments;
+            }
+            expect_true(plateau_segments >= 3,
+                        "fade: curve mode honours the fade_start plateau");
+            for (const auto& seg : sink.segs) {
+                expect_true(seg.alpha >= 0.0f
+                            && seg.alpha <= cfg.base_opacity + 1e-5f,
+                            "fade: curve alphas stay inside the envelope");
+            }
+        }
+
+        // Alpha must still arrive monotonically non-decreasing oldest ->
+        // newest for the batching renderer (B-contract preserved).
+        {
+            ptd::TrailConfig cfg = make_cfg();
+            cfg.fade_start = 0.35f;
+            cfg.fade_curve = ptd::FadeCurve::Smooth;
+            CursorHistory h(512);
+            make_path(h, now, cfg);
+            TrailEffect e(cfg);
+            RecordSink sink;
+            e.build_geometry(h, now, nullptr, 512, sink);
+            for (std::size_t i = 1; i < sink.segs.size(); ++i) {
+                expect_true(sink.segs[i].alpha >= sink.segs[i - 1].alpha - 1e-6f,
+                            "fade: alpha is non-decreasing oldest -> newest");
+            }
+        }
+    }
+
+    // ---- DOTTED/SPARK LATTICE IS HEAD-ANCHORED (repair regression) ----
+    //
+    // Defect: DotSampler started its arc-length residual at the TAIL, so
+    // the retracting lifetime boundary shifted the phase of the whole dot
+    // lattice every frame -- every dot crawled backwards along the stroke
+    // and the running dot_index renumbered, re-seeding the Spark flicker
+    // of every dot at once. Head-anchoring makes an expiring tail dot
+    // remove that dot and nothing else.
+    {
+        for (const ptd::TrailStyle style : {ptd::TrailStyle::Dotted,
+                                            ptd::TrailStyle::Spark}) {
+            ptd::TrailConfig cfg = make_cfg();
+            cfg.style = style;
+            cfg.smoothing = 0.0f;
+            cfg.segment_spacing_px = 12.0f;
+            const int64_t t0 = 10'000 * kMs;
+            CursorHistory h(512);
+            for (int i = 0; i < 60; ++i) {
+                h.push(move(t0 + static_cast<int64_t>(i) * 4 * kMs,
+                            100 + 10 * i, 300));
+            }
+            const int64_t last = t0 + 59 * 4 * kMs;
+
+            TrailEffect e(cfg);
+            RecordSink a;
+            RecordSink b;
+            // Two frames 40 ms apart: the tail retracts, the head does not
+            // move (the history is frozen).
+            e.build_geometry(h, last + 100 * kMs, nullptr, 512, a);
+            e.build_geometry(h, last + 140 * kMs, nullptr, 512, b);
+            expect_true(a.segs.size() >= 6 && b.segs.size() >= 6,
+                        "dots: both frames emitted a usable lattice");
+            expect_true(b.segs.size() <= a.segs.size(),
+                        "dots: the retracting tail can only remove dots");
+
+            // Compare from the HEAD end: surviving dots must sit at the
+            // exact same coordinates, not slide along the path.
+            const std::size_t compare =
+                (b.segs.size() < a.segs.size() ? b.segs.size() : a.segs.size()) - 1;
+            for (std::size_t k = 0; k < compare; ++k) {
+                const auto& sa = a.segs[a.segs.size() - 1 - k];
+                const auto& sb = b.segs[b.segs.size() - 1 - k];
+                const float ax = (sa.x1 + sa.x2) * 0.5f;
+                const float ay = (sa.y1 + sa.y2) * 0.5f;
+                const float bx = (sb.x1 + sb.x2) * 0.5f;
+                const float by = (sb.y1 + sb.y2) * 0.5f;
+                expect_near(bx, ax, 1e-3f, "dots: head-side dot x is anchored");
+                expect_near(by, ay, 1e-3f, "dots: head-side dot y is anchored");
+            }
+        }
+
+        // Same invariant on the SMOOTHED path: the Catmull-Rom emitter
+        // shares the one sampler, so its lattice is anchored too.
+        {
+            ptd::TrailConfig cfg = make_cfg();
+            cfg.style = ptd::TrailStyle::Dotted;
+            cfg.smoothing = 0.75f;
+            cfg.segment_spacing_px = 14.0f;
+            const int64_t t0 = 10'000 * kMs;
+            CursorHistory h(512);
+            for (int i = 0; i < 40; ++i) {
+                h.push(move(t0 + static_cast<int64_t>(i) * 6 * kMs,
+                            120 + 12 * i, 260 + ((i % 2) ? 18 : -18)));
+            }
+            const int64_t last = t0 + 39 * 6 * kMs;
+            TrailEffect e(cfg);
+            RecordSink a;
+            RecordSink b;
+            e.build_geometry(h, last + 90 * kMs, nullptr, 512, a);
+            e.build_geometry(h, last + 130 * kMs, nullptr, 512, b);
+            expect_true(a.segs.size() >= 5 && b.segs.size() >= 5,
+                        "dots: smoothed lattice emitted dots");
+            // Only the head-side half: the OLDEST span legitimately
+            // changes shape because its Catmull-Rom neighbour is the
+            // moving lifetime-boundary point, so dots inside that span
+            // ride real geometry, not a lattice phase shift.
+            const std::size_t shared =
+                (b.segs.size() < a.segs.size() ? b.segs.size() : a.segs.size());
+            const std::size_t compare = shared / 2;
+            expect_true(compare >= 3, "dots: enough smoothed dots to compare");
+            for (std::size_t k = 0; k < compare; ++k) {
+                const auto& sa = a.segs[a.segs.size() - 1 - k];
+                const auto& sb = b.segs[b.segs.size() - 1 - k];
+                expect_near((sb.x1 + sb.x2) * 0.5f, (sa.x1 + sa.x2) * 0.5f,
+                            1e-3f, "dots: smoothed head-side dot x anchored");
+                expect_near((sb.y1 + sb.y2) * 0.5f, (sa.y1 + sa.y2) * 0.5f,
+                            1e-3f, "dots: smoothed head-side dot y anchored");
+            }
+        }
+    }
+
+    // ---- PERF-003: adaptive tessellation scales with complexity, not sample count ----
+    {
+        // Dense, nearly-straight 350-sample path. The old fixed-12 walker
+        // emitted (350 - 1) * 12 = 4188 segments; adaptive must emit
+        // materially fewer because every span is short and flat.
+        {
+            ptd::TrailConfig c = make_cfg();
+            TrailEffect e(c);
+            CursorHistory h(512);
+            const int64_t now = 10'000 * kMs;
+            for (int i = 0; i < 350; ++i) {
+                h.push(move(now - (350 - i) * kMs, i, 0));  // 1 px per sample
+            }
+            RecordSink sink;
+            e.build_geometry(h, now, nullptr, 512, sink);
+            expect_true(!sink.segs.empty(), "perf003: dense straight emits geometry");
+            expect_true(sink.segs.size() < 4188,
+                        "perf003: dense straight emits fewer than the old 4188");
+            expect_true(sink.segs.size() <= 1600,
+                        "perf003: dense straight collapses materially");
+        }
+
+        // The retained reference oracle, on the SAME input, proves the old
+        // count was 4188 -- so the reduction is real, not a weakened fixture.
+        {
+            ptd::TrailConfig c = make_cfg();
+            TrailEffect e(c);
+            e.set_reference_tessellation_for_tests(true);
+            CursorHistory h(512);
+            const int64_t now = 10'000 * kMs;
+            for (int i = 0; i < 350; ++i) {
+                h.push(move(now - (350 - i) * kMs, i, 0));
+            }
+            RecordSink sink;
+            e.build_geometry(h, now, nullptr, 512, sink);
+            expect_true(sink.segs.size() == 349 * 12,
+                        "perf003: reference oracle reproduces the old 4188");
+        }
+
+        // Highly curved input must automatically spend more pieces than a
+        // near-straight one over the same span count.
+        {
+            const int64_t now = 10'000 * kMs;
+            auto build_zigzag = [&](RecordSink& sink) {
+                ptd::TrailConfig c = make_cfg();
+                TrailEffect e(c);
+                CursorHistory h(512);
+                for (int i = 0; i < 40; ++i) {
+                    const int y = (i % 2 == 0) ? 0 : 200;
+                    h.push(move(now - (40 - i) * 5 * kMs, i * 40, y));
+                }
+                e.build_geometry(h, now, nullptr, 512, sink);
+            };
+            RecordSink zig;
+            build_zigzag(zig);
+
+            ptd::TrailConfig straight_cfg = make_cfg();
+            TrailEffect straight_e(straight_cfg);
+            CursorHistory sh(512);
+            for (int i = 0; i < 40; ++i) {
+                sh.push(move(now - (40 - i) * 5 * kMs, i * 40, 0));
+            }
+            RecordSink straight;
+            straight_e.build_geometry(sh, now, nullptr, 512, straight);
+
+            expect_true(zig.segs.size() > straight.segs.size(),
+                        "perf003: curved input subdivides more than straight");
+            expect_true(zig.segs.size() <= TrailEffect::max_segments_for(512),
+                        "perf003: curved output stays within the ceiling bound");
+        }
+
+        // Determinism: identical (history, config, now) -> identical output.
+        {
+            ptd::TrailConfig c = make_cfg();
+            const int64_t now = 10'000 * kMs;
+            auto build = [&](RecordSink& sink) {
+                TrailEffect e(c);
+                CursorHistory h(512);
+                for (int i = 0; i < 60; ++i) {
+                    h.push(move(now - (60 - i) * 5 * kMs, i * 20, (i * i) % 300));
+                }
+                e.build_geometry(h, now, nullptr, 512, sink);
+            };
+            RecordSink a, b;
+            build(a);
+            build(b);
+            expect_true(a.segs.size() == b.segs.size(),
+                        "perf003: adaptive output is deterministic (count)");
+            bool same = a.segs.size() == b.segs.size();
+            for (std::size_t i = 0; same && i < a.segs.size(); ++i) {
+                same = a.segs[i].x1 == b.segs[i].x1 && a.segs[i].y1 == b.segs[i].y1
+                    && a.segs[i].x2 == b.segs[i].x2 && a.segs[i].y2 == b.segs[i].y2;
+            }
+            expect_true(same, "perf003: adaptive output is deterministic (bytes)");
+        }
+
+        // PERF-003 before/after benchmark: emitted segment count and wall time
+        // for the 350- and 512-sample dense-straight cases, adaptive vs the
+        // retained fixed-12 reference. Printed as evidence, asserted only for
+        // the direction of the change.
+        {
+            const int64_t now = 10'000 * kMs;
+            auto measure = [&](int samples, bool reference, double& ms_out,
+                               std::size_t& segs_out) {
+                ptd::TrailConfig c = make_cfg();
+                TrailEffect e(c);
+                e.set_reference_tessellation_for_tests(reference);
+                CursorHistory h(512);
+                // 0.5 ms spacing keeps EVERY sample inside the 350 ms window,
+                // so the 512-sample case exercises 511 visible spans.
+                for (int i = 0; i < samples; ++i) {
+                    h.push(move(now - (samples - i) * 500'000, i, 0));
+                }
+                RecordSink sink;
+                const auto t0 = std::chrono::steady_clock::now();
+                const int iters = 200;
+                for (int k = 0; k < iters; ++k) {
+                    sink.clear();
+                    e.build_geometry(h, now, nullptr, 512, sink);
+                }
+                const auto t1 = std::chrono::steady_clock::now();
+                segs_out = sink.segs.size();
+                ms_out = std::chrono::duration<double, std::milli>(t1 - t0).count()
+                       / iters;
+            };
+            for (int samples : {350, 512}) {
+                double ad_ms = 0, ref_ms = 0;
+                std::size_t ad_segs = 0, ref_segs = 0;
+                measure(samples, false, ad_ms, ad_segs);
+                measure(samples, true, ref_ms, ref_segs);
+                std::printf("PERF-003 %d samples: adaptive %zu segs %.1f us | "
+                            "reference %zu segs %.1f us\n",
+                            samples, ad_segs, ad_ms * 1000.0, ref_segs,
+                            ref_ms * 1000.0);
+                expect_true(ref_segs == static_cast<std::size_t>(samples - 1) * 12,
+                            "perf003: reference reproduces the fixed-12 count");
+                expect_true(ad_segs < ref_segs,
+                            "perf003: adaptive emits fewer segments than reference");
+            }
+        }
+        {
+            const float kErrorTolPx = 1.0f;
+            const int64_t now = 10'000 * kMs;
+            ptd::TrailConfig c = make_cfg();
+            auto collect = [&](bool reference, std::vector<RecordSink::Seg>& out) {
+                TrailEffect e(c);
+                e.set_reference_tessellation_for_tests(reference);
+                CursorHistory h(512);
+                for (int i = 0; i < 30; ++i) {
+                    const int y = (i % 3 == 0) ? 0 : (i % 3 == 1 ? 90 : 30);
+                    h.push(move(now - (30 - i) * 8 * kMs, i * 25, y));
+                }
+                RecordSink sink;
+                e.build_geometry(h, now, nullptr, 512, sink);
+                out = sink.segs;
+            };
+            std::vector<RecordSink::Seg> adaptive, reference;
+            collect(false, adaptive);
+            collect(true, reference);
+
+            // Max distance from any adaptive vertex to the reference polyline.
+            float max_err = 0.0f;
+            for (const auto& s : adaptive) {
+                const float px = s.x1, py = s.y1;
+                float best = 1e30f;
+                for (const auto& r : reference) {
+                    const float dx = r.x2 - r.x1, dy = r.y2 - r.y1;
+                    const float len2 = dx * dx + dy * dy;
+                    float u = 0.0f;
+                    if (len2 > 1e-9f) {
+                        u = ((px - r.x1) * dx + (py - r.y1) * dy) / len2;
+                        u = u < 0.0f ? 0.0f : (u > 1.0f ? 1.0f : u);
+                    }
+                    const float cx = r.x1 + dx * u, cy = r.y1 + dy * u;
+                    const float ex = px - cx, ey = py - cy;
+                    const float d = std::sqrt(ex * ex + ey * ey);
+                    if (d < best) best = d;
+                }
+                if (best > max_err) max_err = best;
+            }
+            expect_true(max_err <= kErrorTolPx,
+                        "perf003: adaptive stays within subpixel error tolerance");
         }
     }
 

@@ -1,0 +1,4 @@
+[2026-09-17 18:26:42] [WARN ] config: malformed JSON, backing up to .corrupt and returning defaults
+[2026-09-17 18:26:42] [WARN ] config: %LOCALAPPDATA% unavailable; using executable-relative fallback V:\___VAC\__K\__CODE\__MAIN__\ProTrail\build\Release\config.json
+[2026-09-17 18:26:42] [WARN ] log: %LOCALAPPDATA% unavailable; using executable-relative fallback V:\___VAC\__K\__CODE\__MAIN__\ProTrail\build\Release\protrail.log
+[2026-09-17 18:26:42] [ERROR] config: failed to open temporary file for writing

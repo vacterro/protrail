@@ -1,0 +1,24 @@
+{
+  "board_hash": "7b2e309cfe1d719f",
+  "canonical_next_command": "saipen work reverify T-008",
+  "content_hash": "8abd3be98dac0908",
+  "exit_code": 1,
+  "external_actions": [],
+  "gate": "core",
+  "kind": "conformance_receipt",
+  "log_hash": "a36a9dd3152010b0",
+  "project_identity": "v:\\___vac\\__k\\__code\\__main__\\protrail",
+  "receipt_id": "receipt-256337c6a646",
+  "remediation_commands": [
+    "saipen work reverify T-008",
+    "saipen work reverify T-009",
+    "saipen work reverify T-021"
+  ],
+  "schema_version": 2,
+  "source_head": "1fc09f09410da3493ed8f7ffca621ca0467ca259",
+  "source_tree_fingerprint": "git-delta-v1:93f35fb608957d3908eddca5081948907fff6d764fa01e529171ef211c7e33bf",
+  "state_hash": "57ce5f3255225e18",
+  "timestamp_utc": "2026-09-20T22:40:18.872950Z",
+  "validator_protocol_version": "1",
+  "verdict": "FAIL"
+}

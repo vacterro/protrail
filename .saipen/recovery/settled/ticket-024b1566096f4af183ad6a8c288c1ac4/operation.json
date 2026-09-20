@@ -1,0 +1,62 @@
+{
+  "op_id": "ticket-024b1566096f4af183ad6a8c288c1ac4",
+  "operation": "ticket_add",
+  "created_at": "2026-09-17T14:06:07Z",
+  "agent": "antigravity",
+  "project_identity": "v:\\___vac\\__k\\__code\\__main__\\protrail",
+  "project_lineage": "lineage-6a51dcf887de4de492b000b2cad0e980",
+  "semantic_payload_hash": "038842ed563ad3ad",
+  "preconditions": {
+    ".saipen/STATE.md": "cfd4a48316e537ff",
+    ".saipen/BOARD.md": "0171b907fca94831",
+    ".saipen/LOG.md": "e81a0804a12e30da"
+  },
+  "read_preconditions": {
+    ".saipen/logs": "tree-missing-v1"
+  },
+  "verification_policy": "core_fast",
+  "status": "COMMITTED",
+  "progress_index": 5,
+  "targets": [
+    {
+      "path": ".saipen/LOG.md",
+      "role": "log",
+      "action": "write",
+      "before_hash": "e81a0804a12e30da",
+      "after_hash": "4f87fd6950e00c7c",
+      "applied": true
+    },
+    {
+      "path": ".saipen/recovery/board-compaction/T-34/T-34-0719587eb46f637dff924e70.BOARD.md",
+      "role": "generic",
+      "action": "write",
+      "before_hash": "",
+      "after_hash": "0719587eb46f637d",
+      "applied": true
+    },
+    {
+      "path": ".saipen/recovery/board-compaction/T-34/T-34-0719587eb46f637dff924e70.json",
+      "role": "generic",
+      "action": "write",
+      "before_hash": "",
+      "after_hash": "5db3ab43e0e2a96a",
+      "applied": true
+    },
+    {
+      "path": ".saipen/BOARD.md",
+      "role": "board",
+      "action": "write",
+      "before_hash": "0171b907fca94831",
+      "after_hash": "c51d6471d0b138b8",
+      "applied": true
+    },
+    {
+      "path": ".saipen/STATE.md",
+      "role": "state",
+      "action": "write",
+      "before_hash": "cfd4a48316e537ff",
+      "after_hash": "4ba2cb5690513e8c",
+      "applied": true
+    }
+  ]
+}

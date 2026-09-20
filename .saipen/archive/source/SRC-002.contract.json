@@ -1,0 +1,14 @@
+{
+  "clauses": {
+    "SRC-002:R1": {
+      "actionable": true,
+      "class": "acceptance-criterion",
+      "text": "T-24HoldFX_CTEST15-15"
+    }
+  },
+  "derived_at": "2026-09-16T06:47:00Z",
+  "derived_from": "SRC-002",
+  "interpretation_revision": 1,
+  "schema_version": 1,
+  "source_sha256": "af050e79380ed88055f83f9538fd0bb37a3a83f2f4c2950743b1c71d5754ba06"
+}

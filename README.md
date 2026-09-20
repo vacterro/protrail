@@ -1,80 +1,147 @@
 # ProTrail
 
-Native Windows cursor-effects application. See `ROADMAP/` for the full plan.
+**v0.1.0**
 
-## Build
+ProTrail is a native Windows desktop utility that renders configurable cursor
+trails, click and press-and-hold effects, and motion wake geometry without ever
+intercepting, delaying or swallowing a mouse click. It is a Qt 6 / C++20
+application rendering through Direct2D and DirectComposition into per-monitor
+click-through overlays.
 
-Requirements (Windows 10/11 x64):
+## Current scope
 
-- Visual Studio 2022 Build Tools with the "Desktop development with C++" workload (MSVC 14.4x, CMake 3.24+).
-- Qt 6.8 MSVC 2022 64-bit, installed at `C:\Qt\6.8.0\msvc2022_64` (adjust with `-DCMAKE_PREFIX_PATH` if elsewhere).
-  Install without the online installer: `python -m aqt install-qt windows desktop 6.8.0 win64_msvc2022_64 -O C:\Qt`.
+Windows 10/11 only. MSVC (Visual Studio 2022) with Qt 6.8 is the supported
+toolchain.
 
-Configure (from a "Developer Command Prompt" / after calling `vcvars64.bat`):
+- **ProTrail home window** — a compact Essentials surface for the settings that
+  get changed often: Master FX, Trail FX and style, Sparkle Mode, Click FX and
+  style, Hold FX, Motion Wake, Wake Density, Hold Intensity and Start with
+  Windows. It also carries `Advanced Settings...` and `Restore Defaults`.
+- **Advanced Settings editor** — the complete Trail, Sparkle, Click, Hold,
+  Motion Wake, color, trigger, animation, preset and persistence configuration.
+  The home window is a focused frequent-use view over the same state; it is not
+  a second copy of the editor.
 
-```bat
-cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH=C:/Qt/6.8.0/msvc2022_64
+## Effects
+
+- **Trail** — 8 styles (Classic, Soft Glow, Comet, Neon, Dotted, Pulse, Ribbon,
+  Spark) with dual start/fade colors, four color modes, 14-swatch palettes,
+  custom color picking, taper, smoothing and glow controls.
+- **Sparkles** — 5 modes (Stardust, Twinkle, Glitter, Firefly, Shards) layered
+  deterministically onto the visible trail path, with amount/size/spread
+  controls.
+- **Click** — 11 styles (Ring, Double Ring, Ripple, Burst, Spark Burst, Soft
+  Flash, Dot + Ring, and the elemental Air, Fire, Water, Earth), per-click
+  randomization that is stable at any frame cadence, per-button triggers, and
+  particle/color/easing controls.
+- **Hold** — press-and-hold is a distinct gesture from a click: a continuous
+  charge aura while the button is down, and a release payoff scaled by how long
+  it was held. Dropped button-up events are reconciled against the physical
+  button state, so a lost Up cannot leave a hold running.
+- **Motion Wake** — while an active hold moves, style-specific geometry is shed
+  into world space. Each emission keeps its birth anchor permanently and
+  animates independently of the cursor. Advanced controls cover wake strength,
+  size, spread, speed response, a minimum motion-speed gate, and turn/stop
+  accents.
+
+## Windows integration
+
+- **Multi-monitor and DPI** — one click-through, non-activating overlay per
+  monitor under a per-monitor-DPI-aware process contract, with deferred
+  topology reconciliation for display changes, plug/unplug and mixed DPI.
+- **Idle behavior** — rendering runs only while content is alive. An idle
+  ProTrail has no permanent render timer.
+- **Start with Windows** — a ProTrail-owned per-user `Run` entry whose command
+  is the fully quoted current executable path plus an explicit startup
+  argument. Only the owned value is ever written or removed, and the
+  registration is reconciled against the real executable path at startup.
+- **Startup modes** — a manual launch opens the ProTrail home window. An
+  autostart launch is tray-only: no home window, no advanced window, no taskbar
+  button, no focus steal. A second manual launch hands an activation request to
+  the running instance, which restores its existing home window.
+- **Tray and lifecycle** — `Open ProTrail`, `Settings...`, `Enable`/`Disable`
+  and `Exit`. Closing either window hides it to the tray and keeps ProTrail
+  running; exit is an explicit tray action.
+
+## Configuration
+
+User configuration lives in `%LOCALAPPDATA%\ProTrail\config.json`, written
+atomically and validated against the schema on load (currently schema 11).
+Older schema files migrate forward; a value introduced by a newer schema is
+repaired to its documented safe default rather than reinterpreted.
+
+**Restore Defaults** applies the canonical defaults embedded at build time from
+`resources/release_defaults.json` — there is exactly one defaults authority for
+both a fresh install and an explicit restore.
+
+Developer builds additionally expose **Set Current as Release Defaults**, which
+takes the complete canonical application configuration, writes the defaults
+source atomically, re-reads and re-parses it to prove semantic equality, and
+reports success plus the changed settings. It is refused outright in a
+production Release build and never ships to ordinary users.
+
+## Build requirements
+
+- Windows 10 or newer
+- Visual Studio 2022 / MSVC v143
+- CMake 3.24+
+- Qt 6.8.x `msvc2022_64` with the Widgets and Test modules
+
+Configure and build from a VS Developer PowerShell:
+
+```powershell
+cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+cmake --build build --config Release --parallel
+cmake --build build --config Debug --parallel
 ```
 
-Build:
+The configure step validates the canonical release defaults source and fails
+loudly if it is missing or malformed. MSVC builds use `/W4 /WX`. Configure with
+`-DPROTRAIL_DEV_BUILD=ON` to enable the developer defaults authoring panel in a
+Release build (Debug builds always have it).
 
-```bat
-cmake --build build --config Release
-cmake --build build --config Debug
+## Tests
+
+Run the whole suite for a configuration:
+
+```powershell
+ctest --test-dir build -C Release --output-on-failure
+ctest --test-dir build -C Debug --output-on-failure
 ```
 
-Run tests:
+The suite registers 23 CTest tests — 21 test executables (trail, sparkles,
+click, hold/wake, multi-monitor, scheduler, config, release defaults,
+autostart, single instance, tray lifecycle, GUI, ProTrail home) plus two
+release-defaults gate script tests, one of which deliberately proves the gate
+can fail. GUI tests run headless through Qt's `offscreen` platform.
 
-```bat
-build\Release\protrail_tests.exe
-```
+## Repository layout
 
-Qt runtime DLLs are loaded through the standard Qt search path; add `C:\Qt\6.8.0\msvc2022_64\bin`
-and `C:\Qt\6.8.0\msvc2022_64\plugins\platforms` to `PATH`, or copy `Qt6Core.dll`, `Qt6Gui.dll`,
-`Qt6Widgets.dll` and the `platforms\qwindows.dll` plugin next to the executables.
+| Path | Contents |
+|------|----------|
+| `src/` | Application source (app, config, core, effects, platform, render, ui) |
+| `tests/` | Test executables registered with CTest |
+| `resources/` | Canonical defaults source and its Qt resource |
+| `cmake/` | Configure-time release-defaults validator |
+| `ROADMAP/` | Planning, references and historical design notes |
+| `ROADMAP/evidence/` | Retained per-ticket design/measurement write-ups |
 
-Output: `build\Release\protrail.exe`. No administrator privileges required.
+## Release status
 
-## Status
+**Source-only release.** The source is available for anyone who wants to build it
+themselves. No official Windows EXE, installer, portable archive,
+package-manager binary or signed binary is published, and CI deliberately does
+not publish binaries.
 
-- MVP `00_PROJECT_BOOTSTRAP`: CLOSED.
-- MVP `01_NATIVE_OVERLAY`: CLOSED — native transparent, click-through D2D/DComp overlay
-  (`WS_EX_LAYERED` + `WS_EX_TRANSPARENT` hit-test recipe, DirectComposition swapchain;
-  verified by `tests/hittest_probe.ps1` and manual check).
-- MVP `02_MOUSE_INPUT_AND_SAMPLING`: CLOSED — global raw-input (RIDEV_INPUTSINK,
-  message-only window) feeding a bounded `CursorHistory` (512 samples, coalesced
-  duplicates, preserved button transitions, QPC timestamps).
-- MVP `03_BASIC_TRAIL`: CLOSED — user-verified trail (yellow, ~350 ms life,
-  centripetal Catmull-Rom with continuous smoothing 0..1, time-based fade,
-  active-only scheduler; `tests/test_trail_effect.cpp` regression).
-- MVP `04_CLICK_BUBBLE`: CLOSED — user-verified click bubble (cyan ring, ease-out
-  8→26 px / 250 ms / 0.85, bounded 128 bubble lifecycle, active-only shared
-  scheduler; `tests/test_click_bubble_effect.cpp` — 107 checks).
-- MVP `05_SETTINGS_GUI`: CLOSED — user-verified live Settings GUI (General/Trail/Click,
-  Golden Default theme, interactive color swatches with QColorDialog, 2px bevel,
-  slider+spin sync, active-only scheduler; `tests/test_settings_window.cpp` — 35 checks).
-- MVP `06_CONFIGURATION_AND_PERSISTENCE`: CLOSED — durable JSON settings at
-  `%LOCALAPPDATA%\ProTrail\config.json`, atomic ReplaceFileW write, malformed
-  fallback with `.corrupt` backup, thread-safe publication (`tests/test_config.cpp` — 7 tests).
-- MVP `07_RENDER_SCHEDULER_AND_PERFORMANCE`: CLOSED — formal active-only `RenderScheduler`
-  with display refresh rate pacing (EnumDisplaySettings), stable delta-time, 0 wakeups when idle,
-  performance counters and zero-leakage resource measurements (`tests/test_render_scheduler.cpp` — 10 tests).
-- MVP `08_MULTI_MONITOR_AND_DPI`: CLOSED — per-monitor overlay architecture, explicit
-  `PER_MONITOR_AWARE_V2` DPI awareness, physical-pixel transform, deferred topology reconciliation,
-  multi-monitor regression suite (`tests/test_multimonitor.cpp` — 28 tests).
-- MVP `09_TRAY`: CLOSED — system tray icon, hide-on-close SettingsWindow lifecycle, tray
-  context menu (Settings, Enable/Disable, Exit), clean application shutdown with zero orphan processes
-  (`tests/test_tray.cpp` — 12 tests).
+Official Windows binary distribution is intentionally deferred until the final
+ProTrail product icon is supplied and accepted
+(`FINAL_BINARY_RELEASE_BLOCKED: USER_PRODUCT_ICON_PENDING`, see
+[RELEASE_BLOCKERS.md](RELEASE_BLOCKERS.md)). The generated tray cursor icon is a
+development fallback, not approved final branding.
 
-### Core MVP Status
+## Contributing and security
 
-Core MVP (Milestones 00 through 09) is complete and fully closed.
-All functional and acceptance criteria verified across both automated test suites (/W4 /WX clean, 12/12 CTest PASS) and live multi-monitor / tray user testing.
-
-### Post-MVP Extensions
-
-- Post-MVP `V1_COLORS_AND_PRESETS`: CLOSED — dual trail colors (Start/Fade), 14-swatch palettes, custom `QColorDialog`, 4 trail color modes (Full, Start only, Fade only, Gradient), click 14-swatch palette, 6 quick presets (Classic, Fire, Ice, Neon, Toxic, Violet), schema v2 backward-compatible config migration.
-- Post-MVP `V2_TRAIL_EFFECTS`: CLOSED — 8 trail styles (Classic, Soft Glow, Comet, Neon, Dotted, Pulse, Ribbon, Spark), glow strength + segment spacing parameters, style-aware effect math and renderer stroke policy, schema v3 persistence.
-- Post-MVP `V3_CLICK_EFFECTS`: CLOSED — 7 click styles (Ring, Double Ring, Ripple, Burst, Spark Burst, Soft Flash, Dot + Ring), particle amount (0..24), schema v4 persistence, isolated smoke testing with 0 production state mutation.
-- Post-MVP `V4_SYSTEM_STABILITY`: CLOSED — single-instance mutex guard (`Local\ProTrail_SingleInstance_Mutex`) with window activation via `ProTrail_ActivateInstance`, Direct2D/DXGI device loss handling and recovery (`D2DERR_RECREATE_TARGET`, `DXGI_ERROR_DEVICE_REMOVED`, `DXGI_ERROR_DEVICE_RESET`) preserving HWND, "Restore All Defaults" instant recovery.
-
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the build/test workflow and
+[SECURITY.md](SECURITY.md) for private vulnerability reports. Licensing is
+intentionally undecided until a license is selected; no license is implied by
+this repository.

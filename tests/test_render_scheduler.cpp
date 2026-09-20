@@ -37,32 +37,42 @@ void TestRenderScheduler::refresh_rate_detection_within_valid_bounds() {
     QVERIFY(hz <= 360);
 }
 
+// PERF-004: the pacing AUTHORITY is the exact chrono interval, not a rounded
+// integer millisecond. frame_interval_ms() remains a diagnostic accessor.
 void TestRenderScheduler::pacing_interval_calculated_correctly() {
     ptd::RenderScheduler scheduler;
 
     scheduler.set_target_fps(60);
     QCOMPARE(scheduler.target_fps(), 60);
-    QCOMPARE(scheduler.frame_interval_ms(), 17); // 1000/60 = 16.67 -> 17
+    QCOMPARE(scheduler.frame_interval_ns(), 1'000'000'000LL / 60);
+
+    scheduler.set_target_fps(100);
+    QCOMPARE(scheduler.frame_interval_ns(), 1'000'000'000LL / 100);
 
     scheduler.set_target_fps(120);
-    QCOMPARE(scheduler.target_fps(), 120);
-    QCOMPARE(scheduler.frame_interval_ms(), 8);  // 1000/120 = 8.33 -> 8
+    QCOMPARE(scheduler.frame_interval_ns(), 1'000'000'000LL / 120);
 
     scheduler.set_target_fps(144);
-    QCOMPARE(scheduler.target_fps(), 144);
-    QCOMPARE(scheduler.frame_interval_ms(), 7);  // 1000/144 = 6.94 -> 7
+    QCOMPARE(scheduler.frame_interval_ns(), 1'000'000'000LL / 144);
+
+    scheduler.set_target_fps(165);
+    QCOMPARE(scheduler.frame_interval_ns(), 1'000'000'000LL / 165);
 
     scheduler.set_target_fps(240);
-    QCOMPARE(scheduler.target_fps(), 240);
-    QCOMPARE(scheduler.frame_interval_ms(), 4);  // 1000/240 = 4.17 -> 4
+    QCOMPARE(scheduler.frame_interval_ns(), 1'000'000'000LL / 240);
+
+    scheduler.set_target_fps(360);
+    QCOMPARE(scheduler.frame_interval_ns(), 1'000'000'000LL / 360);
 
     // Underflow clamped to 30
     scheduler.set_target_fps(10);
     QCOMPARE(scheduler.target_fps(), 30);
+    QCOMPARE(scheduler.frame_interval_ns(), 1'000'000'000LL / 30);
 
     // Overflow clamped to 360
     scheduler.set_target_fps(500);
     QCOMPARE(scheduler.target_fps(), 360);
+    QCOMPARE(scheduler.frame_interval_ns(), 1'000'000'000LL / 360);
 }
 
 void TestRenderScheduler::initial_state_is_idle() {

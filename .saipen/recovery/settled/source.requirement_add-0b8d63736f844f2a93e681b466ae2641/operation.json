@@ -1,0 +1,44 @@
+{
+  "op_id": "source.requirement_add-0b8d63736f844f2a93e681b466ae2641",
+  "operation": "source.requirement_add",
+  "created_at": "2026-09-18T17:48:20Z",
+  "agent": "antigravity",
+  "project_identity": "v:\\___vac\\__k\\__code\\__main__\\protrail",
+  "project_lineage": "lineage-6a51dcf887de4de492b000b2cad0e980",
+  "semantic_payload_hash": "77b1d8a967ab350c",
+  "preconditions": {
+    ".saipen/intake/contracts/SRC-009.json": "ace96e8f0837c5c1",
+    ".saipen/intake/contracts/SRC-009.r004.json": "",
+    ".saipen/intake/coverage/SRC-009.json": "13842ff446809886"
+  },
+  "read_preconditions": {},
+  "verification_policy": "core_fast",
+  "status": "COMMITTED",
+  "progress_index": 3,
+  "targets": [
+    {
+      "path": ".saipen/intake/contracts/SRC-009.json",
+      "role": "contract",
+      "action": "write",
+      "before_hash": "ace96e8f0837c5c1",
+      "after_hash": "820a687d8e6160af",
+      "applied": true
+    },
+    {
+      "path": ".saipen/intake/contracts/SRC-009.r004.json",
+      "role": "contract_revision",
+      "action": "write",
+      "before_hash": "",
+      "after_hash": "820a687d8e6160af",
+      "applied": true
+    },
+    {
+      "path": ".saipen/intake/coverage/SRC-009.json",
+      "role": "coverage",
+      "action": "write",
+      "before_hash": "13842ff446809886",
+      "after_hash": "c4d5d17f4c11430b",
+      "applied": true
+    }
+  ]
+}

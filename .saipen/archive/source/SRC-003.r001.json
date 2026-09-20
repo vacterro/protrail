@@ -1,0 +1,14 @@
+{
+  "clauses": {
+    "SRC-003:R1": {
+      "actionable": true,
+      "class": "acceptance-criterion",
+      "text": "T-25PerClickRandomization_CTEST15-15"
+    }
+  },
+  "derived_at": "2026-09-16T06:46:12Z",
+  "derived_from": "SRC-003",
+  "interpretation_revision": 1,
+  "schema_version": 1,
+  "source_sha256": "b7835091b943316f0e561c0b94a4e1ad34bb7f783208e7589f5520d20cb3b2e9"
+}

@@ -1,0 +1,200 @@
+{
+  "op_id": "sub-sync-0ab8a471",
+  "operation": "sub_sync",
+  "created_at": "2026-09-17T14:20:52Z",
+  "agent": "antigravity",
+  "project_identity": "v:\\___vac\\__k\\__code\\__main__\\protrail",
+  "project_lineage": "lineage-6a51dcf887de4de492b000b2cad0e980",
+  "semantic_payload_hash": "d32c7775e2e19678",
+  "preconditions": {
+    ".saipen/extensions/subs/README.md": "893ba5f03753235b",
+    ".saipen/extensions/subs/TEMPLATE/LOG.md": "85d22917455761cf",
+    ".saipen/extensions/subs/TEMPLATE/kitchen/OUTBOX.md": "d505902d6325245d",
+    ".saipen/extensions/subs/crew.md": "91e1e94948c6e33e",
+    ".saipen/extensions/subs/saihunt.md": "60558e6d7590fab8",
+    ".saipen/extensions/subs/saipython.md": "a82a330b15f229c8",
+    ".saipen/extensions/subs/saitest.md": "0a244a9bc0b9eafa",
+    ".saipen/extensions/subs/saitranslate.md": "cbc9a809d40c4b63",
+    ".saipen/extensions/subs/saiui.md": "925ced8c957e532c",
+    ".saipen/extensions/subs/saiwiki.md": "607171a034e58e9a"
+  },
+  "read_preconditions": {
+    "C:/Users/vac34/.config/opencode/skills/saipen/extensions/subs": "tree-sha256:86420adb830d7dd4d26584114064ccb91a18ee560e5b4f16e117fd42b26d1157",
+    "C:/Users/vac34/.config/opencode/skills/saipen/extensions/subs/README.md": "e4ff42445be7ea6d",
+    "C:/Users/vac34/.config/opencode/skills/saipen/extensions/subs/TEMPLATE/LOG.md": "c99f90eaabc29aee",
+    "C:/Users/vac34/.config/opencode/skills/saipen/extensions/subs/TEMPLATE/kitchen/OUTBOX.md": "02feec7cb8582577",
+    "C:/Users/vac34/.config/opencode/skills/saipen/extensions/subs/crew.md": "a350f7cfe641fd4f",
+    "C:/Users/vac34/.config/opencode/skills/saipen/extensions/subs/saihunt.md": "5927e8c0ace9d76b",
+    "C:/Users/vac34/.config/opencode/skills/saipen/extensions/subs/saipython.md": "d77dcb3b84f293ca",
+    "C:/Users/vac34/.config/opencode/skills/saipen/extensions/subs/saitest.md": "c96ebff8c7c36eed",
+    "C:/Users/vac34/.config/opencode/skills/saipen/extensions/subs/saitranslate.md": "7fdd78edab6d44eb",
+    "C:/Users/vac34/.config/opencode/skills/saipen/extensions/subs/saiui.md": "75b31ee6f18d3d7e",
+    "C:/Users/vac34/.config/opencode/skills/saipen/extensions/subs/saiwiki.md": "a10b94acf2356fc9"
+  },
+  "verification_policy": "sub_sync",
+  "status": "COMMITTED",
+  "progress_index": 10,
+  "targets": [
+    {
+      "path": ".saipen/extensions/subs/README.md",
+      "role": "manifest",
+      "action": "write",
+      "before_hash": "893ba5f03753235b",
+      "after_hash": "e4ff42445be7ea6d",
+      "applied": true
+    },
+    {
+      "path": ".saipen/extensions/subs/TEMPLATE/LOG.md",
+      "role": "manifest",
+      "action": "write",
+      "before_hash": "85d22917455761cf",
+      "after_hash": "c99f90eaabc29aee",
+      "applied": true
+    },
+    {
+      "path": ".saipen/extensions/subs/TEMPLATE/kitchen/OUTBOX.md",
+      "role": "manifest",
+      "action": "write",
+      "before_hash": "d505902d6325245d",
+      "after_hash": "02feec7cb8582577",
+      "applied": true
+    },
+    {
+      "path": ".saipen/extensions/subs/crew.md",
+      "role": "manifest",
+      "action": "write",
+      "before_hash": "91e1e94948c6e33e",
+      "after_hash": "a350f7cfe641fd4f",
+      "applied": true
+    },
+    {
+      "path": ".saipen/extensions/subs/saihunt.md",
+      "role": "manifest",
+      "action": "write",
+      "before_hash": "60558e6d7590fab8",
+      "after_hash": "5927e8c0ace9d76b",
+      "applied": true
+    },
+    {
+      "path": ".saipen/extensions/subs/saipython.md",
+      "role": "manifest",
+      "action": "write",
+      "before_hash": "a82a330b15f229c8",
+      "after_hash": "d77dcb3b84f293ca",
+      "applied": true
+    },
+    {
+      "path": ".saipen/extensions/subs/saitest.md",
+      "role": "manifest",
+      "action": "write",
+      "before_hash": "0a244a9bc0b9eafa",
+      "after_hash": "c96ebff8c7c36eed",
+      "applied": true
+    },
+    {
+      "path": ".saipen/extensions/subs/saitranslate.md",
+      "role": "manifest",
+      "action": "write",
+      "before_hash": "cbc9a809d40c4b63",
+      "after_hash": "7fdd78edab6d44eb",
+      "applied": true
+    },
+    {
+      "path": ".saipen/extensions/subs/saiui.md",
+      "role": "manifest",
+      "action": "write",
+      "before_hash": "925ced8c957e532c",
+      "after_hash": "75b31ee6f18d3d7e",
+      "applied": true
+    },
+    {
+      "path": ".saipen/extensions/subs/saiwiki.md",
+      "role": "manifest",
+      "action": "write",
+      "before_hash": "607171a034e58e9a",
+      "after_hash": "a10b94acf2356fc9",
+      "applied": true
+    }
+  ],
+  "receipt_metadata": {
+    "owned_source_inventory": [
+      {
+        "path": "PROTOCOL.md",
+        "kind": "file",
+        "source_hash": "9f9ec1aea31c7195"
+      },
+      {
+        "path": "README.md",
+        "kind": "file",
+        "source_hash": "e4ff42445be7ea6d"
+      },
+      {
+        "path": "TEMPLATE",
+        "kind": "directory",
+        "source_hash": "delete-tree-sha256:6aa4ff1dca5f0f082f1422a8a056a6a23b7627e31e56960b4e2429bb212fb960"
+      },
+      {
+        "path": "TEMPLATE/BOARD.md",
+        "kind": "file",
+        "source_hash": "2f404b252fd85214"
+      },
+      {
+        "path": "TEMPLATE/LOG.md",
+        "kind": "file",
+        "source_hash": "c99f90eaabc29aee"
+      },
+      {
+        "path": "TEMPLATE/STATE.md",
+        "kind": "file",
+        "source_hash": "3c9f0f2f2e6a2549"
+      },
+      {
+        "path": "TEMPLATE/kitchen",
+        "kind": "directory",
+        "source_hash": "delete-tree-sha256:b7c61b05ebe14243d75f7e847a0517bc9f44adb29ede835ca07620d00453e8a2"
+      },
+      {
+        "path": "TEMPLATE/kitchen/OUTBOX.md",
+        "kind": "file",
+        "source_hash": "02feec7cb8582577"
+      },
+      {
+        "path": "crew.md",
+        "kind": "file",
+        "source_hash": "a350f7cfe641fd4f"
+      },
+      {
+        "path": "saihunt.md",
+        "kind": "file",
+        "source_hash": "5927e8c0ace9d76b"
+      },
+      {
+        "path": "saipython.md",
+        "kind": "file",
+        "source_hash": "d77dcb3b84f293ca"
+      },
+      {
+        "path": "saitest.md",
+        "kind": "file",
+        "source_hash": "c96ebff8c7c36eed"
+      },
+      {
+        "path": "saitranslate.md",
+        "kind": "file",
+        "source_hash": "7fdd78edab6d44eb"
+      },
+      {
+        "path": "saiui.md",
+        "kind": "file",
+        "source_hash": "75b31ee6f18d3d7e"
+      },
+      {
+        "path": "saiwiki.md",
+        "kind": "file",
+        "source_hash": "a10b94acf2356fc9"
+      }
+    ],
+    "obsolete_reconciliation": [],
+    "previous_sub_sync_op_id": "sub-sync-a90f81c7"
+  }
+}

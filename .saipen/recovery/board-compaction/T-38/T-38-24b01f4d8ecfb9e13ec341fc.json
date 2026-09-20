@@ -1,0 +1,20 @@
+{
+  "externalization_event": {
+    "event_id": "E-336",
+    "operation_id": "claim-5410423ce3d74d9a8407754ed716fc85",
+    "reason": "existing/proposed oversized BOARD record requires canonical claim update"
+  },
+  "lossless": true,
+  "metadata_path": ".saipen/recovery/board-compaction/T-38/T-38-24b01f4d8ecfb9e13ec341fc.json",
+  "operation": "board_legacy_compaction",
+  "original_record_bytes": 1225,
+  "original_record_path": ".saipen/recovery/board-compaction/T-38/T-38-24b01f4d8ecfb9e13ec341fc.BOARD.md",
+  "original_record_sha256": "24b01f4d8ecfb9e13ec341fcb1a6e51ad0d50bc871161e383b00929cf310989f",
+  "project_identity": "v:\\___vac\\__k\\__code\\__main__\\protrail",
+  "project_lineage": "lineage-6a51dcf887de4de492b000b2cad0e980",
+  "schema_version": 1,
+  "source": ".saipen/BOARD.md",
+  "status": "COMMITTED",
+  "supersedes_detail_ref": "",
+  "ticket_id": "T-38"
+}

@@ -1,0 +1,19 @@
+{
+  "event_id": "E-216",
+  "externalization_event": {
+    "operation_id": "ticket-09f02f21a5ed4f0b9a3923951e2c8b80",
+    "reason": "new LOG event exceeds the live cap; canonical detail externalization"
+  },
+  "lossless": true,
+  "metadata_path": ".saipen/recovery/log-detail/E-216-10758eb21027acebc2be1015.json",
+  "operation": "log_event_externalization",
+  "original_event_bytes": 1046,
+  "original_event_path": ".saipen/recovery/log-detail/E-216-10758eb21027acebc2be1015.LOG.md",
+  "original_event_sha256": "10758eb21027acebc2be101583e941d75e1a0bddda9e231d62f8a4e3a8064ef8",
+  "project_identity": "v:\\___vac\\__k\\__code\\__main__\\protrail",
+  "project_lineage": "lineage-6a51dcf887de4de492b000b2cad0e980",
+  "schema_version": 1,
+  "source": ".saipen/LOG.md",
+  "status": "COMMITTED",
+  "ticket_id": "T-26"
+}
