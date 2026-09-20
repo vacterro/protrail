@@ -16,12 +16,15 @@ jobs:
         configuration: [Release, Debug]
     steps:
       - uses: actions/checkout@v4
+      # Qt Widgets and Qt Test -- everything this project needs -- live in the
+      # base install, so no add-on module is requested. `modules:` names aqt
+      # add-ons only (qtwebengine, qtpdf, ...); naming a base component there
+      # makes the action fail while parsing the package list.
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
         with:
           version: 6.8.0
           arch: win64_msvc2022_64
-          modules: qtbase
           cache: true
       - name: Configure
         shell: pwsh
