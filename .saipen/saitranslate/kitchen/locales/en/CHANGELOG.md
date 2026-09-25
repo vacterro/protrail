@@ -1,43 +1,6 @@
 # Changelog
 
-## 0.1.8 - Official Windows x64 portable release closure
-
-- Committed the complete product source closure required by the canonical CMake target list: unified-window application sources, retired `MainWindow` removal, T-59 runtime repairs, corrected test include paths, and smoke/deploy hardening.
-- Preserved immutable `v0.1.3` through `v0.1.7` tags; each intermediate tag remains an incomplete package-build record and none was moved or deleted.
-- Prepared the unsigned portable package pipeline; package smoke, checksum, and publication gates remain authoritative.
-
-## 0.1.7 - Incomplete package build record (superseded by v0.1.8)
-
-- Added the remaining `src/ui/branding.h` and `src/ui/branding.cpp` sources, but the committed `Application` still referenced the retired `MainWindow` implementation, so a clean link failed.
-- Preserved immutable `v0.1.3` through `v0.1.6` tags; no tag was moved or deleted.
-
-## 0.1.6 - Incomplete package build record (superseded by v0.1.8)
-
-- Added the required `src/app/topology_retry.h` source, but the clean target list still referenced uncommitted branding sources and retired `MainWindow` code.
-- Preserved immutable `v0.1.3` through `v0.1.5` tags; no tag was moved or deleted.
-
-## 0.1.5 - Incomplete package build record (superseded by v0.1.6)
-
-- Renamed the root version authority from `VERSION` to `RELEASE_VERSION`, removing the Windows C++ `<version>` header shadowing failure.
-- Preserved immutable `v0.1.3` and `v0.1.4` tags; this release carries the approved icon and corrected version-file layout.
-- Prepared the unsigned portable package pipeline; package smoke, checksum, and publication gates remain authoritative.
-
-## 0.1.4 - Official Windows x64 portable release recovery
-
-- Corrected the incomplete `v0.1.3` publication record without moving or deleting its immutable tag; the actual icon release is cut as `v0.1.4`.
-- Integrated the operator-authorized deterministic ProTrail product icon across the PE resource, window/taskbar, and tray surfaces.
-- Added multi-resolution `protrail.ico`, master SVG/PNG artwork, and exact SHA-256 approval record.
-- Prepared the unsigned portable package pipeline; package smoke, checksum, and publication gates remain authoritative.
-
-## 0.1.3 - Incomplete publication record (superseded by v0.1.4)
-
-- The immutable `v0.1.3` tag points to the pre-icon closure commit; no tag was moved or deleted.
-
-## 0.1.2 - Croatian documentation patch (source-only)
-
-- Added the complete Croatian translation set for the seven maintained documentation surfaces under the `hr` locale.
-- Updated release-facing mirrors and translation kitchen metadata to the `v0.1.2` source-only release identity.
-- No official Windows binary, installer, portable archive, or signed executable is included; the final product-icon gate remains open.
+🇷🇺 [Русский](../ru/CHANGELOG.md) · 🇺🇸 [English](CHANGELOG.md) · 🇪🇪 [Eesti](../et/CHANGELOG.md) · 🇯🇵 [日本語](../ja/CHANGELOG.md) · 🇷🇺 [👴 Дед](../ded/CHANGELOG.md) · 🇺🇦 [Українська](../uk/CHANGELOG.md) · 🇩🇪 [Deutsch](../de/CHANGELOG.md) · 🇫🇷 [Français](../fr/CHANGELOG.md) · 🇪🇸 [Español](../es/CHANGELOG.md) · 🇮🇹 [Italiano](../it/CHANGELOG.md) · 🇵🇹 [Português](../pt/CHANGELOG.md) · 🇳🇱 [Nederlands](../nl/CHANGELOG.md) · 🇵🇱 [Polski](../pl/CHANGELOG.md) · 🇸🇪 [Svenska](../sv/CHANGELOG.md) · 🇩🇰 [Dansk](../da/CHANGELOG.md) · 🇫🇮 [Suomi](../fi/CHANGELOG.md) · 🇳🇴 [Norsk](../no/CHANGELOG.md) · 🇨🇳 [中文](../zh/CHANGELOG.md) · 🇰🇷 [한국어](../ko/CHANGELOG.md) · 🇹🇭 [ไทย](../th/CHANGELOG.md) · 🇻🇳 [Tiếng Việt](../vi/CHANGELOG.md) · 🇸🇦 [العربية](../ar/CHANGELOG.md) · 🇮🇱 [עברית](../he/CHANGELOG.md) · 🇹🇷 [Türkçe](../tr/CHANGELOG.md) · 🇮🇳 [हिन्दी](../hi/CHANGELOG.md) · 🇮🇩 [Bahasa Indonesia](../id/CHANGELOG.md) · 🇬🇷 [Ελληνικά](../el/CHANGELOG.md) · 🇨🇿 [Čeština](../cs/CHANGELOG.md) · 🇷🇴 [Română](../ro/CHANGELOG.md) · 🇭🇺 [Magyar](../hu/CHANGELOG.md) · 🇧🇬 [Български](../bg/CHANGELOG.md) · 🇸🇰 [Slovenčina](../sk/CHANGELOG.md) · 🇭🇷 [Hrvatski](../hr/CHANGELOG.md)
 
 ## 0.1.1 - Windows x64 portable release preparation (unreleased)
 
@@ -99,3 +62,5 @@
 No official Windows executable, installer, portable package or other binary is
 attached. Final binary release is blocked by
 `FINAL_BINARY_RELEASE_BLOCKED: USER_PRODUCT_ICON_PENDING`.
+
+<!-- source-digest: CHANGELOG.md sha256:ff2738b58aa2dcea -->
