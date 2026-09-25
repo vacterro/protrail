@@ -1,0 +1,14 @@
+{
+  "requirements": {
+    "SRC-026:R001": {
+      "actionable": true,
+      "class": "requirement",
+      "disposition": "VERIFIED",
+      "evidence": "T-76 closed with verification evidence in LOG: review -> PASS [target: T-76] conf: high -- tag/remote/package evidence agree",
+      "text": "Publish verified v0.1.8 complete source closure: commit staged product tree, clean official package, tag, GitHub release",
+      "verification": "the Work this request created reached its own verification gate; see the T-76 VERIFY cycle in .saipen/LOG.md",
+      "work": "T-76"
+    }
+  },
+  "schema_version": 1
+}

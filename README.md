@@ -1,6 +1,6 @@
 # ProTrail
 
-**v0.1.8**
+**v0.1.9**
 
 ProTrail is a native Windows desktop utility that renders configurable cursor
 trails, click and press-and-hold effects, and motion wake geometry without ever
@@ -131,7 +131,7 @@ headless through Qt's `offscreen` platform.
 
 ## Release status
 
-**v0.1.8 is the official Windows x64 portable release.** It carries the
+**v0.1.9 is the official Windows x64 portable release.** It carries the
 operator-authorized deterministic product icon and the complete committed
 product source closure required by the canonical CMake target list.
 

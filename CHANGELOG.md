@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.1.9 - Restore the canonical release authority
+
+- Restored the root `VERSION` file as the single release-version authority,
+  reverting the v0.1.5 rename to `RELEASE_VERSION`. The rename was a workaround
+  for an MSVC `<version>` header shadow; v0.1.8 corrected the test include paths
+  that caused it, and a clean build with a root `VERSION` present now produces
+  the executable with zero errors, zero warnings and no C2059.
+- The rename also made the canonical `saipen ship` release path refuse to
+  publish, because it requires a root `VERSION` file. This release is the first
+  one produced through that canonical path, so it carries a committed release
+  receipt.
+- No product behaviour changed; the portable package is byte-identical in
+  content to v0.1.8 apart from the VERSIONINFO version resource.
+
 ## 0.1.8 - Official Windows x64 portable release closure
 
 - Committed the complete product source closure required by the canonical CMake target list: unified-window application sources, retired `MainWindow` removal, T-59 runtime repairs, corrected test include paths, and smoke/deploy hardening.

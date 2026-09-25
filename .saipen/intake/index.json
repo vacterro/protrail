@@ -79,9 +79,13 @@
     "SRC-024": {
       "linked_work": "T-69",
       "source_sha256": "a94496d2cd40418251e789519ee7f06dd6d6cc9eeb0e8d2270adbb127bfc64f2"
+    },
+    "SRC-026": {
+      "linked_work": "T-76",
+      "source_sha256": "0c0c99a1defe1c8dafc6b87b8ea055ea73a198a90c48e1f753f849e4760a64df"
     }
   },
-  "next_id": 25,
+  "next_id": 27,
   "schema_version": 1,
   "tombstones": {
     "SRC-002": {
@@ -136,6 +140,33 @@
       "source_sha256": "b917026e290d669e96150711d5883efc4462d5b62e250f73115b3f42f65a3f06",
       "status": "CLOSED",
       "unresolved": 0
+    },
+    "SRC-025": {
+      "archive_ref": ".saipen/archive/retired/SRC-025.md",
+      "linked_work": "T-73",
+      "measured_sha256": "1cf976b90623394108d956c86bbf546615c46203c1352c80683dbb71b07269d4",
+      "receipt_id": "SRC-025",
+      "retired_at": "2026-09-25T16:12:05Z",
+      "retired_by": "antigravity",
+      "retirement": {
+        "digest_mismatch": false,
+        "measured_sha256": "1cf976b90623394108d956c86bbf546615c46203c1352c80683dbb71b07269d4",
+        "note": "",
+        "reason": "SUPERSEDED_SOURCE",
+        "receipt_only": true,
+        "recorded_sha256": "1cf976b90623394108d956c86bbf546615c46203c1352c80683dbb71b07269d4",
+        "retired_at": "2026-09-25T16:12:05Z",
+        "retired_by": "antigravity",
+        "retirement_event": "E-1158",
+        "schema_version": 2,
+        "source_reason": "SUPERSEDED_SOURCE",
+        "successor": "SRC-026"
+      },
+      "retirement_event": "E-1158",
+      "schema_version": 2,
+      "source_reason": "SUPERSEDED_SOURCE",
+      "source_sha256": "1cf976b90623394108d956c86bbf546615c46203c1352c80683dbb71b07269d4",
+      "status": "INVALID"
     }
   }
 }

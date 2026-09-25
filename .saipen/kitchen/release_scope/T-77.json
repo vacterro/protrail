@@ -1,0 +1,27 @@
+{
+  "op_id": "scope-89b896f196244843ac42068687fbddb0",
+  "paths": {
+    ".saipen/saitranslate/kitchen/evidence/README_EVIDENCE.md": "7b44b9322b4ef067b181b052c819c28950024fc42fc5b704bd34d0faf459d56a",
+    ".saipen/saitranslate/kitchen/locales/README_LOCALES.md": "40643e4db77bf70f63650d5db6b56c6b6071afce4e23b11e0173ece7fd7abd50",
+    ".saipen/saitranslate/kitchen/locales/en/CHANGELOG.md": "3fb92675094e3827d923be7a7538c48b1b4887f53814b326004085853e7a1b9e",
+    ".saipen/saitranslate/kitchen/locales/hr/CHANGELOG.md": "71bcf64ea6f90a07b2a88408ca2707b5bdaa02dae6ac8fe9e0b88182148885e1",
+    ".saipen/saitranslate/kitchen/locales/hr/README.md": "edece25a651358a6ef15b06941f949b92b369aa383b6801b5094aeeaf82e9926",
+    ".saipen/saitranslate/kitchen/locales/hr/RELEASE_NOTES_v0.1.9.md": "afe0fd21464fcc37bc1904894ec559b7f2d3a144f6ba928f9b40ce423ebd2942",
+    ".saipen/saitranslate/kitchen/mirrors/README_MIRRORS.md": "ff34aeee66db84be164b2319cccda0a3ae1d1e2c4729deff28b40179cc25291f",
+    ".saipen/saitranslate/kitchen/tools/README_TOOLS.md": "a8faa9e3126173585e7f55e704ab5771cb786563bba52302f634da89e7442f0b",
+    "CHANGELOG.md": "cfc0498ba9b21eb3c37b936bbcc601916c85c7c410a1a766ff74b986c2c57fcc",
+    "README.ded.md": "93bc56ed99f4e48582b329fdd278540ae6cfd7cd656d1c8fe95b83b7d05d5e6e",
+    "README.ee.md": "c06d98ce0ed0968213f79eb64e2e39d247f703921f7dad36479ed5cdb2eee86f",
+    "README.ja.md": "c96e36b2ad9ff3de3457ebd0959aa35b75fccd6a6514a7181c7037896aad93a6",
+    "README.md": "ad35c224d08fe44a3b30c474961a3819073691626f50bc01fc218bd43a778bdb",
+    "RELEASE_NOTES_v0.1.9.md": "0ba204d37fb59fd1ea091d4cff57597e9d681c04bc053e75eef7eafa7e890d6e",
+    "VERSION": "e358d84552808a5c0bd6679d690c283b938ebe15c2bd843c898681d093213107"
+  },
+  "project_identity": "v:\\___vac\\__k\\__code\\__main__\\protrail",
+  "project_lineage": "lineage-6a51dcf887de4de492b000b2cad0e980",
+  "recorded_at": "2026-09-25T16:12:38Z",
+  "schema_version": 2,
+  "source_head": "a2d0b50a97fb79c171f014dc5d245bff375b478c",
+  "source_tree_fingerprint": "git-delta-v1:2b47c0a0ff9627b508f8cccf65f56c4e1a018bc443a3e631b638d7377da1033b",
+  "ticket": "T-77"
+}

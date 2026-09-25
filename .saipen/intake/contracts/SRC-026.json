@@ -1,0 +1,14 @@
+{
+  "clauses": {
+    "SRC-026:R001": {
+      "actionable": true,
+      "class": "requirement",
+      "text": "Publish verified v0.1.8 complete source closure: commit staged product tree, clean official package, tag, GitHub release"
+    }
+  },
+  "derived_at": "2026-09-25T15:46:32Z",
+  "derived_from": "SRC-026",
+  "interpretation_revision": 1,
+  "schema_version": 1,
+  "source_sha256": "0c0c99a1defe1c8dafc6b87b8ea055ea73a198a90c48e1f753f849e4760a64df"
+}

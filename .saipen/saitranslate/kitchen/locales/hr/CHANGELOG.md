@@ -2,6 +2,13 @@
 
 🇷🇺 [Русский](../ru/CHANGELOG.md) · 🇺🇸 [English](../en/CHANGELOG.md) · 🇪🇪 [Eesti](../et/CHANGELOG.md) · 🇯🇵 [日本語](../ja/CHANGELOG.md) · 🇷🇺 [👴 Дед](../ded/CHANGELOG.md) · 🇺🇦 [Українська](../uk/CHANGELOG.md) · 🇩🇪 [Deutsch](../de/CHANGELOG.md) · 🇫🇷 [Français](../fr/CHANGELOG.md) · 🇪🇸 [Español](../es/CHANGELOG.md) · 🇮🇹 [Italiano](../it/CHANGELOG.md) · 🇵🇹 [Português](../pt/CHANGELOG.md) · 🇳🇱 [Nederlands](../nl/CHANGELOG.md) · 🇵🇱 [Polski](../pl/CHANGELOG.md) · 🇸🇪 [Svenska](../sv/CHANGELOG.md) · 🇩🇰 [Dansk](../da/CHANGELOG.md) · 🇫🇮 [Suomi](../fi/CHANGELOG.md) · 🇳🇴 [Norsk](../no/CHANGELOG.md) · 🇨🇳 [中文](../zh/CHANGELOG.md) · 🇰🇷 [한국어](../ko/CHANGELOG.md) · 🇹🇭 [ไทย](../th/CHANGELOG.md) · 🇻🇳 [Tiếng Việt](../vi/CHANGELOG.md) · 🇸🇦 [العربية](../ar/CHANGELOG.md) · 🇮🇱 [עברית](../he/CHANGELOG.md) · 🇹🇷 [Türkçe](../tr/CHANGELOG.md) · 🇮🇳 [हिन्दी](../hi/CHANGELOG.md) · 🇮🇩 [Bahasa Indonesia](../id/CHANGELOG.md) · 🇬🇷 [Ελληνικά](../el/CHANGELOG.md) · 🇨🇿 [Čeština](../cs/CHANGELOG.md) · 🇷🇴 [Română](../ro/CHANGELOG.md) · 🇭🇺 [Magyar](../hu/CHANGELOG.md) · 🇧🇬 [Български](../bg/CHANGELOG.md) · 🇸🇰 [Slovenčina](../sk/CHANGELOG.md) · 🇭🇷 [Hrvatski](CHANGELOG.md)
 
+## 0.1.9 - Obnova kanonskog izvora verzije izdanja
+
+- Korijenska datoteka `VERSION` ponovno je jedini izvor broja verzije izdanja; vraćeno je preimenovanje iz `RELEASE_VERSION` uvedeno u v0.1.5.
+- To preimenovanje bilo je zaobilazno rješenje za zasjenjivanje MSVC zaglavlja `<version>`. Izdanje v0.1.8 ispravilo je putove uključivanja testova koji su ga uzrokovali, pa čista izgradnja s korijenskom datotekom `VERSION` sada daje izvršnu datoteku bez pogrešaka i upozorenja te bez C2059.
+- Preimenovanje je također onemogućavalo kanonsku putanju objave `saipen ship`, koja zahtijeva korijensku datoteku `VERSION`. Ovo je prvo izdanje objavljeno tom putanjom pa nosi predanu potvrdu izdanja.
+- Ponašanje proizvoda nije se promijenilo; prijenosni paket sadržajno je jednak v0.1.8 osim resursa VERSIONINFO koji sada navodi 0.1.9.
+
 ## 0.1.8 - Službeno prijenosno izdanje Windows x64 — potpuno zatvaranje
 
 - Predano je potpuno izvorno zatvaranje proizvoda koje zahtijeva kanonski CMake popis ciljeva: izvori objedinjenog prozora, uklanjanje povučenog `MainWindow`-a, T-59 popravci izvršavanja, ispravljeni putovi uključivanja testova te ojačane provjere dima i postavljanja.

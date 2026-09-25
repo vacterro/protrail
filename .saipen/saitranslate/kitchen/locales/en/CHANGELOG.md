@@ -2,6 +2,20 @@
 
 🇷🇺 [Русский](../ru/CHANGELOG.md) · 🇺🇸 [English](CHANGELOG.md) · 🇪🇪 [Eesti](../et/CHANGELOG.md) · 🇯🇵 [日本語](../ja/CHANGELOG.md) · 🇷🇺 [👴 Дед](../ded/CHANGELOG.md) · 🇺🇦 [Українська](../uk/CHANGELOG.md) · 🇩🇪 [Deutsch](../de/CHANGELOG.md) · 🇫🇷 [Français](../fr/CHANGELOG.md) · 🇪🇸 [Español](../es/CHANGELOG.md) · 🇮🇹 [Italiano](../it/CHANGELOG.md) · 🇵🇹 [Português](../pt/CHANGELOG.md) · 🇳🇱 [Nederlands](../nl/CHANGELOG.md) · 🇵🇱 [Polski](../pl/CHANGELOG.md) · 🇸🇪 [Svenska](../sv/CHANGELOG.md) · 🇩🇰 [Dansk](../da/CHANGELOG.md) · 🇫🇮 [Suomi](../fi/CHANGELOG.md) · 🇳🇴 [Norsk](../no/CHANGELOG.md) · 🇨🇳 [中文](../zh/CHANGELOG.md) · 🇰🇷 [한국어](../ko/CHANGELOG.md) · 🇹🇭 [ไทย](../th/CHANGELOG.md) · 🇻🇳 [Tiếng Việt](../vi/CHANGELOG.md) · 🇸🇦 [العربية](../ar/CHANGELOG.md) · 🇮🇱 [עברית](../he/CHANGELOG.md) · 🇹🇷 [Türkçe](../tr/CHANGELOG.md) · 🇮🇳 [हिन्दी](../hi/CHANGELOG.md) · 🇮🇩 [Bahasa Indonesia](../id/CHANGELOG.md) · 🇬🇷 [Ελληνικά](../el/CHANGELOG.md) · 🇨🇿 [Čeština](../cs/CHANGELOG.md) · 🇷🇴 [Română](../ro/CHANGELOG.md) · 🇭🇺 [Magyar](../hu/CHANGELOG.md) · 🇧🇬 [Български](../bg/CHANGELOG.md) · 🇸🇰 [Slovenčina](../sk/CHANGELOG.md) · 🇭🇷 [Hrvatski](../hr/CHANGELOG.md)
 
+## 0.1.9 - Restore the canonical release authority
+
+- Restored the root `VERSION` file as the single release-version authority,
+  reverting the v0.1.5 rename to `RELEASE_VERSION`. The rename was a workaround
+  for an MSVC `<version>` header shadow; v0.1.8 corrected the test include paths
+  that caused it, and a clean build with a root `VERSION` present now produces
+  the executable with zero errors, zero warnings and no C2059.
+- The rename also made the canonical `saipen ship` release path refuse to
+  publish, because it requires a root `VERSION` file. This release is the first
+  one produced through that canonical path, so it carries a committed release
+  receipt.
+- No product behaviour changed; the portable package is byte-identical in
+  content to v0.1.8 apart from the VERSIONINFO version resource.
+
 ## 0.1.1 - Windows x64 portable release preparation (unreleased)
 
 - Made the root `VERSION` file the single release-version authority: CMake
