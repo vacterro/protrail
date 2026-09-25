@@ -2,6 +2,12 @@
 
 🇷🇺 [Русский](../ru/CHANGELOG.md) · 🇺🇸 [English](../en/CHANGELOG.md) · 🇪🇪 [Eesti](../et/CHANGELOG.md) · 🇯🇵 [日本語](../ja/CHANGELOG.md) · 🇷🇺 [👴 Дед](../ded/CHANGELOG.md) · 🇺🇦 [Українська](../uk/CHANGELOG.md) · 🇩🇪 [Deutsch](../de/CHANGELOG.md) · 🇫🇷 [Français](../fr/CHANGELOG.md) · 🇪🇸 [Español](../es/CHANGELOG.md) · 🇮🇹 [Italiano](../it/CHANGELOG.md) · 🇵🇹 [Português](../pt/CHANGELOG.md) · 🇳🇱 [Nederlands](../nl/CHANGELOG.md) · 🇵🇱 [Polski](../pl/CHANGELOG.md) · 🇸🇪 [Svenska](../sv/CHANGELOG.md) · 🇩🇰 [Dansk](../da/CHANGELOG.md) · 🇫🇮 [Suomi](../fi/CHANGELOG.md) · 🇳🇴 [Norsk](../no/CHANGELOG.md) · 🇨🇳 [中文](../zh/CHANGELOG.md) · 🇰🇷 [한국어](../ko/CHANGELOG.md) · 🇹🇭 [ไทย](../th/CHANGELOG.md) · 🇻🇳 [Tiếng Việt](../vi/CHANGELOG.md) · 🇸🇦 [العربية](../ar/CHANGELOG.md) · 🇮🇱 [עברית](../he/CHANGELOG.md) · 🇹🇷 [Türkçe](../tr/CHANGELOG.md) · 🇮🇳 [हिन्दी](../hi/CHANGELOG.md) · 🇮🇩 [Bahasa Indonesia](../id/CHANGELOG.md) · 🇬🇷 [Ελληνικά](../el/CHANGELOG.md) · 🇨🇿 [Čeština](../cs/CHANGELOG.md) · 🇷🇴 [Română](../ro/CHANGELOG.md) · 🇭🇺 [Magyar](../hu/CHANGELOG.md) · 🇧🇬 [Български](../bg/CHANGELOG.md) · 🇸🇰 [Slovenčina](../sk/CHANGELOG.md) · 🇭🇷 [Hrvatski](CHANGELOG.md)
 
+## 0.1.6 - Službeno prijenosno izdanje Windows x64 — oporavak
+
+- Dodan je potrebni izvorni `src/app/topology_retry.h` kako čisti release build više ne pada tijekom CMake generiranja.
+- Nepromjenjive oznake `v0.1.3`, `v0.1.4` i `v0.1.5` su sačuvane; ovo izdanje sadrži odobreni simbol i potpuno zatvoreni izvor.
+- Pripremljen je cjevovod za nepotpisani prijenosni paket; provjere pakiranja, dima, kontrolne sume i objave ostaju autoritativne.
+
 ## 0.1.5 - Službeno prijenosno izdanje Windows x64 — oporavak
 
 - Korijenski izvor verzije preimenovan je iz `VERSION` u `RELEASE_VERSION`, čime je uklonjeno prekrivanje C++ zaglavlja `<version>` u Windows sustavu.

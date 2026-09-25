@@ -1,3 +1,3 @@
 # ProTrail Mirrors Kitchen
 
-**v0.1.5**
+**v0.1.6**

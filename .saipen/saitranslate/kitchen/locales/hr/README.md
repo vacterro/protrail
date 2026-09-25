@@ -2,7 +2,7 @@
 
 🇷🇺 [Русский](../ru/README.md) · 🇺🇸 [English](../en/README.md) · 🇪🇪 [Eesti](../et/README.md) · 🇯🇵 [日本語](../ja/README.md) · 🇷🇺 [👴 Дед](../ded/README.md) · 🇺🇦 [Українська](../uk/README.md) · 🇩🇪 [Deutsch](../de/README.md) · 🇫🇷 [Français](../fr/README.md) · 🇪🇸 [Español](../es/README.md) · 🇮🇹 [Italiano](../it/README.md) · 🇵🇹 [Português](../pt/README.md) · 🇳🇱 [Nederlands](../nl/README.md) · 🇵🇱 [Polski](../pl/README.md) · 🇸🇪 [Svenska](../sv/README.md) · 🇩🇰 [Dansk](../da/README.md) · 🇫🇮 [Suomi](../fi/README.md) · 🇳🇴 [Norsk](../no/README.md) · 🇨🇳 [中文](../zh/README.md) · 🇰🇷 [한국어](../ko/README.md) · 🇹🇭 [ไทย](../th/README.md) · 🇻🇳 [Tiếng Việt](../vi/README.md) · 🇸🇦 [العربية](../ar/README.md) · 🇮🇱 [עברית](../he/README.md) · 🇹🇷 [Türkçe](../tr/README.md) · 🇮🇳 [हिन्दी](../hi/README.md) · 🇮🇩 [Bahasa Indonesia](../id/README.md) · 🇬🇷 [Ελληνικά](../el/README.md) · 🇨🇿 [Čeština](../cs/README.md) · 🇷🇴 [Română](../ro/README.md) · 🇭🇺 [Magyar](../hu/README.md) · 🇧🇬 [Български](../bg/README.md) · 🇸🇰 [Slovenčina](../sk/README.md) · 🇭🇷 [Hrvatski](README.md)
 
-**v0.1.5**
+**v0.1.6**
 
 ProTrail je izvorna Windows aplikacija za radnu površinu koja prikazuje prilagodljive tragove kursora, učinke klika i pritiska i držanja gumba te geometriju buđenja pri kretanju, a pritom nikada ne presreće, ne odgađa niti guta klikove miša. Riječ je o aplikaciji Qt 6 / C++20 koja putem Direct2D i DirectComposition prikazuje sadržaj u slojevima koji propuštaju klikove za svaki monitor.
 
@@ -81,7 +81,7 @@ Skup testova registrira cijelu CTest matricu za trag, iskrice, klik, držanje/bu
 
 ## Status izdanja
 
-**v0.1.5 službeni je kandidat prijenosnog izdanja za Windows x64.
+**v0.1.6 službeni je kandidat prijenosnog izdanja za Windows x64.
 Operatorijski odobreni deterministički proizvodni simbol ugrađen je, a
 izvorni dijelovi objavljeni su.** Prijenosni binarni paket još uvijek prolazi
 službenu provjeru pakiranja, dima, kontrolne sume i objave.

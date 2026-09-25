@@ -1,6 +1,12 @@
 # Changelog
 
-## 0.1.5 - Official Windows x64 portable release recovery
+## 0.1.6 - Official Windows x64 portable release recovery
+
+- Committed the required `src/app/topology_retry.h` source so clean release builds no longer fail during CMake generation.
+- Preserved immutable `v0.1.3`, `v0.1.4`, and `v0.1.5` tags; this release carries the approved icon and the complete source closure.
+- Prepared the unsigned portable package pipeline; package smoke, checksum, and publication gates remain authoritative.
+
+## 0.1.5 - Incomplete package build record (superseded by v0.1.6)
 
 - Renamed the root version authority from `VERSION` to `RELEASE_VERSION`, removing the Windows C++ `<version>` header shadowing failure.
 - Preserved immutable `v0.1.3` and `v0.1.4` tags; this release carries the approved icon and corrected version-file layout.

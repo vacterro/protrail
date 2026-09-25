@@ -48,7 +48,7 @@ not configured; the portable release is explicitly unsigned.
    taskbar, window, and enabled/disabled tray states.
 3. Run the official packaging pipeline from the clean, tagged tree:
    `powershell -NoProfile -ExecutionPolicy Bypass -File tools\release\package.ps1`
-4. Publish the generated `ProTrail-v0.1.5-win-x64-portable.zip` and
+4. Publish the generated `ProTrail-v0.1.6-win-x64-portable.zip` and
    `SHA256SUMS.txt` only after the pipeline and tagged-tree verification pass.
 
 This blocker is resolved. Source cleanup, tests, CI, documentation, and
