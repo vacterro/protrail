@@ -1,4 +1,14 @@
 {
-  "requirements": {},
+  "requirements": {
+    "SRC-020:R001": {
+      "actionable": true,
+      "class": "requirement",
+      "disposition": "VERIFIED",
+      "evidence": "E-908",
+      "text": "Adopt saitranslate role and handle current assignment",
+      "verification": "E-908",
+      "work": "T-64"
+    }
+  },
   "schema_version": 1
 }

@@ -2,7 +2,7 @@
 
 🇷🇺 [Русский](../ru/README.md) · 🇺🇸 [English](../en/README.md) · 🇪🇪 [Eesti](../et/README.md) · 🇯🇵 [日本語](../ja/README.md) · 🇷🇺 [👴 Дед](../ded/README.md) · 🇺🇦 [Українська](../uk/README.md) · 🇩🇪 [Deutsch](../de/README.md) · 🇫🇷 [Français](../fr/README.md) · 🇪🇸 [Español](../es/README.md) · 🇮🇹 [Italiano](../it/README.md) · 🇵🇹 [Português](../pt/README.md) · 🇳🇱 [Nederlands](../nl/README.md) · 🇵🇱 [Polski](../pl/README.md) · 🇸🇪 [Svenska](../sv/README.md) · 🇩🇰 [Dansk](../da/README.md) · 🇫🇮 [Suomi](../fi/README.md) · 🇳🇴 [Norsk](../no/README.md) · 🇨🇳 [中文](../zh/README.md) · 🇰🇷 [한국어](../ko/README.md) · 🇹🇭 [ไทย](../th/README.md) · 🇻🇳 [Tiếng Việt](../vi/README.md) · 🇸🇦 [العربية](../ar/README.md) · 🇮🇱 [עברית](../he/README.md) · 🇹🇷 [Türkçe](../tr/README.md) · 🇮🇳 [हिन्दी](../hi/README.md) · 🇮🇩 [Bahasa Indonesia](../id/README.md) · 🇬🇷 [Ελληνικά](../el/README.md) · 🇨🇿 [Čeština](../cs/README.md) · 🇷🇴 [Română](../ro/README.md) · 🇭🇺 [Magyar](../hu/README.md) · 🇧🇬 [Български](../bg/README.md) · 🇸🇰 [Slovenčina](../sk/README.md) · 🇭🇷 [Hrvatski](README.md)
 
-**v0.1.2**
+**v0.1.4**
 
 ProTrail je izvorna Windows aplikacija za radnu površinu koja prikazuje prilagodljive tragove kursora, učinke klika i pritiska i držanja gumba te geometriju buđenja pri kretanju, a pritom nikada ne presreće, ne odgađa niti guta klikove miša. Riječ je o aplikaciji Qt 6 / C++20 koja putem Direct2D i DirectComposition prikazuje sadržaj u slojevima koji propuštaju klikove za svaki monitor.
 
@@ -81,12 +81,10 @@ Skup testova registrira cijelu CTest matricu za trag, iskrice, klik, držanje/bu
 
 ## Status izdanja
 
-**v0.1.2 objavljeno je izdanje samo s izvornim kodom i hrvatskim prijevodom
-dokumenacije. v0.1.1 ostaje prvo binarno izdanje za Windows x64, ali nije
-objavljeno kao službena binarna distribucija.** Dosad nije objavljena službena
-Windows EXE datoteka, instalacijski program, prijenosni arhiv, binarna datoteka
-za upravitelj paketa ni potpisana binarna datoteka, a CI namjerno ne objavljuje
-binarne datoteke.
+**v0.1.4 službeni je kandidat prijenosnog izdanja za Windows x64.
+Operatorijski odobreni deterministički proizvodni simbol ugrađen je, a
+izvorni dijelovi objavljeni su.** Prijenosni binarni paket još uvijek prolazi
+službenu provjeru pakiranja, dima, kontrolne sume i objave.
 
 Službena binarna distribucija za Windows ovisi o dostavi i prihvaćanju konačne ikone proizvoda ProTrail
 (`FINAL_BINARY_RELEASE_BLOCKED: USER_PRODUCT_ICON_PENDING`, vidi

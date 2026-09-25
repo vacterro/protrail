@@ -1,0 +1,41 @@
+// ProTrail Windows product resource. Generated into the build tree by
+// configure_file(); every version literal comes from the root VERSION file
+// through project(VERSION), so the PE metadata cannot drift from the release.
+//
+// CompanyName and LegalCopyright are deliberately absent: the repository
+// establishes no publisher or legal entity, and inventing one is forbidden.
+
+#include <winres.h>
+
+// Application icon. Qt's Windows platform plugin uses the resource named
+// IDI_ICON1 as the default window/taskbar icon, and ptd::ui::branding reads
+// the same resource for the tray, so the PE resource is the single icon
+// authority.
+@PROTRAIL_RC_ICON_LINE@
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION     @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0
+ PRODUCTVERSION  @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0
+ FILEFLAGSMASK   VS_FFI_FILEFLAGSMASK
+ FILEFLAGS       0x0L
+ FILEOS          VOS_NT_WINDOWS32
+ FILETYPE        VFT_APP
+ FILESUBTYPE     VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "ProductName",      "ProTrail"
+            VALUE "FileDescription",  "ProTrail"
+            VALUE "FileVersion",      "@PROJECT_VERSION@"
+            VALUE "ProductVersion",   "@PROJECT_VERSION@"
+            VALUE "InternalName",     "protrail"
+            VALUE "OriginalFilename", "protrail.exe"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

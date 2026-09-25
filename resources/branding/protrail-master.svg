@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="trail" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#1dcdf0"/>
+      <stop offset="1" stop-color="#ebfdff"/>
+    </linearGradient>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="18"/>
+    </filter>
+  </defs>
+  <rect x="80" y="80" width="864" height="864" rx="190" fill="#0a1020" stroke="#2ed3ee" stroke-width="14"/>
+  <path d="M210 790 C410 690 665 400 790 220" fill="none" stroke="#1dcdf0" stroke-width="108" stroke-linecap="round" opacity=".32" filter="url(#glow)"/>
+  <path d="M210 790 C410 690 665 400 790 220" fill="none" stroke="url(#trail)" stroke-width="42" stroke-linecap="round"/>
+  <path d="M210 790 C410 690 665 400 790 220" fill="none" stroke="#ebfdff" stroke-width="18" stroke-linecap="round"/>
+  <circle cx="795" cy="225" r="51" fill="#ffcf57" stroke="#fff4be" stroke-width="8"/>
+  <path d="M568 250 L815 205 L755 470 L690 350 L585 430 Z" fill="#f2fcff" stroke="#0a192e" stroke-width="18" stroke-linejoin="round"/>
+  <path d="M640 330 L760 300" stroke="#47d7ef" stroke-width="14" stroke-linecap="round"/>
+  <circle cx="220" cy="780" r="30" fill="#ffc443"/>
+</svg>

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.4 - Official Windows x64 portable release recovery
+
+- Corrected the incomplete `v0.1.3` publication record without moving or deleting its immutable tag; the actual icon release is cut as `v0.1.4`.
+- Integrated the operator-authorized deterministic ProTrail product icon across the PE resource, window/taskbar, and tray surfaces.
+- Added multi-resolution `protrail.ico`, master SVG/PNG artwork, and exact SHA-256 approval record.
+- Prepared the unsigned portable package pipeline; package smoke, checksum, and publication gates remain authoritative.
+
+## 0.1.3 - Incomplete publication record (superseded by v0.1.4)
+
+- The immutable `v0.1.3` tag points to the pre-icon closure commit; no tag was moved or deleted.
+
 ## 0.1.2 - Croatian documentation patch (source-only)
 
 - Added the complete Croatian translation set for the seven maintained documentation surfaces under the `hr` locale.

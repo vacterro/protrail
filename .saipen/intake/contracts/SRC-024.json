@@ -1,0 +1,14 @@
+{
+  "clauses": {
+    "SRC-024:R001": {
+      "actionable": true,
+      "class": "requirement",
+      "text": "Read-only audit T-65 / SRC-021: compare seven top-level English docs with Croatian targets under .saipen/saitranslate/kitchen/locales/hr for completeness, language quality, meaning, preserved commands/paths/code/links/Markdown, and no appended digest; do not edit; report exact file:line findings and PASS/FAIL"
+    }
+  },
+  "derived_at": "2026-09-25T15:01:08Z",
+  "derived_from": "SRC-024",
+  "interpretation_revision": 1,
+  "schema_version": 1,
+  "source_sha256": "a94496d2cd40418251e789519ee7f06dd6d6cc9eeb0e8d2270adbb127bfc64f2"
+}

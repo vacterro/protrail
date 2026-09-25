@@ -1,0 +1,14 @@
+{
+  "requirements": {
+    "SRC-024:R001": {
+      "actionable": true,
+      "class": "requirement",
+      "disposition": "VERIFIED",
+      "evidence": "E-934",
+      "text": "Read-only audit T-65 / SRC-021: compare seven top-level English docs with Croatian targets under .saipen/saitranslate/kitchen/locales/hr for completeness, language quality, meaning, preserved commands/paths/code/links/Markdown, and no appended digest; do not edit; report exact file:line findings and PASS/FAIL",
+      "verification": "E-934",
+      "work": "T-69"
+    }
+  },
+  "schema_version": 1
+}

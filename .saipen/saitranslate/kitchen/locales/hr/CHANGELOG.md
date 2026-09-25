@@ -2,6 +2,19 @@
 
 🇷🇺 [Русский](../ru/CHANGELOG.md) · 🇺🇸 [English](../en/CHANGELOG.md) · 🇪🇪 [Eesti](../et/CHANGELOG.md) · 🇯🇵 [日本語](../ja/CHANGELOG.md) · 🇷🇺 [👴 Дед](../ded/CHANGELOG.md) · 🇺🇦 [Українська](../uk/CHANGELOG.md) · 🇩🇪 [Deutsch](../de/CHANGELOG.md) · 🇫🇷 [Français](../fr/CHANGELOG.md) · 🇪🇸 [Español](../es/CHANGELOG.md) · 🇮🇹 [Italiano](../it/CHANGELOG.md) · 🇵🇹 [Português](../pt/CHANGELOG.md) · 🇳🇱 [Nederlands](../nl/CHANGELOG.md) · 🇵🇱 [Polski](../pl/CHANGELOG.md) · 🇸🇪 [Svenska](../sv/CHANGELOG.md) · 🇩🇰 [Dansk](../da/CHANGELOG.md) · 🇫🇮 [Suomi](../fi/CHANGELOG.md) · 🇳🇴 [Norsk](../no/CHANGELOG.md) · 🇨🇳 [中文](../zh/CHANGELOG.md) · 🇰🇷 [한국어](../ko/CHANGELOG.md) · 🇹🇭 [ไทย](../th/CHANGELOG.md) · 🇻🇳 [Tiếng Việt](../vi/CHANGELOG.md) · 🇸🇦 [العربية](../ar/CHANGELOG.md) · 🇮🇱 [עברית](../he/CHANGELOG.md) · 🇹🇷 [Türkçe](../tr/CHANGELOG.md) · 🇮🇳 [हिन्दी](../hi/CHANGELOG.md) · 🇮🇩 [Bahasa Indonesia](../id/CHANGELOG.md) · 🇬🇷 [Ελληνικά](../el/CHANGELOG.md) · 🇨🇿 [Čeština](../cs/CHANGELOG.md) · 🇷🇴 [Română](../ro/CHANGELOG.md) · 🇭🇺 [Magyar](../hu/CHANGELOG.md) · 🇧🇬 [Български](../bg/CHANGELOG.md) · 🇸🇰 [Slovenčina](../sk/CHANGELOG.md) · 🇭🇷 [Hrvatski](CHANGELOG.md)
 
+## 0.1.4 - Službeno prijenosno izdanje Windows x64 — oporavak
+
+- Ispravljen je nepotpuni zapis izdanja v0.1.3 bez pomicanja ili brisanja njegove nepromjenjive oznake; stvarno izdanje sa simbolom je v0.1.4.
+- Ugrađen je operatorijski odobreni deterministički simbol ProTrail u PE resurs, prozor, traku zadataka i sistemsku traku.
+- Dodani su višerazlučivi `protrail.ico`, glavni SVG/PNG izvor i točan zapis SHA-256 odobrenja.
+- Pripremljen je cjevovod za nepotpisani prijenosni paket; provjere pakiranja, dima, kontrolne sume i objave ostaju autoritativne.
+
+## 0.1.3 - Priprema službenog prijenosnog izdanja za Windows x64
+
+- Ugrađen je operatorijski odobreni deterministički simbol proizvoda ProTrail u PE resurs, prozor, traku zadataka i sistemsku traku.
+- Dodani su višerazlučivi `protrail.ico`, glavni SVG/PNG izvor i točan zapis SHA-256 odobrenja.
+- Pripremljen je cjevovod za nepotpisani prijenosni paket; provjere pakiranja, dima, kontrolne sume i objave ostaju autoritativne.
+
 ## 0.1.2 - Hrvatska dokumentacijska zakrpa (samo izvorni kod)
 
 - Dodan je cjelovit hrvatski prijevod sedam održavanih dokumentacijskih površina pod lokalom `hr`.
