@@ -1,6 +1,12 @@
 # Changelog
 
-## 0.1.6 - Official Windows x64 portable release recovery
+## 0.1.7 - Official Windows x64 portable release recovery
+
+- Committed the remaining `src/ui/branding.h` and `src/ui/branding.cpp` sources required by the clean CMake target list.
+- Preserved immutable `v0.1.3` through `v0.1.6` tags; this release closes the full source closure with approved branding.
+- Prepared the unsigned portable package pipeline; package smoke, checksum, and publication gates remain authoritative.
+
+## 0.1.6 - Incomplete package build record (superseded by v0.1.7)
 
 - Committed the required `src/app/topology_retry.h` source so clean release builds no longer fail during CMake generation.
 - Preserved immutable `v0.1.3`, `v0.1.4`, and `v0.1.5` tags; this release carries the approved icon and the complete source closure.
