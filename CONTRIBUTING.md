@@ -23,4 +23,4 @@ The project treats MSVC warnings as errors. Keep persisted configuration changes
 
 Keep changes focused, explain user-visible behavior, include validation results, and do not commit generated build directories, local evidence dumps, credentials, or machine-specific paths. Do not add a license file without an explicit project decision.
 
-Verification binaries may be built locally, but this wave does not publish binaries. The final product icon is required before any official Windows executable or installer release.
+Verification binaries may be built locally. The only supported way to produce a distributable package is `tools\release\package.ps1` (see the README's Packaging section); use `-Rehearsal` to exercise it before the final product icon exists. The final product icon is required before any official Windows executable release.

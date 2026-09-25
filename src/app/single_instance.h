@@ -19,14 +19,14 @@ struct SingleInstanceConfig {
     std::wstring message_name = L"ProTrail_ActivateInstance";
     // T-032: a second registered message for a launch that only wants to
     // hand its presence over -- a Windows autostart launch that finds an
-    // owner must NOT request the Main/Settings window, so requesting it and
+    // owner must NOT request the product window, so requesting it and
     // suppressing it later is not good enough. Same request identity, same
     // per-request ACK, different owner handler.
     std::wstring presence_message_name = L"ProTrail_PresenceInstance";
 };
 
 // T-032: what the claimant is asking the existing owner for.
-//   Interactive  restore/activate the Main/Settings window (today's
+//   Interactive  restore/activate the product window (today's
 //                behaviour, every manual launch).
 //   Quiet        acknowledge that a ProTrail instance is alive; never
 //                show, raise or activate any window and never steal focus.
@@ -49,7 +49,7 @@ enum class ClaimStatus {
 // Delivered          the existing owner PROCESSED the activation callback:
 //                    the claimant's unique per-request ACK event was
 //                    signaled by the owner after it restored/activated the
-//                    canonical SettingsWindow. PostMessageW success alone
+//                    canonical ProTrail window. PostMessageW success alone
 //                    is never delivery.
 // OwnerStarting      owner alive and positively owning the protocol for
 //                    the whole readiness budget (the wait watches the

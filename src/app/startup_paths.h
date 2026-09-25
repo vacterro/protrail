@@ -12,6 +12,13 @@ struct StartupPaths {
     std::string error_message;
 };
 
+enum class StartupLogBootstrapStatus : int {
+    Ready = 0,
+    Failed = 1,
+};
+
+constexpr int kStartupLogFailureExitCode = 2;
+
 // Pure deterministic path resolution for testing and runtime.
 // When smoke_auto_exit_str is non-null/non-empty and parses to > 0:
 //   - If smoke_state_dir_str is non-null/non-empty:
@@ -27,5 +34,11 @@ StartupPaths resolve_startup_paths(
 
 // Environment-reading overload for production wWinMain().
 StartupPaths resolve_startup_paths();
+
+// Initializes the log sink from the already-resolved explicit path. It never
+// resolves a substitute/default path; both normal and smoke startup fail
+// closed when this bootstrap step fails.
+StartupLogBootstrapStatus initialize_startup_logging(
+    const StartupPaths& paths);
 
 } // namespace ptd

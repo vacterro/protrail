@@ -760,41 +760,62 @@ void TrailEffect::collect_sparkle_slots(const CursorHistory& history,
                                         const TrailPoint* live_head,
                                         std::vector<SparklePoint>& out) const {
     out.clear();
-    if (!prepare_points(history, now_ns, live_head)) return;
-    for_each_sparkle_slot(scratch_,
-                          [&](const SparklePoint& sp) { out.push_back(sp); });
+    if (!prepare_points(history, now_ns, live_head)) {
+        canonical_pieces_.clear();
+        canonical_arc_length_px_ = 0.0f;
+        return;
+    }
+    materialize_canonical_pieces(scratch_);
+    for_each_sparkle_slot(scratch_, [&](const SparklePoint& sp) { out.push_back(sp); });
 }
 
+// Smoothed traversal uses the exact cached pieces consumed by the renderer.
+// Direct polyline traversal streams raw chords without allocating a duplicate.
 template<typename Fn>
 void TrailEffect::for_each_canonical_piece(const std::vector<BuildPoint>& pts,
                                             Fn&& fn) const {
-    const std::size_t n = pts.size();
-    if (n < 2) return;
-    if (config_.smoothing <= 0.0f) {
-        int64_t group_key = -1, group_start_ts = 0;
-        float group_arc = 0.0f;
-        bool group_unstable = false;
-        for (std::size_t i = 1; i < n; ++i) {
-            const BuildPoint& a = pts[i - 1];
-            const BuildPoint& b = pts[i];
-            const int64_t key = a.ts / kSparkleOccurrenceNs;
-            if (key != group_key) {
-                group_key = key;
-                group_start_ts = a.ts;
-                group_arc = a.occ_arc0;
-                group_unstable = a.synthetic;
-            }
-            // The newest source span remains unfinalized until another real
-            // sample arrives. Synthetic tail and live-head spans never seed.
-            const bool unfinalized = group_unstable || a.synthetic || b.live || b.synthetic
-                || i + 1 >= n || pts[i + 1].live;
-            fn(CanonicalPiece{a.x, a.y, a.t, b.x, b.y, b.t,
-                              group_start_ts, group_arc, unfinalized});
-            const float dx = b.x - a.x, dy = b.y - a.y;
-            group_arc += std::sqrt(dx * dx + dy * dy);
-        }
+    if (config_.smoothing > 0.0f) {
+        for (const CanonicalPiece& piece : canonical_pieces_) fn(piece);
         return;
     }
+
+    int64_t group_key = -1;
+    int64_t group_start_ts = 0;
+    float group_arc = 0.0f;
+    bool group_unstable = false;
+    for (std::size_t i = 1; i < pts.size(); ++i) {
+        const BuildPoint& a = pts[i - 1];
+        const BuildPoint& b = pts[i];
+        const int64_t key = a.ts / kSparkleOccurrenceNs;
+        if (key != group_key) {
+            group_key = key;
+            group_start_ts = a.ts;
+            group_arc = a.occ_arc0;
+            group_unstable = a.synthetic;
+        }
+        const bool unfinalized = group_unstable || a.synthetic || b.live || b.synthetic
+            || i + 1 >= pts.size() || pts[i + 1].live;
+        fn(CanonicalPiece{a.x, a.y, a.t, b.x, b.y, b.t,
+                          group_start_ts, group_arc, unfinalized});
+        const float dx = b.x - a.x;
+        const float dy = b.y - a.y;
+        group_arc += std::sqrt(dx * dx + dy * dy);
+    }
+}
+
+void TrailEffect::materialize_canonical_pieces(const std::vector<BuildPoint>& pts) const {
+    canonical_pieces_.clear();
+    canonical_arc_length_px_ = 0.0f;
+    if (config_.smoothing <= 0.0f || pts.size() < 2) return;
+    ++canonical_curve_build_count_;
+    canonical_pieces_.reserve((pts.size() - 1)
+        * static_cast<std::size_t>(kCurveSubdivisionCeiling));
+    materialize_canonical_catmull_rom(pts, canonical_pieces_);
+}
+
+void TrailEffect::materialize_canonical_catmull_rom(
+    const std::vector<BuildPoint>& pts, std::vector<CanonicalPiece>& out) const {
+    const std::size_t n = pts.size();
     int64_t group_key = -1, group_start_ts = 0;
     float group_arc = 0.0f;
     bool group_unstable = false;
@@ -823,23 +844,22 @@ void TrailEffect::for_each_canonical_piece(const std::vector<BuildPoint>& pts,
         float px = p1.x, py = p1.y, prev_t = p1.t;
         float occ_arc = group_arc;
         for (int s = 1; s <= subdivisions; ++s) {
-            const float u = static_cast<float>(s)
-                          / static_cast<float>(subdivisions);
+            const float u = static_cast<float>(s) / static_cast<float>(subdivisions);
             float qx, qy;
-            bezier_point(p1.x, p1.y, c1x, c1y, c2x, c2y,
-                         p2.x, p2.y, u, qx, qy);
+            bezier_point(p1.x, p1.y, c1x, c1y, c2x, c2y, p2.x, p2.y, u, qx, qy);
             const float qt = p1.t + (p2.t - p1.t) * u;
-            fn(CanonicalPiece{px, py, prev_t, qx, qy, qt,
-                              group_start_ts, occ_arc, unfinalized});
+            out.push_back(CanonicalPiece{px, py, prev_t, qx, qy, qt,
+                                         group_start_ts, occ_arc, unfinalized});
             const float dx = qx - px, dy = qy - py;
-            occ_arc += std::sqrt(dx * dx + dy * dy);
-            px = qx;
-            py = qy;
-            prev_t = qt;
+            const float piece_length = std::sqrt(dx * dx + dy * dy);
+            occ_arc += piece_length;
+            canonical_arc_length_px_ += piece_length;
+            px = qx; py = qy; prev_t = qt;
         }
         group_arc = occ_arc;
     }
 }
+
 
 // Stable per-occurrence sparkle lattice. Only source spans with immutable
 // Catmull-Rom neighbor context can emit. A fixed phase and ordinal in each
@@ -847,7 +867,7 @@ void TrailEffect::for_each_canonical_piece(const std::vector<BuildPoint>& pts,
 // visible total arc never enter the position or seed.
 template<typename Fn>
 void TrailEffect::for_each_sparkle_slot(const std::vector<BuildPoint>& pts,
-                                        Fn&& fn) const {
+                                       Fn&& fn) const {
     if (config_.sparkle_mode == TrailSparkleMode::Off || pts.size() < 3) return;
     const SparkleModeParams params = sparkle_params(config_.sparkle_mode);
     const float spacing = std::max(2.0f, kSparkleBaseSpacingPx / params.density);
@@ -866,9 +886,8 @@ void TrailEffect::for_each_sparkle_slot(const std::vector<BuildPoint>& pts,
         return std::pair<int, int>{first, after};
     };
 
-    // Count algebraically, without visiting every candidate on a huge path.
-    // The second pass resolves only the newest 128 candidates; older slots
-    // expire from the bounded output without renumbering surviving ones.
+    // Count algebraically over the cached canonical pieces, then resolve only
+    // the newest 128 candidates without recomputing the curve.
     int64_t total = 0;
     for_each_canonical_piece(pts, [&](const CanonicalPiece& piece) {
         const auto [first, after] = slot_range(piece);
@@ -1075,32 +1094,47 @@ void TrailEffect::build_geometry(const CursorHistory& history,
                                  TrailGeometrySink& sink) const {
     (void)history_count_bound;  // scratch_ is self-bounding (see header)
     if (!prepare_points(history, now_ns, live_head)) {
+        canonical_pieces_.clear();
+        canonical_arc_length_px_ = 0.0f;
         sink.reserve_hint(0);
         return;
     }
 
-    // Straight mode (smoothing == 0): raw polyline, still age-faded.
+    // PERF-003: materialize the canonical stroke pieces ONCE. Every subsequent
+    // consumer -- stroke emission, arc-length dot lattice, sparkle slot
+    // resolution -- walks this single materialized list instead of recomputing
+    // the adaptive tessellation independently. Identical (history, config,
+    // now_ns) yield identical pieces, so visual output is byte-for-semantic
+    // frozen. canonical_pieces_ is cleared by materialize_canonical_pieces
+    // and reused across frames (bounded by the visible path).
+    materialize_canonical_pieces(scratch_);
+
+    // Straight mode (smoothing == 0): raw polyline chords, still age-faded.
     if (config_.smoothing <= 0.0f) {
         emit_polyline(scratch_, now_ns, sink);
         emit_sparkles_arc(scratch_, now_ns, sink);
         return;
     }
 
-    emit_catmull_rom(scratch_, now_ns, sink);
+    emit_catmull_rom(now_ns, sink);
     // T-021: the sparkle layer is a decoration pass OVER the accepted
     // stroke path; the segment stream above is byte-identical to the
     // T-019 output whether sparkles are On or Off.
     emit_sparkles_arc(scratch_, now_ns, sink);
 }
 
+float TrailEffect::canonical_arc_length() const {
+    return canonical_arc_length_px_;
+}
+
 float TrailEffect::canonical_arc_length(const std::vector<BuildPoint>& pts) const {
+    if (config_.smoothing > 0.0f) return canonical_arc_length_px_;
     float total = 0.0f;
-    for_each_canonical_piece(pts,
-        [&](const CanonicalPiece& piece) {
-            const float dx = piece.x2 - piece.x1;
-            const float dy = piece.y2 - piece.y1;
-            total += std::sqrt(dx * dx + dy * dy);
-        });
+    for (std::size_t i = 1; i < pts.size(); ++i) {
+        const float dx = pts[i].x - pts[i - 1].x;
+        const float dy = pts[i].y - pts[i - 1].y;
+        total += std::sqrt(dx * dx + dy * dy);
+    }
     return total;
 }
 
@@ -1152,12 +1186,9 @@ void TrailEffect::emit_polyline(const std::vector<BuildPoint>& pts,
     }
 }
 
-void TrailEffect::emit_catmull_rom(const std::vector<BuildPoint>& pts,
-                                   int64_t now_ns,
+void TrailEffect::emit_catmull_rom(int64_t now_ns,
                                    TrailGeometrySink& sink) const {
-    const std::size_t n = pts.size();
-    const int spans = static_cast<int>(n) - 1;
-    sink.reserve_hint(spans * kCurveSubdivisions);
+    sink.reserve_hint(static_cast<int>(canonical_pieces_.size()));
 
     const bool dots = config_.style == TrailStyle::Dotted
                    || config_.style == TrailStyle::Spark;
@@ -1168,7 +1199,7 @@ void TrailEffect::emit_catmull_rom(const std::vector<BuildPoint>& pts,
     const int max_dot_budget = max_segments_for(512);
     DotSampler sampler = DotSampler::head_anchored(
         config_.segment_spacing_px, max_dot_budget,
-        canonical_arc_length(pts));
+        canonical_arc_length());
     auto emit_dot = [&](float x, float y, float t,
                         float dir_x, float dir_y, int index) {
         const float half = kDotStubPx * 0.5f;
@@ -1182,45 +1213,16 @@ void TrailEffect::emit_catmull_rom(const std::vector<BuildPoint>& pts,
                          alpha, style_width_at(t, now_ns), color_at(t));
     };
 
-    for (std::size_t i = 1; i < n; ++i) {
-        const BuildPoint& p1 = pts[i - 1];
-        const BuildPoint& p2 = pts[i];
-        const BuildPoint& p0 = (i >= 2) ? pts[i - 2] : p1;
-        const BuildPoint& p3 = (i + 1 < n) ? pts[i + 1] : p2;
-
-        float c1x, c1y, c2x, c2y;
-        centripetal_cp(config_.smoothing, p0.x, p0.y, p1.x, p1.y, p2.x, p2.y,
-                       p3.x, p3.y, c1x, c1y, c2x, c2y);
-
-        // PERF-003: adaptive, deterministic subdivision for this span -- the
-        // byte-identical policy the canonical piece walker uses, so the stroke
-        // and the sparkle anchors share ONE curve approximation.
-        const int subdivisions = subdivisions_for_span(
-            p1.x, p1.y, c1x, c1y, c2x, c2y, p2.x, p2.y, p2.t - p1.t);
-
-        // Per-subdivision alpha: linear blend of endpoint window positions
-        // -> smooth fade along the curve, monotone within the segment.
-        // Width and color from the same interpolated window position.
-        float px = p1.x, py = p1.y, prev_t = p1.t;
-        for (int s = 1; s <= subdivisions; ++s) {
-            const float u = static_cast<float>(s) / static_cast<float>(subdivisions);
-            float qx, qy;
-            bezier_point(p1.x, p1.y, c1x, c1y, c2x, c2y, p2.x, p2.y, u, qx, qy);
-            const float t = p1.t + (p2.t - p1.t) * u;
-            if (dots) {
-                sampler.advance(px, py, qx, qy, prev_t, t, emit_dot);
-                px = qx;
-                py = qy;
-                prev_t = t;
-                continue;
-            }
-            sink.add_segment(px, py, qx, qy,
-                             alpha_for(config_, t) * style_alpha_multiplier(t, now_ns),
-                             style_width_at(t, now_ns), color_at(t));
-            px = qx;
-            py = qy;
-            prev_t = t;
+    for (const CanonicalPiece& piece : canonical_pieces_) {
+        if (dots) {
+            sampler.advance(piece.x1, piece.y1, piece.x2, piece.y2,
+                            piece.t1, piece.t2, emit_dot);
+            continue;
         }
+        sink.add_segment(piece.x1, piece.y1, piece.x2, piece.y2,
+                         alpha_for(config_, piece.t2)
+                             * style_alpha_multiplier(piece.t2, now_ns),
+                         style_width_at(piece.t2, now_ns), color_at(piece.t2));
     }
 }
 

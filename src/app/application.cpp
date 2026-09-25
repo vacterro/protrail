@@ -1,4 +1,5 @@
 #include "application.h"
+#include "topology_retry.h"
 #include "request_dedup.h"
 #include "single_instance.h"
 #include "../platform/autostart.h"
@@ -9,8 +10,8 @@
 #include "../render/overlay_manager.h"
 #include "../effects/trail_effect.h"
 #include "../effects/click_bubble_effect.h"
+#include "../ui/branding.h"
 #include "../ui/settings_window.h"
-#include "../ui/main_window.h"
 #include "../ui/tray_icon.h"
 #include "../config/app_config.h"
 #include "../config/config_storage.h"
@@ -125,12 +126,12 @@ bool verify_d2d_link() {
 
 struct Application::Impl {
     std::unique_ptr<QApplication> qt;
+    // One canonical user-facing surface: General / Trail / Click / Developer.
     std::unique_ptr<ptd::ui::SettingsWindow> settings;
-    // T-37: compact Main Essentials surface. A VIEW over the same canonical
-    // AppConfig; its publications are wired into the same controller paths.
-    std::unique_ptr<ptd::ui::MainWindow> main_window;
     std::unique_ptr<ptd::ui::TrayIcon> tray_icon;
     std::unique_ptr<ptd::OverlayManager> overlay_mgr;
+    std::unique_ptr<ptd::OverlayManager> overlay_mgr_for_tests;
+    ptd::TopologyRetry::Policy topology_retry_policy;
     std::unique_ptr<ptd::MouseInput> mouse_input;
     ptd::CursorHistory cursor_history;
 
@@ -148,6 +149,11 @@ struct Application::Impl {
     // (cheap to reverse).
     bool master_enabled = true;
 
+    // PERF-001: cached scheduler target FPS; set_target_fps() called only when
+    // the effective target changes. Initialized to 0 so the first real update
+    // always commits.
+    int last_scheduler_target_fps = 0;
+
     // MVP 06: durable configuration snapshot.
     ptd::AppConfig app_config;
 
@@ -155,6 +161,10 @@ struct Application::Impl {
     // WM_DPICHANGED bursts. First notification schedules ONE deferred
     // reconciliation; further notifications before the drain are absorbed.
     ptd::DeferredCoalescer topology_coalescer;
+
+    // W2-001: one bounded retry authority; its callback reuses the existing
+    // topology coalescer so notifications and retries share reconciliation.
+    std::unique_ptr<ptd::TopologyRetry> topology_retry;
 
     // T-017R1: application-owned config path (default or isolated for tests).
     std::wstring config_path;
@@ -187,6 +197,10 @@ struct Application::Impl {
     // unsupported-future-schema, failed malformed backup, or read failure.
     // Every save path (including shutdown) must respect it.
     bool persistence_allowed = true;
+    // CORE-002/003: source load provenance. Protected fallback states are not
+    // authoritative for external machine-state (Run key) mutations.
+    ptd::ConfigLoadStatus provisional_status = ptd::ConfigLoadStatus::MissingFresh;
+    bool is_authoritative_config_source = true;
 
     // PERF-002: restartable single-shot debounce for high-frequency visual
     // edits. One authority shared by Trail and Click, never one timer each.
@@ -218,9 +232,13 @@ const std::wstring& Application::config_path() const {
 }
 
 bool Application::initialize() {
+    // W2-003: logging is an explicit bootstrap prerequisite. Do not resolve a
+    // substitute path here if the startup-owned destination could not open.
+    if (!ptd::is_log_initialized()) {
+        d_->persistence_allowed = false;
+        return false;
+    }
     s_instance_.store(this, std::memory_order_release);
-
-    ptd::log_init();
     app_log(2, "ProTrail starting");
 
     if (!verify_d2d_link()) {
@@ -229,14 +247,21 @@ bool Application::initialize() {
 
     // T-017R1: load durable configuration snapshot during initialization so
     // that lifecycle runs without run() do not save uninitialized defaults.
-    // CORE-001: the status-bearing load carries the write-protection
+    // CORE-001/002/003: the status-bearing load carries the write-protection
     // provenance; a protected source (future schema, failed malformed backup,
-    // read failure) disables persistence for the whole Application lifetime.
+    // read failure, probe error, missing/wrong-type schema) disables
+    // persistence and is NOT authoritative for external side effects.
     {
         const ptd::ConfigLoadResult load =
             ptd::ConfigStorage::load_from_file_result(d_->config_path);
         d_->app_config = load.config;
         d_->persistence_allowed = load.persistence_allowed;
+        d_->provisional_status = load.status;
+        d_->is_authoritative_config_source =
+            (load.status == ptd::ConfigLoadStatus::MissingFresh ||
+             load.status == ptd::ConfigLoadStatus::LoadedCurrent ||
+             load.status == ptd::ConfigLoadStatus::LoadedMigrated ||
+             load.status == ptd::ConfigLoadStatus::MalformedBackedUp);
     }
     d_->master_enabled = d_->app_config.master_enabled;
     d_->trail_config = d_->app_config.trail;
@@ -255,7 +280,14 @@ bool Application::initialize() {
     // Reconcile BEFORE anything else can change the setting: a portable
     // ProTrail that was moved must repair its own registration on the next
     // launch, but only when the user actually enabled the feature.
-    reconcile_autostart();
+    // CORE-002/003: skip reconciliation when the desired preference came only
+    // from a protected fallback -- non-authoritative data must not drive
+    // external machine-state mutations.
+    if (d_->is_authoritative_config_source) {
+        reconcile_autostart();
+    } else {
+        app_log(3, "autostart: reconcile skipped -- protected fallback config provenance, not authoritative");
+    }
 
     return true;
 }
@@ -276,6 +308,13 @@ int Application::run() {
     QFont app_font(QStringLiteral("Verdana"), 12);
     app_font.setStyleStrategy(QFont::NoAntialias);
     QApplication::setFont(app_font);
+
+    // Product icon authority: the PE icon resource. Qt already applies it to
+    // native window classes; setting it explicitly keeps every Qt surface on
+    // the same source. Absent in developer builds without the approved asset.
+    if (const QIcon product_icon = ptd::ui::branding::product_icon(); !product_icon.isNull()) {
+        QApplication::setWindowIcon(product_icon);
+    }
 
     // T-018R1: the supplied SingleInstance object is the ONE activation
     // message authority -- production activation uses the message
@@ -304,7 +343,7 @@ int Application::run() {
                         return;
                     }
                     // Mark BEFORE user-visible handling so a re-entrant copy
-                    // cannot execute show_settings() twice.
+                    // cannot execute show_main() twice.
                     d_->activation_dedup.mark_processed(request_id);
 
                     // T-018R3 test seam (deterministic harness gate only):
@@ -339,7 +378,7 @@ int Application::run() {
 
     // T-032: the QUIET presence channel. A Windows autostart launch that
     // arrives while ProTrail already runs must hand its presence over and
-    // exit -- it must NOT open, raise or activate the Main/Settings window
+    // exit -- it must NOT open, raise or activate the product window
     // and must not steal focus. That is a different message, not a
     // suppressed activation, so the owner never evaluates a show at all.
     //
@@ -456,12 +495,17 @@ int Application::run() {
                                               d_->trail_config, d_->click_effect,
                                               d_->click_config, now_ns);
                 d_->scheduler->end_frame();
+                // PERF-001: scheduler Hz follows exact current-frame content-bearing
+                // monitors (PREP for PERF-002's per-overlay primitive partition).
+                update_scheduler_target_fps();
             } else if (action == ptd::FrameAction::RenderClear) {
                 d_->scheduler->begin_frame();
                 d_->overlay_mgr->render_frame(d_->trail_effect, d_->cursor_history,
                                               d_->trail_config, d_->click_effect,
                                               d_->click_config, now_ns);
                 d_->scheduler->end_frame();
+                // PERF-001: refresh scheduler Hz even when content just expired.
+                update_scheduler_target_fps();
             }
         });
 
@@ -485,7 +529,9 @@ int Application::run() {
     // protrail_input_dispatch test and the manual global-input checks.
     // No polling timer remains: idle ProTrail generates zero timer wakeups.
 
-    d_->overlay_mgr = std::make_unique<ptd::OverlayManager>();
+     d_->overlay_mgr = d_->overlay_mgr_for_tests
+         ? std::move(d_->overlay_mgr_for_tests)
+         : std::make_unique<ptd::OverlayManager>();
 
     // WM_DISPLAYCHANGE/WM_DPICHANGED callback is intentionally lightweight:
     // request deferred work through the production DeferredCoalescer and
@@ -502,16 +548,24 @@ int Application::run() {
                 QTimer::singleShot(0, qapp, std::move(work));
             },
             [this] {
-                if (d_->overlay_mgr) d_->overlay_mgr->refresh_topology();
+                if (d_->overlay_mgr) {
+                    handle_topology_convergence(d_->overlay_mgr->refresh_topology_ex());
+                    update_scheduler_target_fps();
+                }
             });
     });
 
-    if (d_->overlay_mgr->create(inst, diag)) {
-        d_->overlay_mgr->show();
-        app_log(2, diag ? "overlay manager initialized with diagnostic primitives"
-                        : "overlay manager initialized (no diagnostics)");
-    } else {
-        app_log(3, "overlay manager creation failed; continuing without overlay");
+     if (d_->overlay_mgr) {
+         const auto result = d_->overlay_mgr->create_topology(inst, diag);
+        if (d_->overlay_mgr->overlay_count() > 0) {
+            d_->overlay_mgr->show();
+            app_log(2, diag ? "overlay manager initialized with diagnostic primitives"
+                              : "overlay manager initialized (no diagnostics)");
+            handle_topology_convergence(result);
+            update_scheduler_target_fps();
+        } else {
+            app_log(3, "overlay manager creation failed; continuing without overlay");
+        }
     }
 
     // W2-005: the durable configuration is loaded EXACTLY ONCE, during
@@ -525,23 +579,13 @@ int Application::run() {
 
     // MVP 05: real SettingsWindow with Golden Default theme, live controls
     // for Trail/Click/Master, validated config publication.
-    d_->settings = std::make_unique<ptd::ui::SettingsWindow>(
-        d_->trail_config, d_->click_config, d_->master_enabled,
-        d_->app_config.start_with_windows);
+    d_->settings = std::make_unique<ptd::ui::SettingsWindow>(d_->app_config);
     d_->settings->set_developer_defaults_controller(true);
-    // T-37: the compact Main Essentials surface is a VIEW over the same
-    // canonical AppConfig. It is populated silently from the startup
-    // snapshot; every user change flows through the SAME controller paths
-    // Settings uses, and cross-surface sync is silent in both directions.
-    // Startup behaviour is unchanged: the Main essentials surface is shown
-    // by the same startup contract that already governs Settings.
-    d_->main_window = std::make_unique<ptd::ui::MainWindow>();
-    d_->main_window->set_from_app_config(d_->app_config);
-    // Manual launch opens the compact product home. Autostart remains truly
-    // tray-only: neither surface is shown or activated.
-    if (ptd::startup_mode_requests_settings(d_->startup_mode)) {
-        d_->main_window->show();
-        app_log(2, "Main window shown (product home)");
+    // Manual launch opens the single ProTrail window on General. Autostart
+    // remains tray-only: the product window is created but never shown.
+    if (ptd::startup_mode_requests_product_window(d_->startup_mode)) {
+        d_->settings->show();
+        app_log(2, "ProTrail window shown on General tab");
     } else {
         app_log(2, "autostart: silent startup -- tray-only, no product window shown");
     }
@@ -553,8 +597,6 @@ int Application::run() {
 
     QObject::connect(d_->tray_icon.get(), &ptd::ui::TrayIcon::home_requested,
                      [this] { show_main(); });
-    QObject::connect(d_->tray_icon.get(), &ptd::ui::TrayIcon::settings_requested,
-                     [this] { show_settings(); });
     QObject::connect(d_->tray_icon.get(), &ptd::ui::TrayIcon::master_enabled_toggled,
                      [this](bool on) {
                          set_master_enabled(on);
@@ -575,8 +617,6 @@ int Application::run() {
                 d_->trail_config = c;
                 d_->app_config.trail = c;
                 d_->trail_effect.set_config(c);
-                // T-37: silent cross-surface sync (Settings -> Main).
-                if (d_->main_window) d_->main_window->set_from_app_config(d_->app_config);
                 // PERF-002: preview immediate; durable write debounced.
                 request_deferred_save();
                 if (d_->master_enabled && d_->trail_config.enabled)
@@ -587,8 +627,6 @@ int Application::run() {
                 d_->click_config = c;
                 d_->app_config.click = c;
                 d_->click_effect.set_config(c);
-                // T-37: silent cross-surface sync (Settings -> Main).
-                if (d_->main_window) d_->main_window->set_from_app_config(d_->app_config);
                 // PERF-002: preview immediate; durable write debounced.
                 request_deferred_save();
                 if (d_->master_enabled && d_->click_config.enabled)
@@ -603,7 +641,6 @@ int Application::run() {
     QObject::connect(d_->settings.get(), &ptd::ui::SettingsWindow::app_config_applied,
             [this](const ptd::AppConfig& cfg) {
                 apply_app_config_transaction(cfg);
-                if (d_->main_window) d_->main_window->set_from_app_config(d_->app_config);
             });
     QObject::connect(d_->settings.get(), &ptd::ui::SettingsWindow::preset_applied,
             [this](const ptd::TrailConfig& t, const ptd::ClickConfig& c) {
@@ -619,7 +656,6 @@ int Application::run() {
                 // enable flip inside it carries the same history hygiene as
                 // the checkbox -- the transition is detected here, not skipped.
                 apply_trail_toggle_transition(was_trail_enabled, t.enabled);
-                if (d_->main_window) d_->main_window->set_from_app_config(d_->app_config);
                 if (d_->master_enabled && (t.enabled || c.enabled))
                     start_effect_rendering();
             });
@@ -658,63 +694,9 @@ int Application::run() {
                 }
             });
 
-    // T-37: the Main Essentials surface publishes the SAME signals as
-    // Settings; wire each to the identical controller path so one user
-    // action yields exactly ONE coherent persisted update, and push the
-    // canonical state silently back into BOTH surfaces afterwards. The
-    // silent cross-surface push is what keeps them synchronized without a
-    // callback loop.
-    QObject::connect(d_->main_window.get(), &ptd::ui::MainWindow::trail_config_changed,
-            [this](const ptd::TrailConfig& c) {
-                const bool was_enabled = d_->trail_config.enabled;
-                d_->trail_config = c;
-                d_->app_config.trail = c;
-                d_->trail_effect.set_config(c);
-                apply_trail_toggle_transition(was_enabled, c.enabled);
-                if (d_->settings) d_->settings->sync_from_app_config(d_->app_config);
-                request_deferred_save();
-                if (d_->master_enabled && d_->trail_config.enabled)
-                    start_effect_rendering();
-            });
-    QObject::connect(d_->main_window.get(), &ptd::ui::MainWindow::click_config_changed,
-            [this](const ptd::ClickConfig& c) {
-                const bool was_enabled = d_->click_config.enabled;
-                d_->click_config = c;
-                d_->app_config.click = c;
-                d_->click_effect.set_config(c);
-                if (was_enabled && !c.enabled) d_->click_effect.clear();
-                if (d_->settings) d_->settings->sync_from_app_config(d_->app_config);
-                request_deferred_save();
-                if (d_->master_enabled && d_->click_config.enabled)
-                    start_effect_rendering();
-            });
-    QObject::connect(d_->main_window.get(), &ptd::ui::MainWindow::master_enabled_changed,
-            [this](bool on) {
-                set_master_enabled(on);
-                if (d_->tray_icon) d_->tray_icon->set_master_enabled(on);
-                if (d_->settings) d_->settings->set_master_enabled(on);
-                d_->app_config.master_enabled = on;
-                save_config();
-            });
-    QObject::connect(d_->main_window.get(), &ptd::ui::MainWindow::start_with_windows_changed,
-            [this](bool on) { apply_start_with_windows(on); });
-    QObject::connect(d_->main_window.get(), &ptd::ui::MainWindow::advanced_settings_requested,
-            [this] { show_settings(); });
-    QObject::connect(d_->main_window.get(), &ptd::ui::MainWindow::restore_defaults_requested,
-            [this] {
-                apply_app_config_transaction(ptd::release_defaults());
-                if (d_->settings) d_->settings->sync_from_app_config(d_->app_config);
-                if (d_->main_window) d_->main_window->set_from_app_config(d_->app_config);
-            });
-
-    // T-37 / Target D: the developer defaults action has exactly ONE owner in
-    // the application. Both surfaces -- the Settings developer panel and the
-    // compact developer-only Main action -- publish the same request and both
-    // are routed to this one controller operation, so neither can ever be a
-    // second defaults authority.
+    // The Developer tab is the single normal UI location for release-default
+    // authoring. Application remains the canonical full-AppConfig authority.
     QObject::connect(d_->settings.get(), &ptd::ui::SettingsWindow::set_current_as_release_defaults_requested,
-            [this] { set_current_as_release_defaults(); });
-    QObject::connect(d_->main_window.get(), &ptd::ui::MainWindow::set_current_as_release_defaults_requested,
             [this] { set_current_as_release_defaults(); });
 
     // T-018R1/T-018R2: the canonical windows exist and the activation
@@ -735,7 +717,7 @@ int Application::run() {
             return 1;
         }
         if (d_->single_instance->consume_startup_activation_request()) {
-            app_log(2, "single_instance: startup activation consumed; activating Main window");
+            app_log(2, "single_instance: startup activation consumed; activating ProTrail window");
             show_main();
         }
     }
@@ -928,19 +910,6 @@ void Application::stop_effect_rendering() {
 }
 
 void Application::show_main() {
-    if (!d_->main_window) return;
-    if (d_->main_window->isMinimized()) {
-        d_->main_window->showNormal();
-    } else {
-        d_->main_window->show();
-    }
-    d_->main_window->raise();
-    d_->main_window->activateWindow();
-    HWND hwnd = reinterpret_cast<HWND>(d_->main_window->winId());
-    if (hwnd) SetForegroundWindow(hwnd);
-}
-
-void Application::show_settings() {
     if (!d_->settings) return;
     if (d_->settings->isMinimized()) {
         d_->settings->showNormal();
@@ -949,6 +918,8 @@ void Application::show_settings() {
     }
     d_->settings->raise();
     d_->settings->activateWindow();
+    // Interactive activation is the only path allowed to foreground the
+    // existing product window; no second top-level surface is constructed.
     HWND hwnd = reinterpret_cast<HWND>(d_->settings->winId());
     if (hwnd) SetForegroundWindow(hwnd);
 }
@@ -965,8 +936,8 @@ void Application::set_current_as_release_defaults() {
     const ptd::AppConfig snapshot = ptd::AppConfig::validated(d_->app_config);
     const ptd::PromoteResult result = ptd::promote_to_release_defaults(snapshot);
     // The result is reported on the Settings developer panel AND logged, so a
-    // promotion triggered from the compact Main action is never silent when
-    // the developer panel happens to be closed.
+    // the operation remains observable through the Developer tab status and
+    // the durable application log.
     app_log(result.success ? 2 : 4,
             std::string("release_defaults: ") + result.message);
     if (d_->settings) {
@@ -978,41 +949,81 @@ void Application::set_startup_mode(ptd::StartupMode mode) {
     d_->startup_mode = mode;
 }
 
-void Application::set_autostart_backend_for_tests(ptd::AutostartBackend* backend) {
+void Application::set_autostart_backend(ptd::AutostartBackend* backend) {
     d_->autostart_backend = backend;
+}
+
+void Application::set_autostart_backend_for_tests(ptd::AutostartBackend* backend) {
+    set_autostart_backend(backend);
+}
+
+void Application::set_overlay_manager_for_tests(
+    std::unique_ptr<ptd::OverlayManager> manager) {
+    d_->overlay_mgr_for_tests = std::move(manager);
+}
+
+void Application::set_topology_retry_policy_for_tests(int max_attempts,
+                                                       int base_delay_ms,
+                                                       int max_delay_ms) {
+    d_->topology_retry_policy = {max_attempts, base_delay_ms, max_delay_ms};
+}
+
+bool Application::topology_retry_pending_for_tests() const {
+    return d_->topology_retry && d_->topology_retry->pending();
 }
 
 // T-032: register/remove ProTrail's own Run entry and persist the matching
 // preference in ONE operation, so what the user sees in Settings is what the
 // machine will actually do at the next sign-in.
 void Application::apply_start_with_windows(bool on) {
+    // CORE-002/003: while source provenance is protected, do not mutate the
+    // registry at all -- the preference cannot be durably recorded.
+    if (!d_->is_authoritative_config_source) {
+        if (d_->settings) {
+            d_->settings->set_start_with_windows(d_->app_config.start_with_windows);
+        }
+        app_log(3,
+                "autostart: preference change blocked -- protected fallback config provenance; "
+                "registry not touched");
+        return;
+    }
     if (d_->app_config.start_with_windows == on && d_->autostart) {
         // Already consistent: still reconcile when ON so a moved executable
         // is repaired rather than silently left pointing at a dead path.
         if (on) reconcile_autostart();
         return;
     }
+    // W2-002: durable intent first. If persistence fails, do not mutate
+    // the Run key -- the registry and preference would split. The UI value is
+    // restored to the previous durable preference so future reconciliations
+    // see the correct desired state.
+    const bool previous_on = d_->app_config.start_with_windows;
     d_->app_config.start_with_windows = on;
+    if (!save_config()) {
+        // Compensate: restore preference so registry/desired cannot diverge.
+        d_->app_config.start_with_windows = previous_on;
+        if (d_->settings) {
+            d_->settings->set_start_with_windows(previous_on);
+        }
+        app_log(4, "autostart: config persistence failed; Start with Windows change blocked, registry untouched");
+        return;
+    }
 
     if (d_->autostart) {
         const std::wstring exe = ptd::current_executable_path();
         const bool ok = on ? d_->autostart->enable(exe) : d_->autostart->disable();
         if (!ok) {
-            // The PREFERENCE is still saved: it is the user's recorded
-            // choice, and the next start reconciles the machine toward it.
-            // The failure is loud, never silent.
+            // Registry failure is observed but preference is now durable, so a
+            // later launch/retry converges machine state toward it.
             app_log(4, on ? "autostart: could not register ProTrail in the "
-                            "per-user Run key; the preference is saved and "
-                            "will be reconciled on the next start"
+                            "per-user Run key; durable preference saved for next reconciliation"
                           : "autostart: could not remove the ProTrail entry "
-                            "from the per-user Run key; the preference is "
-                            "saved and will be reconciled on the next start");
+                            "from the per-user Run key; durable preference saved for next reconciliation");
         } else {
             app_log(2, on ? "autostart: ProTrail registered to start with Windows"
                           : "autostart: ProTrail removed from Windows startup");
         }
     }
-    save_config();
 }
 
 // CORE-003 + W2-002: the single owner for a whole-AppConfig state change.
@@ -1058,22 +1069,37 @@ void Application::apply_app_config_transaction(const ptd::AppConfig& cfg) {
         d_->click_effect.clear();
     }
 
-    // Start-with-Windows: reconcile the DESIRED state through CORE-002's
-    // bidirectional path (registry side effect + preference are one op).
+    // W2-002: if the Start-with-Windows desired state changed, persistence is
+    // the commit authority. Persist FIRST; if save fails, do not mutate the
+    // registry and restore the previous durable desired state so the machine
+    // and disk cannot split. Visual/other fields already applied; only the
+    // Run key is gated by this save.
     if (was_start_with_windows != d_->app_config.start_with_windows) {
-        if (d_->autostart) {
-            const std::wstring exe = ptd::current_executable_path();
-            const bool desired = d_->app_config.start_with_windows;
-            if (!d_->autostart->reconcile_desired(desired, exe)) {
-                app_log(4, desired
-                                ? "autostart: could not register ProTrail in the per-user Run key"
-                                : "autostart: could not remove the ProTrail entry from the per-user Run key");
+        if (!save_config()) {
+            // Restore durable desired state and leave registry untouched.
+            d_->app_config.start_with_windows = was_start_with_windows;
+            if (d_->settings) {
+                d_->settings->set_start_with_windows(was_start_with_windows);
+            }
+            app_log(4, "autostart: config persistence failed; whole-config Start with Windows change blocked, registry untouched");
+            // Still wake scheduler for the final (reverted) state below.
+        } else {
+            // Registry reconciliation after durable commit; failure is observable
+            // but leaves desired preference durably recorded for later retries.
+            if (d_->autostart) {
+                const std::wstring exe = ptd::current_executable_path();
+                const bool desired = d_->app_config.start_with_windows;
+                if (!d_->autostart->reconcile_desired(desired, exe)) {
+                    app_log(4, desired
+                                    ? "autostart: could not register ProTrail in the per-user Run key"
+                                    : "autostart: could not remove the ProTrail entry from the per-user Run key");
+                }
             }
         }
+    } else {
+        // No Start-with-Windows edge: ordinary whole-config persistence commit.
+        save_config();
     }
-
-    // ONE persistence commit for the final complete configuration.
-    save_config();
 
     // Wake the scheduler only as the FINAL state requires.
     const bool want_render = d_->master_enabled
@@ -1139,10 +1165,13 @@ void Application::shutdown() {
     if (d_->single_instance) {
         d_->single_instance->begin_shutdown();
     }
-    // PERF-002: flush any pending debounced visual edit synchronously so a
-    // final slider value is never discarded on exit.
-    flush_pending_save();
-    save_config();
+    // W2-005: bounded shutdown persistence -- one durable write for one
+    // final state. Do not perform the unconditional second write if the
+    // pending dirty flush already succeeded.
+    const FlushResult flushed = flush_pending_save();
+    if (flushed == FlushResult::NonePending || flushed == FlushResult::FlushedError) {
+        save_config();
+    }
     if (d_->activation_filter || d_->presence_filter) {
         QApplication* qapp_owner = d_->qt ? d_->qt.get()
                                          : qobject_cast<QApplication*>(QApplication::instance());
@@ -1159,6 +1188,10 @@ void Application::shutdown() {
     }
     ptd::OverlayWindow::clear_display_change_callback();
     d_->topology_coalescer.cancel();
+    if (d_->topology_retry) {
+        d_->topology_retry->cancel();
+        d_->topology_retry.reset();
+    }
     stop_effect_rendering();
     if (d_->scheduler) {
         d_->scheduler.reset();
@@ -1179,7 +1212,6 @@ void Application::shutdown() {
         d_->tray_icon.reset();
     }
     d_->settings.reset();
-    d_->main_window.reset();
     if (d_->qt) {
         d_->qt.reset();
     }
@@ -1194,11 +1226,7 @@ bool Application::save_config_for_tests() {
     return save_config();
 }
 
-ptd::ui::MainWindow* Application::main_window_for_tests() const {
-    return d_->main_window.get();
-}
-
-ptd::ui::SettingsWindow* Application::settings_window_for_tests() const {
+ptd::ui::SettingsWindow* Application::product_window_for_tests() const {
     return d_->settings.get();
 }
 
@@ -1206,7 +1234,63 @@ ptd::ui::TrayIcon* Application::tray_icon_for_tests() const {
     return d_->tray_icon.get();
 }
 
-// PERF-002: schedule a single coalesced durable write. The visual/effect state
+// W2-001: single reconciliation authority + bounded retry lifecycle.
+void Application::handle_topology_convergence(ptd::OverlayManager::Convergence result) {
+    if (result == ptd::OverlayManager::Convergence::Complete ||
+        result == ptd::OverlayManager::Convergence::Unchanged) {
+        if (d_->topology_retry) d_->topology_retry->observe(result);
+        return;
+    }
+    if (!d_->topology_retry) {
+        d_->topology_retry = std::make_unique<ptd::TopologyRetry>(
+            [this] {
+                d_->topology_coalescer.request(
+                    [qapp = QApplication::instance()](std::function<void()> work) {
+                        if (qapp) QTimer::singleShot(0, qapp, std::move(work));
+                    },
+                    [this] { perform_topology_retry(); });
+            },
+            d_->topology_retry_policy,
+            [this](int attempt, int delay) {
+                app_log(2, "topology: incomplete coverage, scheduling retry " +
+                             std::to_string(attempt) + "/5 in " +
+                             std::to_string(delay) + "ms");
+            },
+            [this] {
+                app_log(4, "topology: max retries reached; persistent incomplete coverage");
+            });
+    }
+    d_->topology_retry->observe(result);
+}
+
+void Application::perform_topology_retry() {
+    if (!d_->overlay_mgr) return;
+    handle_topology_convergence(d_->overlay_mgr->refresh_topology_ex());
+}
+
+// PERF-001: update scheduler target FPS from the current frame's populated
+// buckets; empty frames use the bounded maximum-live-monitor fallback.
+void Application::update_scheduler_target_fps() {
+    if (!d_->scheduler || !d_->overlay_mgr) return;
+
+    int fallback_hz = 0;
+    const auto& overlays = d_->overlay_mgr->monitor_overlays();
+    for (const auto& overlay : overlays) {
+        const int hz = overlay.monitor.refresh_rate_hz;
+        if (hz >= 30 && hz <= 360 && hz > fallback_hz) {
+            fallback_hz = hz;
+        }
+    }
+
+    const int effective_fps = ptd::RenderScheduler::resolve_target_fps(
+        d_->overlay_mgr->content_refresh_rate_hz(), fallback_hz);
+    if (effective_fps != d_->last_scheduler_target_fps) {
+        d_->last_scheduler_target_fps = effective_fps;
+        if (effective_fps > 0) {
+            d_->scheduler->set_target_fps(effective_fps);
+        }
+    }
+}
 // is already updated; only the filesystem write is deferred. Discrete and
 // lifecycle operations call save_config() directly and remain immediate.
 void Application::request_deferred_save() {
@@ -1221,12 +1305,14 @@ void Application::request_deferred_save() {
     d_->save_debounce->start(d_->save_debounce_ms);
 }
 
-void Application::flush_pending_save() {
+Application::FlushResult Application::flush_pending_save() {
     if (d_->save_debounce) d_->save_debounce->stop();
-    if (!d_->config_dirty) return;
+    if (!d_->config_dirty) return FlushResult::NonePending;
     if (save_config()) {
         d_->config_dirty = false;
+        return FlushResult::FlushedOk;
     }
+    return FlushResult::FlushedError;
 }
 
 void Application::set_save_debounce_ms_for_tests(int ms) {

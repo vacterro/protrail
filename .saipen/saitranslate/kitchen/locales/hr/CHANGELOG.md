@@ -2,17 +2,21 @@
 
 🇷🇺 [Русский](../ru/CHANGELOG.md) · 🇺🇸 [English](../en/CHANGELOG.md) · 🇪🇪 [Eesti](../et/CHANGELOG.md) · 🇯🇵 [日本語](../ja/CHANGELOG.md) · 🇷🇺 [👴 Дед](../ded/CHANGELOG.md) · 🇺🇦 [Українська](../uk/CHANGELOG.md) · 🇩🇪 [Deutsch](../de/CHANGELOG.md) · 🇫🇷 [Français](../fr/CHANGELOG.md) · 🇪🇸 [Español](../es/CHANGELOG.md) · 🇮🇹 [Italiano](../it/CHANGELOG.md) · 🇵🇹 [Português](../pt/CHANGELOG.md) · 🇳🇱 [Nederlands](../nl/CHANGELOG.md) · 🇵🇱 [Polski](../pl/CHANGELOG.md) · 🇸🇪 [Svenska](../sv/CHANGELOG.md) · 🇩🇰 [Dansk](../da/CHANGELOG.md) · 🇫🇮 [Suomi](../fi/CHANGELOG.md) · 🇳🇴 [Norsk](../no/CHANGELOG.md) · 🇨🇳 [中文](../zh/CHANGELOG.md) · 🇰🇷 [한국어](../ko/CHANGELOG.md) · 🇹🇭 [ไทย](../th/CHANGELOG.md) · 🇻🇳 [Tiếng Việt](../vi/CHANGELOG.md) · 🇸🇦 [العربية](../ar/CHANGELOG.md) · 🇮🇱 [עברית](../he/CHANGELOG.md) · 🇹🇷 [Türkçe](../tr/CHANGELOG.md) · 🇮🇳 [हिन्दी](../hi/CHANGELOG.md) · 🇮🇩 [Bahasa Indonesia](../id/CHANGELOG.md) · 🇬🇷 [Ελληνικά](../el/CHANGELOG.md) · 🇨🇿 [Čeština](../cs/CHANGELOG.md) · 🇷🇴 [Română](../ro/CHANGELOG.md) · 🇭🇺 [Magyar](../hu/CHANGELOG.md) · 🇧🇬 [Български](../bg/CHANGELOG.md) · 🇸🇰 [Slovenčina](../sk/CHANGELOG.md) · 🇭🇷 [Hrvatski](CHANGELOG.md)
 
-## 0.1.7 - Službeno prijenosno izdanje Windows x64 — oporavak
+## 0.1.8 - Službeno prijenosno izdanje Windows x64 — potpuno zatvaranje
 
-- Dodani su preostali izvori `src/ui/branding.h` i `src/ui/branding.cpp` potrebni čistom CMake popisu ciljeva.
-- Nepromjenjive oznake `v0.1.3` do `v0.1.6` su sačuvane; ovo izdanje zatvara punu izvornu cjelinu s odobrenim brendiranjem.
+- Predano je potpuno izvorno zatvaranje proizvoda koje zahtijeva kanonski CMake popis ciljeva: izvori objedinjenog prozora, uklanjanje povučenog `MainWindow`-a, T-59 popravci izvršavanja, ispravljeni putovi uključivanja testova te ojačane provjere dima i postavljanja.
+- Nepromjenjive oznake `v0.1.3` do `v0.1.7` su sačuvane; svaka međuzimska oznaka ostaje nepotpuni zapis izgradnje paketa i nijedna nije pomaknuta niti obrisana.
 - Pripremljen je cjevovod za nepotpisani prijenosni paket; provjere pakiranja, dima, kontrolne sume i objave ostaju autoritativne.
 
-## 0.1.6 - Službeno prijenosno izdanje Windows x64 — oporavak
+## 0.1.7 - Nepotpuni zapis paketa (nadomješten izdanjem v0.1.8)
 
-- Dodan je potrebni izvorni `src/app/topology_retry.h` kako čisti release build više ne pada tijekom CMake generiranja.
-- Nepromjenjive oznake `v0.1.3`, `v0.1.4` i `v0.1.5` su sačuvane; ovo izdanje sadrži odobreni simbol i potpuno zatvoreni izvor.
-- Pripremljen je cjevovod za nepotpisani prijenosni paket; provjere pakiranja, dima, kontrolne sume i objave ostaju autoritativne.
+- Dodani su preostali izvori `src/ui/branding.h` i `src/ui/branding.cpp`, ali predani `Application` još je upotrebljavao povučenu implementaciju `MainWindow`, pa čisto povezivanje nije uspjelo.
+- Nepromjenjive oznake `v0.1.3` do `v0.1.6` su sačuvane; nijedna oznaka nije pomaknuta niti obrisana.
+
+## 0.1.6 - Nepotpuni zapis paketa (nadomješten izdanjem v0.1.8)
+
+- Dodan je potrebni izvorni `src/app/topology_retry.h`, ali čisti popis ciljeva još je upotrebljavao nepredane izvore brendiranja i povučeni kod `MainWindow`.
+- Nepromjenjive oznake `v0.1.3` do `v0.1.5` su sačuvane; nijedna oznaka nije pomaknuta niti obrisana.
 
 ## 0.1.5 - Službeno prijenosno izdanje Windows x64 — oporavak
 

@@ -25,6 +25,24 @@ void reset_dev_presets_dir_for_tests();
 void set_canonical_release_defaults_path_for_tests(const std::filesystem::path& path);
 void reset_canonical_release_defaults_path_for_tests();
 
+// W2-004 deterministic promotion fault-injection seam. Each value forces
+// exactly one transaction stage of promote_to_release_defaults() to fail so
+// its rollback semantics can be exercised without depending on permissions,
+// timing, or external Windows state. None (default) leaves production
+// behaviour unchanged. The fault is one-shot: promote_to_release_defaults()
+// clears it on entry after reading it, so a single armed fault affects only
+// the next promotion.
+enum class PromoteFault {
+    None,
+    TempFlush,          // temporary-file flush fails before canonical replace
+    PostReplaceRead,    // canonical file cannot be re-opened after replace
+    SemanticVerify,     // post-replace roundtrip semantic verification fails
+    RollbackWriteFlush, // rollback's own write/flush fails
+    RollbackMove,       // rollback's MoveFileEx replacement fails
+};
+void set_promote_fault_for_tests(PromoteFault fault);
+void reset_promote_fault_for_tests();
+
 // Presets management (under dev/presets)
 std::filesystem::path dev_presets_dir();
 std::filesystem::path canonical_release_defaults_path();

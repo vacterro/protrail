@@ -40,14 +40,15 @@
 #include <QCheckBox>
 #include <QTimer>
 
-#include "src/app/application.h"
-#include "src/config/config_storage.h"
-#include "src/config/release_defaults.h"
-#include "src/core/cursor_history.h"
-#include "src/core/cursor_sample.h"
-#include "src/effects/trail_effect.h"
-#include "src/platform/mouse_input.h"
-#include "src/ui/settings_window.h"
+#include "../src/app/application.h"
+#include "../src/config/config_storage.h"
+#include "../src/config/release_defaults.h"
+#include "../src/core/cursor_history.h"
+#include "../src/core/log.h"
+#include "../src/core/cursor_sample.h"
+#include "../src/effects/trail_effect.h"
+#include "../src/platform/mouse_input.h"
+#include "../src/ui/settings_window.h"
 
 #include <filesystem>
 #include <functional>
@@ -149,6 +150,14 @@ std::wstring isolated_config_path(const wchar_t* name) {
 bool run_scenario(const std::wstring& config_path,
                   const std::function<void(Application&, ptd::ui::SettingsWindow*)>& scenario,
                   bool* scenario_ran) {
+    const auto log_dir = std::filesystem::temp_directory_path() /
+                         "protrail_trail_lifecycle_test_logs";
+    std::error_code log_ec;
+    std::filesystem::create_directories(log_dir, log_ec);
+    if (!ptd::is_log_initialized()
+        && !ptd::log_init((log_dir / "protrail.log").native())) {
+        return false;
+    }
     Application app(config_path);
     if (!app.initialize()) return false;
 

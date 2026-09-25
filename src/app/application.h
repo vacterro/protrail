@@ -2,6 +2,7 @@
 
 #include "startup_mode.h"
 #include "../config/app_config.h"
+#include "../render/overlay_manager.h"
 
 #include <atomic>
 #include <cstddef>
@@ -26,7 +27,6 @@ class SingleInstance;
 
 namespace ptd {
 namespace ui {
-class MainWindow;
 class SettingsWindow;
 class TrayIcon;
 } // namespace ui
@@ -46,20 +46,32 @@ public:
     void request_exit();
     void set_single_instance(ptd::SingleInstance* si);
     void show_main();
-    void show_settings();
     void set_current_as_release_defaults();
 
     // T-032: how this process was launched. StartupMode::AutostartMinimized
     // (Windows Run entry) initializes every service and the tray but never
-    // shows the Main/Settings window; StartupMode::Normal preserves the
+    // shows the ProTrail window; StartupMode::Normal preserves the
     // existing user-facing launch behaviour. Set before run().
     void set_startup_mode(ptd::StartupMode mode);
+
+    // Isolated (smoke) launches: route the Start with Windows side effect to a
+    // caller-owned backend so the run never reads, rewrites or removes the
+    // real per-user Run entry of the operator. Must be set before initialize().
+    void set_autostart_backend(ptd::AutostartBackend* backend);
 
     // T-032 test seam: inject a non-owning autostart backend (an in-memory
     // double) so a controller-level run can exercise the autostart wiring
     // without touching the real per-user Run key. nullptr restores the
     // production Win32 backend. Must be set before initialize().
     void set_autostart_backend_for_tests(ptd::AutostartBackend* backend);
+
+    // W2-001 integration seams. Tests may inject one synthetic topology and
+    // short retry delays before run(); production keeps native defaults.
+    void set_overlay_manager_for_tests(std::unique_ptr<ptd::OverlayManager> manager);
+    void set_topology_retry_policy_for_tests(int max_attempts,
+                                             int base_delay_ms,
+                                             int max_delay_ms);
+    bool topology_retry_pending_for_tests() const;
 
     const std::wstring& config_path() const;
 
@@ -78,23 +90,17 @@ public:
     // on-disk write happens once after the drag settles. Lifecycle/discrete
     // operations still save immediately, and shutdown flushes any pending
     // dirty state synchronously.
+     enum class FlushResult : int { NonePending = 0, FlushedOk = 1, FlushedError = 2 };
     void request_deferred_save();
-    void flush_pending_save();
+    FlushResult flush_pending_save();
     // Test seams.
     void set_save_debounce_ms_for_tests(int ms);
     int save_invocation_count_for_tests() const;
     void reset_save_invocation_count_for_tests();
     bool config_dirty_for_tests() const;
 
-    // T-37 home-surface seams: the ONE canonical Main / Settings / tray
-    // instances. A controller-level regression has to answer two product
-    // questions that no window title can answer: WHICH surface a startup mode
-    // or a navigation action made visible, and whether repeated navigation
-    // restored the SAME instance instead of constructing a second one. These
-    // accessors are read-only, return nullptr before run() creates the
-    // surfaces, and never let a caller install state of its own.
-    ptd::ui::MainWindow* main_window_for_tests() const;
-    ptd::ui::SettingsWindow* settings_window_for_tests() const;
+    // The one canonical ProTrail product window.
+    ptd::ui::SettingsWindow* product_window_for_tests() const;
     ptd::ui::TrayIcon* tray_icon_for_tests() const;
 
     static Application& instance();
@@ -183,6 +189,13 @@ private:
     // path, including shutdown, respects the load provenance protection --
     // a blocked save is explicit and never touches a protected source.
     bool save_config();
+
+    // W2-001: single reconciliation authority + bounded retry lifecycle.
+    // PERF-001: scheduler pacing prepared to consume PERF-002's exact per-overlay
+    // primitive assignment — MIL-C gate, full closure waits for PERF-002/003.
+    void handle_topology_convergence(ptd::OverlayManager::Convergence result);
+    void perform_topology_retry();
+    void update_scheduler_target_fps();
 
 
     struct Impl;

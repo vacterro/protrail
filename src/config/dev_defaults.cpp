@@ -26,6 +26,9 @@ namespace {
 static std::optional<bool> g_dev_build_override;
 static std::optional<std::filesystem::path> g_presets_dir_override;
 static std::optional<std::filesystem::path> g_canonical_path_override;
+// W2-004 one-shot promotion fault injection. Read-and-cleared on entry to
+// promote_to_release_defaults(); production leaves it None.
+static PromoteFault g_promote_fault = PromoteFault::None;
 
 std::string sanitize_preset_name(const std::string& input) {
     if (input.empty()) {
@@ -117,6 +120,14 @@ void set_canonical_release_defaults_path_for_tests(const std::filesystem::path& 
 
 void reset_canonical_release_defaults_path_for_tests() {
     g_canonical_path_override.reset();
+}
+
+void set_promote_fault_for_tests(PromoteFault fault) {
+    g_promote_fault = fault;
+}
+
+void reset_promote_fault_for_tests() {
+    g_promote_fault = PromoteFault::None;
 }
 
 std::filesystem::path dev_presets_dir() {
@@ -308,6 +319,10 @@ std::string diff_configs(const AppConfig& cur, const AppConfig& ref) {
 }
 
 PromoteResult promote_to_release_defaults(const AppConfig& config) {
+    // W2-004: read-and-clear the one-shot fault so it affects only this call.
+    const PromoteFault fault = g_promote_fault;
+    g_promote_fault = PromoteFault::None;
+
     if (!is_dev_build()) {
         log_write(LogLevel::Error, "promote_to_release_defaults: refused in production release build");
         return {false, "Release build cannot write the repository defaults file."};
@@ -364,7 +379,19 @@ PromoteResult promote_to_release_defaults(const AppConfig& config) {
         std::filesystem::remove(temp_path, ec);
         return {false, "Failed to write complete serialized defaults"};
     }
-    file.flush();
+    if (!file.flush()) {
+        file.close();
+        std::filesystem::remove(temp_path, ec);
+        return {false, "Failed to flush temporary release defaults file"};
+    }
+    // W2-004 seam: model a temporary-file flush failure BEFORE canonical
+    // replacement. The canonical target is never touched, so existing bytes
+    // (or absence) must remain byte-identical.
+    if (fault == PromoteFault::TempFlush) {
+        file.close();
+        std::filesystem::remove(temp_path, ec);
+        return {false, "Failed to flush temporary release defaults file"};
+    }
     file.close();
 
     // Atomic replacement
@@ -372,25 +399,71 @@ PromoteResult promote_to_release_defaults(const AppConfig& config) {
                      MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
         std::filesystem::remove(temp_path, ec);
         return {false, "Failed to atomically replace release defaults file"};
-    }    // Re-read and verify roundtrip equality. If this unexpectedly fails,
+    }
+
+    // Re-read and verify roundtrip equality. If this unexpectedly fails,
     // restore the prior bytes atomically so the canonical source is never
-    // left in a partially trusted state.
-    auto restore_previous = [&]() {
+    // left in a partially trusted state. Restoration itself is verified; if
+    // it fails the canonical file must not be misreported as restored.
+    auto restore_previous = [&]() -> bool {
+        if (!had_previous) {
+            // No previous file: remove the newly-written unverified target so
+            // absence remains the canonical prior state.
+            std::filesystem::remove(target, ec);
+            if (ec) {
+                return false;
+            }
+            return true;
+        }
         std::filesystem::path restore = target;
         restore += L".restore." + std::to_wstring(GetCurrentProcessId());
         QFile rf(QString::fromStdWString(restore.wstring()));
         if (!rf.open(QIODevice::WriteOnly | QIODevice::Truncate)) return false;
         if (rf.write(previous_bytes) != previous_bytes.size()) { rf.close(); return false; }
-        rf.flush(); rf.close();
+        // W2-004 seam: model rollback's own write/flush failure.
+        if (fault == PromoteFault::RollbackWriteFlush) {
+            rf.close();
+            std::filesystem::remove(restore, ec);
+            return false;
+        }
+        if (!rf.flush()) { rf.close(); std::filesystem::remove(restore, ec); return false; }
+        rf.close();
+        // W2-004 seam: model rollback's replacement (MoveFileEx) failure.
+        if (fault == PromoteFault::RollbackMove) {
+            std::filesystem::remove(restore, ec);
+            return false;
+        }
         const bool ok = MoveFileExW(restore.c_str(), target.c_str(),
                                     MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
-        if (!ok) std::filesystem::remove(restore, ec);
-        return ok;
+        if (!ok) {
+            std::filesystem::remove(restore, ec);
+            return false;
+        }
+        // Verify the restored bytes match what we expected.
+        QFile vf(QString::fromStdWString(target.wstring()));
+        if (!vf.open(QIODevice::ReadOnly)) return false;
+        const QByteArray back = vf.readAll();
+        vf.close();
+        return back == previous_bytes;
     };
 
     QFile verify_file(QString::fromStdWString(target.wstring()));
-    if (!verify_file.open(QIODevice::ReadOnly)) {
-        if (had_previous) restore_previous();
+    // W2-004 seam: model the canonical file being unreadable after replace.
+    const bool post_replace_read_ok =
+        (fault != PromoteFault::PostReplaceRead) &&
+        verify_file.open(QIODevice::ReadOnly);
+    if (!post_replace_read_ok) {
+        if (had_previous) {
+            const bool restored = restore_previous();
+            if (!restored) {
+                return {false, "Failed to re-read release defaults file after write; RESTORATION FAILED -- canonical source may be untrusted; manual intervention required: " + target.string()};
+            }
+        } else {
+            const bool removed = restore_previous();
+            if (!removed) {
+                return {false, "Failed to re-read newly created release defaults file; removal of unverified target FAILED -- canonical source may be untrusted: " + target.string()};
+            }
+        }
         return {false, "Failed to re-read release defaults file after write; previous defaults restored."};
     }
     QByteArray read_bytes = verify_file.readAll();
@@ -398,8 +471,20 @@ PromoteResult promote_to_release_defaults(const AppConfig& config) {
 
     QString err;
     auto reloaded = ConfigStorage::deserialize_json(read_bytes, &err);
-    if (!reloaded || *reloaded != sanitized) {
-        if (had_previous) restore_previous();
+    // W2-004 seam: model a post-replace semantic verification failure. The
+    // rollback-fault cases also force the verify failure so the rollback path
+    // is actually entered.
+    const bool force_verify_fail =
+        fault == PromoteFault::SemanticVerify ||
+        fault == PromoteFault::RollbackWriteFlush ||
+        fault == PromoteFault::RollbackMove;
+    const bool semantic_ok =
+        !force_verify_fail && reloaded && (*reloaded == sanitized);
+    if (!semantic_ok) {
+        const bool restored = restore_previous();
+        if (!restored) {
+            return {false, "Roundtrip equality verification failed; RESTORATION FAILED -- canonical source may be untrusted; manual intervention required: " + target.string()};
+        }
         return {false, "Roundtrip equality verification failed; previous defaults restored."};
     }
 

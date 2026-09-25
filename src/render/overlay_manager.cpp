@@ -47,6 +47,16 @@ BOOL CALLBACK monitor_enum_proc(HMONITOR hmon, HDC, LPRECT, LPARAM lp) {
     info.dpi_x = dpi_x ? dpi_x : 96;
     info.dpi_y = dpi_y ? dpi_y : 96;
     info.scale = static_cast<float>(info.dpi_x) / 96.0f;
+
+    // PERF-001: cache current display refresh rate for this monitor.
+    DEVMODEW dm{};
+    dm.dmSize = sizeof(dm);
+    if (EnumDisplaySettingsExW(mi.szDevice, ENUM_CURRENT_SETTINGS, &dm, 0)) {
+        if (dm.dmDisplayFrequency >= 30 && dm.dmDisplayFrequency <= 360) {
+            info.refresh_rate_hz = static_cast<int>(dm.dmDisplayFrequency);
+        }
+    }
+
     list->push_back(std::move(info));
     return TRUE;
 }
@@ -156,6 +166,45 @@ void OverlayManager::normalize_live_dpi(std::vector<MonitorInfo>& discovered) co
     }
 }
 
+void OverlayManager::normalize_live_refresh(
+    std::vector<MonitorInfo>& discovered) {
+    for (auto& monitor : discovered) {
+        if (monitor.device_name.empty()) continue;
+        DEVMODEW dm{};
+        dm.dmSize = sizeof(dm);
+        if (!EnumDisplaySettingsExW(monitor.device_name.c_str(),
+                                    ENUM_CURRENT_SETTINGS, &dm, 0))
+            continue;
+        if (dm.dmDisplayFrequency >= 30 && dm.dmDisplayFrequency <= 360 &&
+            dm.dmDisplayFrequency != static_cast<DWORD>(monitor.refresh_rate_hz)) {
+            monitor.refresh_rate_hz = static_cast<int>(dm.dmDisplayFrequency);
+        }
+    }
+    if (discovered.empty()) return;
+    const bool topology_unchanged =
+        monitor_topology_equal(discovered, monitors_) &&
+        live_overlay_coverage_complete(discovered);
+    if (topology_unchanged) {
+        for (auto& m : monitors_) {
+            const auto it = std::find_if(discovered.begin(), discovered.end(),
+                [&](const MonitorInfo& d) { return identity(d) == identity(m); });
+            if (it != discovered.end() && it->refresh_rate_hz >= 30 &&
+                it->refresh_rate_hz <= 360) {
+                m.refresh_rate_hz = it->refresh_rate_hz;
+            }
+        }
+        for (auto& overlay : overlays_) {
+            const auto oid = identity(overlay.monitor);
+            const auto dit = std::find_if(discovered.begin(), discovered.end(),
+                [&](const MonitorInfo& d) { return identity(d) == oid; });
+            if (dit != discovered.end() && dit->refresh_rate_hz >= 30 &&
+                dit->refresh_rate_hz <= 360) {
+                overlay.monitor.refresh_rate_hz = dit->refresh_rate_hz;
+            }
+        }
+    }
+}
+
 // T-013R3: "topology unchanged" additionally requires that every discovered
 // monitor currently has a live, identity-matched MonitorOverlay whose
 // metadata equals the discovered metadata. Without this, an overlay whose
@@ -220,6 +269,14 @@ bool OverlayManager::create_one(const MonitorInfo& monitor, MonitorOverlay& resu
 bool OverlayManager::create(HINSTANCE instance, bool diagnostic) {
     instance_ = instance;
     diagnostic_ = diagnostic;
+    create_topology(instance, diagnostic);
+    return !overlays_.empty();
+}
+
+OverlayManager::Convergence OverlayManager::create_topology(HINSTANCE instance,
+                                                            bool diagnostic) {
+    instance_ = instance;
+    diagnostic_ = diagnostic;
     monitors_ = enumerate_ ? enumerate_() : enumerate_monitors();
     overlays_.clear();
     overlays_.reserve(monitors_.size());
@@ -242,7 +299,9 @@ bool OverlayManager::create(HINSTANCE instance, bool diagnostic) {
 
     normalize_snapshot_from_overlays(monitors_);
 
-    return !overlays_.empty();
+    return live_overlay_coverage_complete(monitors_)
+        ? Convergence::Complete
+        : Convergence::Incomplete;
 }
 
 void OverlayManager::show() {
@@ -260,6 +319,10 @@ void OverlayManager::destroy() {
 }
 
 bool OverlayManager::refresh_topology() {
+    return refresh_topology_ex() != Convergence::Unchanged;
+}
+
+OverlayManager::Convergence OverlayManager::refresh_topology_ex() {
     // Same enumeration authority as create(): the injected seam when present,
     // otherwise native enumeration (test seam only; production unchanged).
     auto discovered = enumerate_ ? enumerate_() : enumerate_monitors();
@@ -267,12 +330,18 @@ bool OverlayManager::refresh_topology() {
     // decision so a deferred WM_DPICHANGED cannot become a no-op just
     // because bounds/device identity are unchanged.
     normalize_live_dpi(discovered);
+    // PERF-001/PROBLEM 3: refresh-rate-only change is NOT a topology change.
+    // Propagate the current live refresh rate to each discovered monitor so the
+    // cached monitors_ snapshot stays current; this must happen before the
+    // "unchanged" decision so a 60 Hz -> 240 Hz change updates metadata
+    // without recreating the overlay HWND.
+    normalize_live_refresh(discovered);
     // T-013R3 topology-liveness invariant: metadata equality alone never
     // proves convergence. A monitor whose overlay creation failed (or whose
     // recreation failed during an earlier refresh) must be retried here on
     // the next deferred refresh, not permanently dropped.
     if (monitor_topology_equal(discovered, monitors_) &&
-        live_overlay_coverage_complete(discovered)) return false;
+        live_overlay_coverage_complete(discovered)) return Convergence::Unchanged;
 
     log_write(LogLevel::Info, "overlay_manager: topology transition begin");
     for (const auto& old_monitor : monitors_)
@@ -325,7 +394,9 @@ bool OverlayManager::refresh_topology() {
               std::to_string(overlays_.size()));
 
     if (on_topology_changed_) on_topology_changed_();
-    return true;
+    return live_overlay_coverage_complete(monitors_)
+        ? Convergence::Complete
+        : Convergence::Incomplete;
 }
 
 void OverlayManager::render_frame(const TrailEffect& effect,
@@ -343,16 +414,23 @@ void OverlayManager::render_frame(const TrailEffect& effect,
     (void)click_config;  // ClickBubbleEffect::draw() carries its own config
     ++frame_builds_;
 
+    partition_inputs_.resize(overlays_.size());
+    for (std::size_t i = 0; i < overlays_.size(); ++i) {
+        partition_inputs_[i].bounds = overlays_[i].monitor.bounds;
+        partition_inputs_[i].refresh_rate_hz =
+            overlays_[i].monitor.refresh_rate_hz;
+    }
+    const auto& partitions =
+        frame_geometry_.partition_for_overlays(partition_inputs_);
+
     last_presenting_ = 0;
-    for (auto& overlay : overlays_) {
-        // Monitor transform + culling happen inside the window. The dirty
-        // contract (frame_geometry.h) is committed by the window only after a
-        // successful present, so a frame with no primitives clears every
-        // dirty overlay exactly once and then stops presenting clean monitors.
-        const bool intersects = frame_geometry_.intersects(overlay.monitor.bounds);
+    for (std::size_t i = 0; i < overlays_.size(); ++i) {
+        auto& overlay = overlays_[i];
+        const auto& partition = partitions[i];
         const OverlayDirtyState::Decision decision =
-            overlay.window->dirty_state().peek(intersects);
-        overlay.window->render_frame(frame_geometry_, intersects, now_ns);
+            overlay.window->dirty_state().peek(partition.intersects());
+        overlay.window->render_frame(frame_geometry_,
+                                     partition.primitive_indices, now_ns);
         if (decision == OverlayDirtyState::Decision::PresentContent) {
             ++last_presenting_;
         }

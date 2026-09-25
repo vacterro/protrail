@@ -5,17 +5,17 @@
 // The distinction is a PRODUCT contract, not a cosmetic one:
 //
 //   Normal              a user launched ProTrail (double click, shortcut,
-//                       Start menu). Open the compact Main product home.
+//                       Start menu). Open the ProTrail product window.
 //   AutostartMinimized  Windows launched ProTrail from the per-user Run
 //                       entry. Initialize services, tray and effect/render
 //                       infrastructure, but NEVER show or activate the
-//                       Main/Settings window: no window flash, no taskbar
+//                       product window: no window flash, no taskbar
 //                       button, no stolen keyboard focus. The tray icon is
 //                       how the user reaches the product from there.
 //
 // Detection is a pure function of the command line so it is unit-testable
 // without launching a process, and the silent path is a decision the caller
-// reads off startup_mode_requests_settings() rather than a scattered
+// reads off startup_mode_requests_product_window() rather than a scattered
 // if-statement.
 
 #include "../platform/autostart.h"
@@ -37,9 +37,9 @@ enum class StartupMode {
 StartupMode parse_startup_mode(std::wstring_view command_line);
 
 // The ONE authority for "may this launch show the product window by
-// itself?". A manual launch opens Main; an autostart launch does not, and
-// the tray remains the only way in until the user asks.
-constexpr bool startup_mode_requests_settings(StartupMode mode) {
+// itself?". A manual launch opens the product window; an autostart launch
+// does not, and the tray remains the only way in until the user asks.
+constexpr bool startup_mode_requests_product_window(StartupMode mode) {
     return mode == StartupMode::Normal;
 }
 

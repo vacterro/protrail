@@ -1,6 +1,6 @@
 # ProTrail
 
-**v0.1.7**
+**v0.1.8**
 
 ProTrail is a native Windows desktop utility that renders configurable cursor
 trails, click and press-and-hold effects, and motion wake geometry without ever
@@ -131,20 +131,19 @@ headless through Qt's `offscreen` platform.
 
 ## Release status
 
-**v0.1.7 is the official Windows x64 portable release candidate. The
-operator-authorized deterministic product icon is integrated and the source
-release is published.** The portable binary package remains subject to the
-official packaging, smoke, checksum, and publication gates.
+**v0.1.8 is the official Windows x64 portable release.** It carries the
+operator-authorized deterministic product icon and the complete committed
+product source closure required by the canonical CMake target list.
 
-Official Windows binary distribution is gated on the final ProTrail product
-icon being supplied and accepted
-(`FINAL_BINARY_RELEASE_BLOCKED: USER_PRODUCT_ICON_PENDING`, see
-[RELEASE_BLOCKERS.md](RELEASE_BLOCKERS.md)). The generated tray cursor icon is a
-development fallback, not approved final branding.
+The portable binary package is produced by the official packaging, smoke,
+checksum, and publication gates. Signing credentials are not configured, so
+the release is explicitly unsigned; see
+[RELEASE_BLOCKERS.md](RELEASE_BLOCKERS.md) for the resolved product-icon gate
+and the remaining publication evidence.
 
 ### Packaging
 
-The planned binary release is a portable archive,
+The binary release is a portable archive,
 `ProTrail-v<VERSION>-win-x64-portable.zip`, plus `SHA256SUMS.txt`. One command
 from a clean checkout builds, tests, stages, verifies and packages it:
 

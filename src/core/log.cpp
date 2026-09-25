@@ -8,7 +8,9 @@
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <mutex>
+#include <utility>
 
 namespace ptd {
 
@@ -19,6 +21,7 @@ std::filesystem::path g_path;
 bool g_initialized = false;
 LogSinkFn g_custom_sink = nullptr;
 KnownFolderProbeFn g_known_folder_probe = nullptr;
+ModulePathQueryForTests g_module_path_query_for_tests;
 
 bool production_known_folder_probe(std::wstring& out) {
     wchar_t* raw = nullptr;
@@ -30,6 +33,18 @@ bool production_known_folder_probe(std::wstring& out) {
     return false;
 }
 
+std::size_t query_module_path(wchar_t* buffer, std::size_t capacity) {
+    ModulePathQueryForTests query;
+    {
+        std::lock_guard lock(g_mutex);
+        query = g_module_path_query_for_tests;
+    }
+    if (query) return query(buffer, capacity);
+    if (capacity > (std::numeric_limits<DWORD>::max)()) return 0;
+    return static_cast<std::size_t>(GetModuleFileNameW(
+        nullptr, buffer, static_cast<DWORD>(capacity)));
+}
+
 std::string path_to_utf8(const std::filesystem::path& path) {
     const std::u8string u8 = path.u8string();
     return std::string(reinterpret_cast<const char*>(u8.data()), u8.size());
@@ -37,8 +52,14 @@ std::string path_to_utf8(const std::filesystem::path& path) {
 
 std::filesystem::path fallback_base_dir() {
     const std::wstring exe_dir = executable_directory();
-    return exe_dir.empty() ? std::filesystem::path(L".")
-                           : std::filesystem::path(exe_dir);
+    if (exe_dir.empty()) {
+        // Genuine resolution failure must not silently use CWD; use an absolute
+        // fallback (the same known-folder result) or report failure.
+        ptd::log_write(LogLevel::Error,
+                       "log: executable path resolution failed; fallback is absolute, not CWD");
+        return std::filesystem::temp_directory_path();
+    }
+    return std::filesystem::path(exe_dir);
 }
 
 const char* level_text(LogLevel level) {
@@ -69,6 +90,16 @@ void set_known_folder_probe_for_tests(KnownFolderProbeFn probe) {
     g_known_folder_probe = probe;
 }
 
+void set_module_path_query_for_tests(ModulePathQueryForTests query) {
+    std::lock_guard lock(g_mutex);
+    g_module_path_query_for_tests = std::move(query);
+}
+
+void clear_module_path_query_for_tests() {
+    std::lock_guard lock(g_mutex);
+    g_module_path_query_for_tests = {};
+}
+
 bool local_app_data_folder(std::wstring& out) {
     KnownFolderProbeFn probe = nullptr;
     {
@@ -79,10 +110,16 @@ bool local_app_data_folder(std::wstring& out) {
 }
 
 std::wstring executable_directory() {
-    wchar_t buffer[MAX_PATH]{};
-    const DWORD written = GetModuleFileNameW(nullptr, buffer, MAX_PATH);
-    if (written == 0 || written >= MAX_PATH) return {};
-    return std::filesystem::path(buffer).parent_path().wstring();
+    std::wstring buffer(MAX_PATH, L'\0');
+    for (;;) {
+        const std::size_t written = query_module_path(buffer.data(), buffer.size());
+        if (written == 0) return {};
+        if (written < buffer.size()) {
+            buffer.resize(written);
+            return std::filesystem::path(buffer).parent_path().wstring();
+        }
+        buffer.resize(buffer.size() * 2);
+    }
 }
 
 std::wstring default_log_path() {
@@ -114,6 +151,7 @@ void reset_log_for_tests() {
     g_path.clear();
     g_custom_sink = nullptr;
     g_known_folder_probe = nullptr;
+    g_module_path_query_for_tests = {};
 }
 
 bool log_init(const std::wstring& explicit_path) {

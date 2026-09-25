@@ -605,10 +605,15 @@ SettingsWindow::SettingsWindow(const ptd::TrailConfig& trail,
       master_enabled_(master_enabled),
       start_with_windows_(start_with_windows),
       trail_cfg_(trail), click_cfg_(click) {
-    setWindowTitle(QStringLiteral("ProTrail Settings"));
-    // T-020 Phase 14: practical compact minimum (was 640x540).
-    setMinimumSize(520, 500);
+    setWindowTitle(QStringLiteral("ProTrail"));
+    // Unified product surface: one resizable window, with vertical scrolling
+    // reserved for the content-heavy Trail and Click tabs.
+     setMinimumSize(520, 500);
     resize(520, 500);
+
+    // Fresh launches always start at General. The tab index is deliberately
+    // session-local; it is not part of AppConfig.
+
 
     // Apply Golden Default theme
     setStyleSheet(theme::golden_stylesheet());
@@ -642,6 +647,19 @@ SettingsWindow::SettingsWindow(const ptd::TrailConfig& trail,
 
     // Single explicit initialization: copy validated config -> widgets
     // with all signals blocked; no publications during construction.
+    populate_from_config();
+    apply_enable_states();
+}
+
+SettingsWindow::SettingsWindow(const ptd::AppConfig& config, QWidget* parent)
+    : SettingsWindow(config.trail, config.click, config.master_enabled,
+                     config.start_with_windows, parent) {
+    const ptd::AppConfig validated = ptd::AppConfig::validated(config);
+    master_enabled_ = validated.master_enabled;
+    start_with_windows_ = validated.start_with_windows;
+    trail_cfg_ = validated.trail;
+    click_cfg_ = validated.click;
+    render_baseline_ = validated.render;
     populate_from_config();
     apply_enable_states();
 }
@@ -1927,6 +1945,9 @@ void SettingsWindow::set_click_widgets(const ptd::ClickConfig& c) {
 
 // Single explicit initialization path from validated configs to widgets
 // (Defect B). All signals blocked: construction publishes nothing.
+// CORE-004: the authoritative baseline is already carried in the fields set by
+// the constructor/apply_config; nothing additional is preserved here because
+// SettingsWindow owns only UI-editable fields and keeps a baseline AppConfig.
 void SettingsWindow::populate_from_config() {
     set_trail_widgets(trail_cfg_);
     set_click_widgets(click_cfg_);
@@ -1949,7 +1970,7 @@ void SettingsWindow::on_start_with_windows_toggled(bool on) {
 }
 
 // T-032: silent programmatic population. Signals blocked, so a config load
-// (or a Main-surface edit routed in from outside) never publishes back.
+// never publishes back.
 void SettingsWindow::set_start_with_windows(bool on) {
     if (start_with_windows_ == on
         && d_->chk_start_with_windows->isChecked() == on) {
@@ -1991,8 +2012,20 @@ ptd::AppConfig SettingsWindow::capture_current_settings() const {
     cfg.start_with_windows = start_with_windows_;
     cfg.trail = trail_cfg_;
     cfg.click = click_cfg_;
-    cfg.render.diagnostic_primitives = false;
+    // CORE-004: complete-state authority -- non-UI fields come from the
+    // retained baseline (seeded via apply_config / populate_from_config).
+    cfg.render = render_baseline_;
     return ptd::AppConfig::validated(cfg);
+}
+
+void SettingsWindow::set_full_snapshot_for_tests(const ptd::AppConfig& cfg) {
+    const ptd::AppConfig validated = ptd::AppConfig::validated(cfg);
+    master_enabled_ = validated.master_enabled;
+    start_with_windows_ = validated.start_with_windows;
+    trail_cfg_ = validated.trail;
+    click_cfg_ = validated.click;
+    render_baseline_ = validated.render;
+    populate_from_config();
 }
 
 void SettingsWindow::apply_config(const ptd::AppConfig& cfg) {
@@ -2006,6 +2039,8 @@ void SettingsWindow::apply_config(const ptd::AppConfig& cfg) {
 
     trail_cfg_ = validated.trail;
     click_cfg_ = validated.click;
+    // CORE-004: retain non-UI baseline for future whole-config captures.
+    render_baseline_ = validated.render;
 
     // Programmatically update all widgets with signals blocked
     {
@@ -2033,33 +2068,6 @@ void SettingsWindow::apply_config(const ptd::AppConfig& cfg) {
     (void)master_changed;
     (void)startup_changed;
     emit app_config_applied(validated);
-}
-
-// T-37: silent cross-surface synchronization. Every stored config field is
-// pushed into its widget with signals blocked, and NOTHING is emitted -- so a
-// Main-surface edit (or any other authority applying canonical state) can
-// never loop back into a publication, a save, or a callback recursion. This
-// is deliberately NOT apply_config(): that is the explicit whole-config USER
-// operation and publishes exactly one transaction.
-void SettingsWindow::sync_from_app_config(const ptd::AppConfig& cfg) {
-    const ptd::AppConfig validated = ptd::AppConfig::validated(cfg);
-    master_enabled_ = validated.master_enabled;
-    start_with_windows_ = validated.start_with_windows;
-    trail_cfg_ = validated.trail;
-    click_cfg_ = validated.click;
-    {
-        QSignalBlocker bm(d_->chk_master);
-        QSignalBlocker bt(d_->chk_trail);
-        QSignalBlocker bc(d_->chk_click);
-        QSignalBlocker bs(d_->chk_start_with_windows);
-        d_->chk_master->setChecked(master_enabled_);
-        d_->chk_trail->setChecked(trail_cfg_.enabled);
-        d_->chk_click->setChecked(click_cfg_.enabled);
-        d_->chk_start_with_windows->setChecked(start_with_windows_);
-    }
-    apply_enable_states();
-    set_trail_widgets(trail_cfg_);
-    set_click_widgets(click_cfg_);
 }
 
 void SettingsWindow::on_restore_all() {

@@ -154,6 +154,9 @@ public:
     bool reference_tessellation_for_tests() const {
         return reference_tessellation_;
     }
+    unsigned long long canonical_curve_build_count_for_tests() const {
+        return canonical_curve_build_count_;
+    }
 
     // ---- Pure math (MVP 05 Phases F/G; testable without Direct2D) ----
 
@@ -359,11 +362,17 @@ private:
 
     // PERF-003: subdivisions for one span's cubic Bezier. Adaptive by default;
     // fixed kCurveSubdivisionCeiling when the test-only reference oracle is
-    // enabled. Both canonical walkers call this so stroke and sparkles can
-    // never diverge.
+    // enabled.
     int subdivisions_for_span(float x0, float y0, float c1x, float c1y,
                               float c2x, float c2y, float x1, float y1,
                               float t_span) const;
+
+    // PERF-003: materialize the smoothed canonical pieces once. Direct
+    // polyline mode stays on its allocation-free path.
+    void materialize_canonical_pieces(const std::vector<BuildPoint>& pts) const;
+    void materialize_canonical_catmull_rom(
+        const std::vector<BuildPoint>& pts,
+        std::vector<CanonicalPiece>& out) const;
 
     // T-021 spatial sparkle sampler -- WORLD-ANCHORED lattice.
     //
@@ -392,45 +401,31 @@ private:
     // resolve only the newest kMaxSparklesPerFrame in a fixed stack array.
     // An over-long path drops its oldest slots without renumbering survivors.
     //
-    // for_each_canonical_piece walks the exact geometry pieces consumed by
-    // the visible stroke (polyline chords, or the Catmull-Rom Bezier
-    // subdivision segments emit_catmull_rom generates), oldest -> newest,
-    // handing each to fn as a CanonicalPiece.
+    // Smoothed traversal uses cached pieces. Direct polyline mode streams raw
+    // chords from pts without allocating a duplicate path.
     template<typename Fn>
     void for_each_canonical_piece(const std::vector<BuildPoint>& pts,
                                   Fn&& fn) const;
 
-    // World-anchored bounded slot lattice over the whole canonical path.
-    // Calls fn(const SparklePoint&) head -> tail, at most
-    // kMaxSparklesPerFrame times. No acceptance, no spread: pure geometry
-    // plus stable identity.
+    // World-anchored bounded slot lattice over the canonical path. Calls
+    // fn(const SparklePoint&) head -> tail, at most kMaxSparklesPerFrame
+    // times. No acceptance, no spread: pure geometry plus stable identity.
+    // Smoothed paths read canonical_pieces_; direct paths stream chords.
     template<typename Fn>
     void for_each_sparkle_slot(const std::vector<BuildPoint>& pts,
                                Fn&& fn) const;
 
-    // Total length of the canonical stroke path -- the same geometry
-    // pieces the renderer receives. Measured before dot emission so the
-    // Dotted/Spark lattice can be head-anchored instead of crawling with
-    // the retracting tail.
+    // Smoothed total is stored during materialization; direct total is summed
+    // from raw chords only when dot spacing needs it.
+    float canonical_arc_length() const;
     float canonical_arc_length(const std::vector<BuildPoint>& pts) const;
 
-    // Both emitters take the segment alpha from alpha_at()/fade() -- the
-    // documented fade contract, including fade_start and FadeCurve --
-    // never from a raw linear window position.
+    // Both emitters use the documented fade contract.
     void emit_polyline(const std::vector<BuildPoint>& pts,
                        int64_t now_ns,
                        TrailGeometrySink& sink) const;
-    void emit_catmull_rom(const std::vector<BuildPoint>& pts,
-                          int64_t now_ns,
+    void emit_catmull_rom(int64_t now_ns,
                           TrailGeometrySink& sink) const;
-    // T-021 spatial arc-length sparkle emission. Walks the same canonical
-    // geometry segments used by the visible Trail (polyline chords or
-    // Catmull-Rom Bezier subdivisions). Emits sparkle candidates at fixed
-    // arc-length intervals in stable source occurrences; density is geometry-driven,
-    // not per-raw-input-point. Hard-capped at kMaxSparklesPerFrame.
-    // smoothing == 0: walks polyline chords (pts[i-1] -> pts[i]).
-    // smoothing  > 0: walks the same Catmull-Rom subdivision segments that
-    //                 emit_catmull_rom() generated for the stroke.
     void emit_sparkles_arc(const std::vector<BuildPoint>& pts,
                            int64_t now_ns,
                            TrailGeometrySink& sink) const;
@@ -444,6 +439,13 @@ private:
 
     // Reused scratch buffer (single-threaded): no per-frame heap churn.
     mutable std::vector<BuildPoint> scratch_;
+    // PERF-003: canonical pieces materialized ONCE per build_geometry pass,
+    // then reused by stroke emission, arc-length (dot lattice), and sparkle
+    // slot resolution. Eliminates the prior 3 independent canonical walks over
+    // the same adaptive curve. Cleared at the start of each build.
+    mutable std::vector<CanonicalPiece> canonical_pieces_;
+    mutable float canonical_arc_length_px_ = 0.0f;
+    mutable unsigned long long canonical_curve_build_count_ = 0;
 };
 
 } // namespace ptd

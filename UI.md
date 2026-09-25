@@ -15,6 +15,16 @@ remembered prompt, screenshot estimate or old implementation gives
 different colour values, this file wins. A model that follows those different
 values has not followed the saipen UI contract.
 
+## ProTrail product surface
+
+ProTrail is one resizable window, not a compact window plus an advanced dialog.
+Its tabs are General, Trail, Click, and Developer in developer builds only.
+General is the fresh-launch home; Trail and Click are scrollable domain editors.
+Close hides the window to the tray. Autostart stays tray-only, while interactive
+second-instance activation and tray Open ProTrail restore the same window.
+Effect, mode, and style choices use visible exclusive selector-button grids;
+ordinary product selection does not use combo boxes.
+
 ## Intent
 
 This UI is meant to feel:

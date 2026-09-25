@@ -12,15 +12,23 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <functional>
+#include <tuple>
 
 namespace ptd {
 
 namespace {
-// CORE-001 test seam: one path whose open/read is forced to fail. Empty in
-// production; never consulted unless a test armed it.
-std::wstring g_forced_read_failure_path;
-// W2-005 test seam: durable load attempt counter.
-int g_load_count = 0;
+ // CORE-001 test seam: one path whose open/read is forced to fail. Empty in
+ // production; never consulted unless a test armed it.
+ std::wstring g_forced_read_failure_path;
+ // W2-002 test seam: one path whose save is forced to fail (empty = every
+ // save). Empty in production; never consulted unless a test armed it.
+ std::wstring g_forced_save_failure_path;
+ bool g_forced_save_failure_armed = false;
+  // CORE-001 probe seam: injected existence check result + error_code.
+ ConfigStorage::FilesystemProbeFn g_probe_fn = nullptr;
+ // W2-005 test seam: durable load attempt counter.
+ int g_load_count = 0;
 
 // Extracts the numeric schema_version from raw JSON bytes without applying any
 // current-schema semantics. Used to detect a future schema BEFORE it is
@@ -46,6 +54,24 @@ void ConfigStorage::clear_read_failure_path_for_tests() {
     g_forced_read_failure_path.clear();
 }
 
+void ConfigStorage::set_save_failure_path_for_tests(const std::wstring& path) {
+    g_forced_save_failure_path = path;
+    g_forced_save_failure_armed = true;
+}
+
+void ConfigStorage::clear_save_failure_path_for_tests() {
+    g_forced_save_failure_path.clear();
+    g_forced_save_failure_armed = false;
+}
+
+void ConfigStorage::set_filesystem_probe_for_tests(FilesystemProbeFn fn) {
+    g_probe_fn = std::move(fn);
+}
+
+void ConfigStorage::clear_filesystem_probe_for_tests() {
+    g_probe_fn = nullptr;
+}
+
 // W2-005 test seam.
 void ConfigStorage::reset_load_count_for_tests() {
     g_load_count = 0;
@@ -69,8 +95,12 @@ std::wstring ConfigStorage::default_config_path() {
     // and use the ONE documented deterministic fallback: beside the
     // executable.
     const std::wstring exe_dir = ptd::executable_directory();
+    if (exe_dir.empty()) {
+        ptd::log_write(ptd::LogLevel::Error,
+                       "config: executable path resolution failed; using absolute fallback");
+    }
     const std::filesystem::path fallback =
-        (exe_dir.empty() ? std::filesystem::path(L".")
+        (exe_dir.empty() ? std::filesystem::temp_directory_path()
                          : std::filesystem::path(exe_dir)) / L"config.json";
     const std::u8string u8 = fallback.u8string();
     ptd::log_write(ptd::LogLevel::Warn,
@@ -476,7 +506,26 @@ ConfigLoadResult ConfigStorage::load_from_file_result(const std::wstring& path) 
     }
 
     std::error_code ec;
-    if (!std::filesystem::exists(path, ec)) {
+    bool exists = false;
+    if (g_probe_fn) {
+        auto [inj_exists, inj_ec] = g_probe_fn(path);
+        exists = inj_exists;
+        ec = inj_ec;
+    } else {
+        exists = std::filesystem::exists(path, ec);
+    }
+    if (!exists) {
+        if (ec) {
+            // CORE-001: filesystem probe error -- cannot establish absence.
+            // Treat as protected source: persistence disabled, original untouched.
+            ptd::log_write(ptd::LogLevel::Error,
+                           "config: filesystem existence probe failed (" +
+                               ec.message() +
+                               "); persistence disabled to protect potential source");
+            result.status = ConfigLoadStatus::ReadFailure;
+            result.persistence_allowed = false;
+            return result;
+        }
         // T-33: a fresh configuration is the canonical Release Defaults, not
         // the C++ struct initializers. One semantic source of truth. A fresh
         // install is ordinary writable state.
@@ -521,6 +570,46 @@ ConfigLoadResult ConfigStorage::load_from_file_result(const std::wstring& path) 
         return result;
     }
 
+    // CORE-003: an existing persisted file whose schema provenance is absent or
+    // wrong-type must NOT silently become writable current schema. Only three
+    // cases are writable: genuinely absent on a fresh install (handled above),
+    // numeric historical/current/future schema. Any other schema metadata is
+    // protected (persistence disabled) so a later save cannot canonicalize it.
+    {
+        const QJsonDocument probe = QJsonDocument::fromJson(bytes);
+        if (!probe.isNull() && probe.isObject()) {
+            const QJsonObject root = probe.object();
+            if (root.contains("schema_version") &&
+                !root["schema_version"].isDouble()) {
+                ptd::log_write(ptd::LogLevel::Error,
+                               "config: schema_version has non-numeric type; "
+                               "persistence disabled to protect unknown provenance");
+                result.status = ConfigLoadStatus::UnsupportedFutureSchema;
+                result.persistence_allowed = false;
+                return result;
+            }
+            if (!root.contains("schema_version")) {
+                ptd::log_write(ptd::LogLevel::Error,
+                               "config: existing file has no schema_version; "
+                               "persistence disabled (legacy-less provenance)");
+                result.status = ConfigLoadStatus::UnsupportedFutureSchema;
+                result.persistence_allowed = false;
+                return result;
+            }
+            // Numeric but non-integral (e.g. 10.5) after toInt truncation gives
+            // wrong schema; treat as wrong-type.
+            if (root["schema_version"].toDouble() !=
+                static_cast<double>(root["schema_version"].toInt())) {
+                ptd::log_write(ptd::LogLevel::Error,
+                               "config: schema_version non-integral; "
+                               "persistence disabled");
+                result.status = ConfigLoadStatus::UnsupportedFutureSchema;
+                result.persistence_allowed = false;
+                return result;
+            }
+        }
+    }
+
     QString err;
     auto opt = deserialize_json(bytes, &err);
     if (!opt) {
@@ -561,6 +650,15 @@ AppConfig ConfigStorage::load_from_file(const std::wstring& path) {
 }
 
 bool ConfigStorage::save_to_file(const AppConfig& config, const std::wstring& path) {
+    // W2-002 deterministic failure seam: an armed empty path fails every save;
+    // an armed non-empty path fails only that exact target. Production leaves
+    // it disarmed, so this branch is never taken outside a test.
+    if (g_forced_save_failure_armed &&
+        (g_forced_save_failure_path.empty() || g_forced_save_failure_path == path)) {
+        ptd::log_write(ptd::LogLevel::Error,
+                       "config: save forced to fail by test seam");
+        return false;
+    }
     const std::filesystem::path target(path);
     std::error_code ec;
     std::filesystem::create_directories(target.parent_path(), ec);

@@ -93,13 +93,17 @@ private:
     std::unique_ptr<Impl> d_;
 };
 
-// Main Settings window with three tabs: General / Trail / Click.
+// Unified ProTrail product window with General / Trail / Click tabs and an
+// optional Developer tab in developer builds. The class name remains stable
+// to avoid needless churn in the existing configuration/editor implementation.
 // Emits validated config structs and master/enable toggles. Does not
 // touch effects/rendering directly -- Application connects signals and
 // publishes to effects (Phase M).
 class SettingsWindow : public QWidget {
     Q_OBJECT
 public:
+    explicit SettingsWindow(const ptd::AppConfig& config,
+                            QWidget* parent = nullptr);
     explicit SettingsWindow(const ptd::TrailConfig& trail,
                             const ptd::ClickConfig& click,
                             bool master_enabled = true,
@@ -132,8 +136,8 @@ public slots:
     // Called by Application when master disable clears visible effects;
     // keeps checkboxes in sync if needed.
     void set_master_enabled(bool);
-    // T-032: silent programmatic population (no publication), so a config
-    // load or a Main-surface edit can never loop back into a save.
+    // T-032: silent programmatic population (no publication) for the
+    // application-level startup preference.
     void set_start_with_windows(bool);
 
 public:
@@ -141,21 +145,15 @@ public:
     bool start_with_windows() const;
 
     // T-34: Developer defaults & presets interface
-    ptd::AppConfig capture_current_settings() const;
+     ptd::AppConfig capture_current_settings() const;
     void apply_config(const ptd::AppConfig& cfg);
+    // CORE-004: seed the retained non-UI baseline for whole-config captures.
+    void set_full_snapshot_for_tests(const ptd::AppConfig& cfg);
     bool has_dev_tab() const;
     QWidget* dev_tab() const;
     std::optional<ptd::AppConfig> captured_config() const;
     void show_dev_status(const QString& text);
     void set_developer_defaults_controller(bool enabled);
-
-    // T-37: SILENT cross-surface synchronization. Applies a canonical
-    // AppConfig to every widget with signals blocked and emits NOTHING, so
-    // the Main Essentials surface (or any other authority) can push state
-    // into Settings without a callback loop, a duplicate save or a
-    // publication storm. Distinct from apply_config(), which is the explicit
-    // whole-config USER operation and publishes ONE transaction.
-    void sync_from_app_config(const ptd::AppConfig& cfg);
 
 private slots:
     void on_master_toggled(bool);
@@ -221,12 +219,14 @@ private:
     void set_click_widgets(const ptd::ClickConfig&);
     void apply_enable_states();
 
-    bool master_enabled_ = true;
+     bool master_enabled_ = true;
     // T-032: persisted application preference; not part of TrailConfig or
     // ClickConfig because it is not an effect setting.
     bool start_with_windows_ = false;
     ptd::TrailConfig trail_cfg_;
     ptd::ClickConfig click_cfg_;
+    // CORE-004: complete canonical baseline so non-UI fields survive capture.
+    ptd::RenderConfig render_baseline_{};
     std::optional<ptd::AppConfig> captured_config_;
     bool developer_defaults_controller_ = false;
 

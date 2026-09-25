@@ -163,9 +163,9 @@ QPushButton:disabled {
 }
 
 /* ---- Inputs: sunken bevel on compareBack ---- */
-QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox,
-QComboBox:editable, QLineEdit:focus, QSpinBox:focus,
-QDoubleSpinBox:focus, QComboBox:focus {
+QLineEdit, QSpinBox, QDoubleSpinBox,
+QLineEdit:focus, QSpinBox:focus,
+QDoubleSpinBox:focus {
     background: %10;
     border: 2px solid;
     border-top-color: %7;
@@ -177,7 +177,7 @@ QDoubleSpinBox:focus, QComboBox:focus {
     selection-background-color: %14;
     selection-color: %11;
 }
-QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {
+QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus {
     border-top-color: %9;
     border-left-color: %9;
     border-bottom-color: %9;
@@ -207,17 +207,6 @@ QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {
     border-top: 3px solid %11;
     width: 0; height: 0;
 }
-QComboBox::drop-down {
-    border: none;
-    width: 16px;
-}
-QComboBox QAbstractItemView {
-    background: %4;
-    border: 2px solid %7;
-    selection-background-color: %14;
-    selection-color: %11;
-}
-
 /* ---- Checkbox: sunken indicator; checked = teal fill + dark tick ----
    T-010R Repair 4: checked state must not depend on accent color alone.
    The checked indicator draws the embedded tick mark (:/ui/check.xpm,

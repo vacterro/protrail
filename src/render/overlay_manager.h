@@ -20,6 +20,9 @@ struct MonitorInfo {
     float scale = 1.0f;      // Metadata only; never multiply physical coordinates.
     bool is_primary = false;
     std::wstring device_name;
+    // PERF-001: cached refresh rate (Hz) for this monitor's current mode.
+    // 0 means unknown/not yet queried. Updated by topology reconciliation.
+    int refresh_rate_hz = 0;
 };
 
 // Live identity pairing. Monitor metadata and its HWND/resource owner can
@@ -58,8 +61,16 @@ public:
     void hide();
     void destroy();
 
+    // W2-001: convergence result of a topology pass. The manager knows when
+    // coverage is incomplete so the application can schedule ONE bounded retry.
+    enum class Convergence : int { Unchanged = 0, Complete = 1, Incomplete = 2 };
+
     // Deferred reconciliation target. This function is NEVER called from
     // OverlayWindow::wnd_proc; Application queues/coalesces it first.
+    // W2-001: refresh_topology_ex() is the authority; refresh_topology() is
+    // the legacy boolean wrapper used by existing callers/tests.
+    Convergence refresh_topology_ex();
+    Convergence create_topology(HINSTANCE instance, bool diagnostic);
     bool refresh_topology();
 
     void render_frame(const TrailEffect& effect,
@@ -77,6 +88,10 @@ public:
     // render_frame (i.e. were intersected by the frame). Monitor transform
     // and culling stay per-overlay.
     std::size_t last_presenting_overlays() const { return last_presenting_; }
+    // PERF-001: max cached refresh among this frame's non-empty content buckets.
+    int content_refresh_rate_hz() const {
+        return frame_geometry_.content_refresh_rate_hz();
+    }
 
     // Enumerated topology may include a monitor whose overlay failed; live
     // overlays always carry their own MonitorInfo directly.
@@ -102,6 +117,11 @@ private:
     bool create_one(const MonitorInfo& monitor, MonitorOverlay& result);
     bool query_window_dpi(HWND hwnd, UINT& dpi_x, UINT& dpi_y) const;
     void normalize_live_dpi(std::vector<MonitorInfo>& discovered) const;
+    // PERF-001/PROBLEM 3: update refresh_rate_hz on each monitor from the live
+    // display-mode query, without treating it as a topology change. Caller
+    // owns the discovered list; live overlays keep their current value until a
+    // successful reconciliation.
+    void normalize_live_refresh(std::vector<MonitorInfo>& discovered);
     // T-013R3 topology-liveness invariant: true only when every discovered
     // monitor has a live, identity-matched MonitorOverlay whose metadata is
     // current. A metadata-equal topology with a missing live overlay is NOT
@@ -122,6 +142,9 @@ private:
     std::vector<MonitorOverlay> overlays_;
     // PERF-001: ONE reusable world-space frame built per render_frame call.
     FrameGeometry frame_geometry_;
+    // PERF-002: reused display rectangles supplied to the frame's single
+    // partition pass. Capacity tracks the topology high-water mark.
+    std::vector<FrameGeometry::OverlayInput> partition_inputs_;
     unsigned long long frame_builds_ = 0;
     std::size_t last_presenting_ = 0;
     std::function<void()> on_topology_changed_;

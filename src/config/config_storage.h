@@ -4,6 +4,9 @@
 
 #include <string>
 #include <optional>
+#include <functional>
+#include <tuple>
+#include <system_error>
 #include <QByteArray>
 #include <QString>
 
@@ -73,11 +76,26 @@ public:
     // Returns true on success, false on error.
     static bool save_to_file(const AppConfig& config, const std::wstring& path = default_config_path());
 
+    // CORE-001 probe seam: force the filesystem existence check to return a
+    // non-zero error_code for this path, exercising the protected probe-error
+    // branch deterministically. Empty means no injection.
+    using FilesystemProbeFn = std::function<std::tuple<bool, std::error_code>(const std::wstring&)>;
+    static void set_filesystem_probe_for_tests(FilesystemProbeFn fn);
+    static void clear_filesystem_probe_for_tests();
+
     // CORE-001 test seam: force an open/read failure for exactly this path so
     // the ReadFailure provenance can be exercised deterministically. Never
     // consulted by production code paths.
     static void set_read_failure_path_for_tests(const std::wstring& path);
     static void clear_read_failure_path_for_tests();
+
+    // W2-002 test seam: force save_to_file() to fail deterministically for
+    // exactly the given path (an empty path arms every save), so an
+    // Application-level regression can prove the persistence-first autostart
+    // transaction never mutates the Run key from an uncommitted preference.
+    // Production behaviour is unchanged when the seam is disabled.
+    static void set_save_failure_path_for_tests(const std::wstring& path);
+    static void clear_save_failure_path_for_tests();
 
     // W2-005 test seam: count durable load attempts so a regression can prove
     // Application startup reads configuration exactly once.

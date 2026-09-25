@@ -40,13 +40,18 @@ public:
                      ptd::TrailColorF color) override {
         segs.push_back(Seg{x1, y1, x2, y2, alpha, thickness_px, color});
     }
+    void add_sparkle(float, float, float, float, float,
+                     ptd::TrailColorF, ptd::TrailSparkleShape) override {
+        ++sparkle_count;
+    }
     struct Seg {
         float x1, y1, x2, y2, alpha, thickness;
         ptd::TrailColorF color;
     };
     std::vector<Seg> segs;
+    std::size_t sparkle_count = 0;
 
-    void clear() { segs.clear(); }
+    void clear() { segs.clear(); sparkle_count = 0; }
 };
 
 constexpr int64_t kMs = 1'000'000; // ns per ms
@@ -1233,7 +1238,47 @@ int main() {
         }
     }
 
-    // ---- PERF-003: adaptive tessellation scales with complexity, not sample count ----
+        // ---- PERF-003: cached canonical curve is built once per smoothed frame ----
+        {
+            ptd::TrailConfig c = make_cfg();
+            c.style = ptd::TrailStyle::Dotted;
+            c.sparkle_mode = ptd::TrailSparkleMode::Glitter;
+            c.sparkle_amount = 1.0f;
+            c = ptd::TrailConfig::validated(c);
+
+            const int64_t now = 10'000 * kMs;
+            CursorHistory h(512);
+            for (int i = 0; i < 60; ++i) {
+                h.push(move(now - (60 - i) * 5 * kMs, i * 10, (i * i) % 80));
+            }
+
+            TrailEffect effect(c);
+            RecordSink sink;
+            effect.build_geometry(h, now, nullptr, 512, sink);
+            expect_true(effect.canonical_curve_build_count_for_tests() == 1,
+                        "perf003: one canonical curve build serves dotted stroke and sparkles");
+            expect_true(!sink.segs.empty(),
+                        "perf003: cached canonical pieces feed the dotted stroke");
+            expect_true(sink.sparkle_count > 0,
+                        "perf003: cached canonical pieces feed sparkle placement");
+
+            sink.clear();
+            effect.build_geometry(h, now + 8 * kMs, nullptr, 512, sink);
+            expect_true(effect.canonical_curve_build_count_for_tests() == 2,
+                        "perf003: each smoothed frame materializes exactly once");
+
+            c.smoothing = 0.0f;
+            c = ptd::TrailConfig::validated(c);
+            TrailEffect direct(c);
+            RecordSink direct_sink;
+            direct.build_geometry(h, now, nullptr, 512, direct_sink);
+            expect_true(direct.canonical_curve_build_count_for_tests() == 0,
+                        "perf003: direct polyline avoids curve materialization");
+            expect_true(!direct_sink.segs.empty(),
+                        "perf003: direct polyline retains stroke output");
+        }
+
+        // ---- PERF-003: adaptive tessellation scales with complexity, not sample count ----
     {
         // Dense, nearly-straight 350-sample path. The old fixed-12 walker
         // emitted (350 - 1) * 12 = 4188 segments; adaptive must emit

@@ -1,1229 +1,1283 @@
-#include <QTest>
-#include <QSignalSpy>
-#include <QAction>
-#include <QMenu>
-#include <QSystemTrayIcon>
-#include <QCheckBox>
-#include <QComboBox>
-#include <QPushButton>
-#include <QSlider>
-#include <QWidget>
 #include <QApplication>
+#include <QAction>
+#include <QCheckBox>
+#include <QPushButton>
+#include <QMenu>
+#include <QSignalSpy>
+#include <QTabWidget>
+#include <QTest>
 #include <QTimer>
 
-#include "src/app/application.h"
-#include "src/app/single_instance.h"
-#include "src/ui/tray_icon.h"
-#include "src/ui/settings_window.h"
-#include "src/ui/main_window.h"
-#include "src/config/app_config.h"
-#include "src/config/config_storage.h"
-#include "src/config/release_defaults.h"
-#include "src/config/dev_defaults.h"
-#include "src/core/log.h"
-#include "src/app/startup_paths.h"
-#include "src/render/overlay_window.h"
+#include "../src/app/application.h"
+#include "../src/app/startup_mode.h"
+#include "../src/app/topology_retry.h"
+#include "../src/config/app_config.h"
+#include "../src/config/config_storage.h"
+#include "../src/config/release_defaults.h"
+#include "../src/core/log.h"
+#include "../src/config/dev_defaults.h"
+#include "../src/platform/autostart.h"
+#include "../src/ui/branding.h"
+#include "../src/ui/settings_window.h"
+#include "../src/ui/tray_icon.h"
 
-#include <cmath>
-#include <vector>
-#include <string>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <string>
+#include <system_error>
+#include <tuple>
+#include <vector>
 
 class TestTray : public QObject {
     Q_OBJECT
 private slots:
-    void initTestCase();
-    void tray_creation();
-    void settings_hide_on_close();
-    void settings_restore();
-    void no_duplicate_settings_window();
-    void tray_enable_disable_uses_canonical_master_state();
-    void tray_action_state_updates_when_master_state_changes_from_settings();
-    void exit_performs_shutdown_path();
-    void exit_triggers_downstream_application_shutdown();
-    void tray_cleanup();
-    void repeated_show_hide_cycles();
-    void disabled_state_persistence_remains_correct();
-    void application_lifecycle_persistence_isolation();
-    void startup_path_resolution_normal_mode();
-    void startup_path_resolution_smoke_auto_exit_without_state_dir_fails_closed();
-    void startup_path_resolution_smoke_mode_with_state_dir();
-    void startup_path_resolution_state_dir_without_smoke_mode_is_ignored();
-    void single_instance_activation_contract();
-    // T-018R1 Phase 8: activation targets the one canonical window in every
-    // visibility state; smoke mode never participates in ownership.
-    void activation_restores_hidden_settings_window();
-    void activation_restores_minimized_settings_window_no_duplicate();
-    void smoke_mode_does_not_participate_in_production_ownership();
-    // T-018R2 Phase 7/8: readiness publication failure fails closed before
-    // the event loop starts.
-    void mark_ready_failure_fails_closed_without_event_loop();
-    void overlay_device_loss_recreation();
-
-    // CORE-001: a protected source must survive the full Application
-    // initialize -> shutdown lifecycle byte-identically.
-    void future_schema_survives_application_shutdown();
-    void future_schema_survives_settings_save_attempt();
-    void malformed_backup_failure_survives_application_shutdown();
-    void read_failure_survives_application_shutdown();
-
-    // CORE-002: startup reconciliation enforces the OFF preference by
-    // removing a stale owned Run value (transient disable repair).
-    void autostart_off_startup_removes_stale_owned_value();
-    void autostart_off_never_touches_unrelated_values();
-
-    // W2-005: exactly one durable config read per Application startup.
-    void startup_loads_configuration_exactly_once();
-
-    // PERF-002: durable persistence is debounced; shutdown flushes it.
-    void deferred_save_coalesces_and_shutdown_flushes();
-
-    // T-37 home-surface contract: which surface each startup mode shows, that
-    // the tray and the Advanced Settings action restore the ONE canonical
-    // window instead of constructing a second, that Main and Settings stay
-    // synchronized in both directions, and that Restore Defaults lands on both
-    // surfaces as a single silent canonical transaction.
-    void manual_startup_shows_main_and_not_settings();
-    void autostart_startup_shows_neither_surface();
-    void tray_home_action_restores_the_single_main_instance();
-    void advanced_settings_action_opens_the_single_settings_instance();
-    void activation_restores_the_single_main_instance();
-    void main_and_settings_stay_synchronized_both_ways();
-    void restore_defaults_updates_both_surfaces_in_one_transaction();
-    void developer_set_defaults_captures_the_complete_canonical_state();
+    void application_initialize_requires_startup_log_bootstrap();
+    void probe_error_blocks_application_save_and_shutdown();
+    void protected_provenance_blocks_autostart_and_ui_changes();
+    void protected_schema_sources_cannot_be_rewritten_by_application();
+    void authoritative_config_reconciles_autostart_both_directions();
+    void autostart_persistence_failure_blocks_run_key_mutation();
+    void application_window_capture_retains_loaded_render_config();
+    void topology_retry_converges_autonomously();
+    void topology_retry_stays_bounded_on_persistent_failure();
+    void topology_retry_cancel_stops_pending_work();
+    void application_startup_incomplete_topology_retries_autonomously();
+    void application_changed_monitor_retries_without_second_event();
+    void application_shutdown_cancels_topology_retry();
+    void tray_has_one_open_action();
+    void product_icon_resource_matches_build_input();
+    void tray_states_are_distinguishable_at_tray_sizes();
+    void disabled_treatment_desaturates_and_dims();
+    void manual_startup_shows_one_general_window();
+    void autostart_is_tray_only();
+    void close_hides_and_open_reuses_window();
+    void restore_defaults_is_one_application_transaction();
+    void shutdown_persistence_is_bounded_and_coalesced();
 };
 
 namespace {
 
-// Runs ONE bounded production lifecycle (initialize -> run -> shutdown) with
-// an isolated temp config, and hands the live Application to `body` at a
-// fixed point INSIDE the running event loop -- that is the state a user
-// actually observes (the product window is up, the tray is alive), not a
-// post-exec() remnant. The body also ends the run, so every wait is bounded
-// and a startup regression fails the test instead of hanging.
-constexpr int kObserveAfterMs = 50;
-
-template <typename Body>
-void with_running_application(const char* tag, ptd::StartupMode mode, Body&& body) {
-    const auto dir = std::filesystem::temp_directory_path()
-                     / (std::string("protrail_t37_home_") + tag);
-    std::error_code ec;
-    std::filesystem::remove_all(dir, ec);
-    std::filesystem::create_directories(dir, ec);
-    const auto config_path = (dir / "config.json").native();
-
-    {
-        Application app(config_path);
-        app.set_startup_mode(mode);
-        QVERIFY(app.initialize());
-        QTimer::singleShot(kObserveAfterMs, QApplication::instance(),
-                           [&app, &body] {
-            body(app);
-            app.request_exit();
-        });
-        // Bounded failure guard: only fires if the observation never ran or
-        // the app failed to exit on its own.
-        QTimer::singleShot(10000, QApplication::instance(), [&app] { app.request_exit(); });
-        QCOMPARE(app.run(), 0);
-        app.shutdown();
-    }
-
-    std::filesystem::remove_all(dir, ec);
-}
-
-// Counts the process's top-level windows carrying a given title: the
-// observable form of "no duplicate product home was constructed".
-int top_level_windows_titled(const QString& title) {
+int product_window_count() {
     int count = 0;
-    const auto widgets = QApplication::topLevelWidgets();
-    for (QWidget* w : widgets) {
-        if (w->windowTitle() == title) ++count;
+    for (QWidget* widget : QApplication::topLevelWidgets()) {
+        if (widget->windowTitle() == QStringLiteral("ProTrail")) ++count;
     }
     return count;
 }
 
-} // namespace
-
-void TestTray::initTestCase() {
-    qRegisterMetaType<ptd::TrailConfig>("ptd::TrailConfig");
-    qRegisterMetaType<ptd::ClickConfig>("ptd::ClickConfig");
-}
-
-void TestTray::tray_creation() {
-    ptd::ui::TrayIcon tray(true);
-    QVERIFY(tray.is_master_enabled());
-    QCOMPARE(tray.tooltip(), QString::fromUtf8("ProTrail \u2014 Enabled"));
-    QCOMPARE(tray.toggle_action_text(), QStringLiteral("Disable"));
-    QVERIFY(tray.action_settings() != nullptr);
-    QCOMPARE(tray.action_settings()->text(), QStringLiteral("Settings..."));
-    QVERIFY(tray.action_toggle() != nullptr);
-    QVERIFY(tray.action_exit() != nullptr);
-    QCOMPARE(tray.action_exit()->text(), QStringLiteral("Exit"));
-    QVERIFY(tray.menu() != nullptr);
-    QVERIFY(tray.system_tray_icon() != nullptr);
-
-    // Disabled constructor variant
-    ptd::ui::TrayIcon tray_off(false);
-    QVERIFY(!tray_off.is_master_enabled());
-    QCOMPARE(tray_off.tooltip(), QString::fromUtf8("ProTrail \u2014 Disabled"));
-    QCOMPARE(tray_off.toggle_action_text(), QStringLiteral("Enable"));
-}
-
-void TestTray::settings_hide_on_close() {
-    ptd::TrailConfig trail{};
-    ptd::ClickConfig click{};
-    ptd::ui::SettingsWindow settings(trail, click, true);
-
-    settings.show();
-    QVERIFY(settings.isVisible());
-    QVERIFY(!settings.isHidden());
-
-    // Window close event must hide the window instead of destroying it
-    settings.close();
-    QVERIFY(!settings.isVisible());
-    QVERIFY(settings.isHidden());
-}
-
-void TestTray::settings_restore() {
-    ptd::TrailConfig trail{};
-    ptd::ClickConfig click{};
-    ptd::ui::SettingsWindow settings(trail, click, true);
-
-    settings.show();
-    QVERIFY(settings.isVisible());
-
-    settings.close();
-    QVERIFY(settings.isHidden());
-
-    // Restore from hidden state
-    if (settings.isMinimized()) {
-        settings.showNormal();
-    } else {
-        settings.show();
-    }
-    settings.raise();
-    settings.activateWindow();
-
-    QVERIFY(settings.isVisible());
-    QVERIFY(!settings.isHidden());
-}
-
-void TestTray::no_duplicate_settings_window() {
-    ptd::TrailConfig trail{};
-    ptd::ClickConfig click{};
-    ptd::ui::SettingsWindow settings(trail, click, true);
-    QWidget* canonical_ptr = &settings;
-
-    // Simulate multiple activation calls
-    for (int i = 0; i < 5; ++i) {
-        if (settings.isMinimized()) {
-            settings.showNormal();
-        } else {
-            settings.show();
-        }
-        settings.raise();
-        settings.activateWindow();
-        QCOMPARE(static_cast<QWidget*>(&settings), canonical_ptr);
-        QVERIFY(settings.isVisible());
-    }
-}
-
-void TestTray::tray_enable_disable_uses_canonical_master_state() {
-    ptd::ui::TrayIcon tray(true);
-    QSignalSpy spy(&tray, &ptd::ui::TrayIcon::master_enabled_toggled);
-
-    // Trigger toggle action (Disable)
-    tray.action_toggle()->trigger();
-    QCOMPARE(spy.count(), 1);
-    QCOMPARE(spy.takeFirst().at(0).toBool(), false);
-    QVERIFY(!tray.is_master_enabled());
-    QCOMPARE(tray.tooltip(), QString::fromUtf8("ProTrail \u2014 Disabled"));
-    QCOMPARE(tray.toggle_action_text(), QStringLiteral("Enable"));
-
-    // Trigger toggle action again (Enable)
-    tray.action_toggle()->trigger();
-    QCOMPARE(spy.count(), 1);
-    QCOMPARE(spy.takeFirst().at(0).toBool(), true);
-    QVERIFY(tray.is_master_enabled());
-    QCOMPARE(tray.tooltip(), QString::fromUtf8("ProTrail \u2014 Enabled"));
-    QCOMPARE(tray.toggle_action_text(), QStringLiteral("Disable"));
-}
-
-void TestTray::tray_action_state_updates_when_master_state_changes_from_settings() {
-    ptd::TrailConfig trail{};
-    ptd::ClickConfig click{};
-    ptd::ui::SettingsWindow settings(trail, click, true);
-    ptd::ui::TrayIcon tray(true);
-
-    auto* chk_master = settings.findChild<QCheckBox*>("chk_master");
-    QVERIFY(chk_master != nullptr);
-
-    // Wire master_enabled_changed signal as Application does
-    QObject::connect(&settings, &ptd::ui::SettingsWindow::master_enabled_changed,
-                     &tray, &ptd::ui::TrayIcon::set_master_enabled);
-
-    // User toggles master checkbox in settings -> tray visual state updates
-    chk_master->setChecked(false);
-    QVERIFY(!tray.is_master_enabled());
-    QCOMPARE(tray.tooltip(), QString::fromUtf8("ProTrail \u2014 Disabled"));
-    QCOMPARE(tray.toggle_action_text(), QStringLiteral("Enable"));
-
-    chk_master->setChecked(true);
-    QVERIFY(tray.is_master_enabled());
-    QCOMPARE(tray.tooltip(), QString::fromUtf8("ProTrail \u2014 Enabled"));
-    QCOMPARE(tray.toggle_action_text(), QStringLiteral("Disable"));
-}
-
-void TestTray::exit_performs_shutdown_path() {
-    ptd::ui::TrayIcon tray(true);
-    QSignalSpy spy(&tray, &ptd::ui::TrayIcon::exit_requested);
-
-    tray.action_exit()->trigger();
-    QCOMPARE(spy.count(), 1);
-}
-
-void TestTray::exit_triggers_downstream_application_shutdown() {
-    // T-017R1 Phase 1 & 2: Integration test proving normal exit reaches actual shutdown sequence
-    // with isolated persistence seam and unambiguous log assertions.
-    std::vector<std::string> log_messages;
-    static std::vector<std::string>* s_active_logs = nullptr;
-    s_active_logs = &log_messages;
-    ptd::set_log_sink([](ptd::LogLevel, const std::string_view& msg) {
-        if (s_active_logs) {
-            s_active_logs->emplace_back(msg);
-        }
-    });
-
-    const auto temp_dir = std::filesystem::temp_directory_path() / "protrail_tray_test_exit";
-    std::error_code ec;
-    std::filesystem::remove_all(temp_dir, ec);
-    std::filesystem::create_directories(temp_dir, ec);
-    const auto temp_config = (temp_dir / "config.json").native();
-
-    Application app(temp_config);
-    QVERIFY(app.initialize());
-
-    ptd::ui::TrayIcon tray(true);
-    bool exit_handler_called = false;
-
-    // Production wiring in Application::run:
-    // QObject::connect(d_->tray_icon.get(), &ptd::ui::TrayIcon::exit_requested,
-    //                  [this] {
-    //                      app_log(2, "ProTrail exit requested via tray");
-    //                      request_exit();
-    //                  });
-    QObject::connect(&tray, &ptd::ui::TrayIcon::exit_requested, [&] {
-        exit_handler_called = true;
-        ptd::log_write(ptd::LogLevel::Info, "ProTrail exit requested via tray");
-        app.request_exit();
-    });
-
-    // Trigger tray Exit action
-    tray.action_exit()->trigger();
-    QVERIFY(exit_handler_called);
-
-    // Verify exit requested logs were emitted (Phase 2: exact equality, distinct assertions)
-    bool found_tray_exit_req = false;
-    bool found_generic_exit_req = false;
-    for (const auto& m : log_messages) {
-        if (m == "ProTrail exit requested via tray") {
-            found_tray_exit_req = true;
-        }
-        if (m == "ProTrail exit requested") {
-            found_generic_exit_req = true;
-        }
-    }
-    QVERIFY(found_tray_exit_req);
-    QVERIFY(found_generic_exit_req);
-
-    // Execute application shutdown path
-    app.shutdown();
-
-    // Verify shutdown log sequence was emitted (Phase 3: entry + completion)
-    bool found_shutdown_started = false;
-    bool found_shutdown_complete = false;
-    for (const auto& m : log_messages) {
-        if (m == "ProTrail shutting down") {
-            found_shutdown_started = true;
-        }
-        if (m == "ProTrail shutdown complete") {
-            found_shutdown_complete = true;
-        }
-    }
-    QVERIFY(found_shutdown_started);
-    QVERIFY(found_shutdown_complete);
-
-    ptd::clear_log_sink();
-    s_active_logs = nullptr;
-
-    std::filesystem::remove_all(temp_dir, ec);
-}
-
-void TestTray::tray_cleanup() {
-    auto tray = std::make_unique<ptd::ui::TrayIcon>(true);
-    tray->show();
-    QVERIFY(tray != nullptr);
-    tray->hide();
-    tray.reset(); // must cleanly tear down without memory leak or crash
-    QVERIFY(tray == nullptr);
-}
-
-void TestTray::repeated_show_hide_cycles() {
-    ptd::TrailConfig trail{};
-    ptd::ClickConfig click{};
-    ptd::ui::SettingsWindow settings(trail, click, true);
-
-    for (int i = 0; i < 10; ++i) {
-        settings.show();
-        QVERIFY(settings.isVisible());
-        settings.close();
-        QVERIFY(settings.isHidden());
-    }
-}
-
-void TestTray::disabled_state_persistence_remains_correct() {
-    const auto temp_dir = std::filesystem::temp_directory_path() / "protrail_tray_test_persistence";
-    std::error_code ec;
-    std::filesystem::remove_all(temp_dir, ec);
-    std::filesystem::create_directories(temp_dir, ec);
-    const auto temp_config = (temp_dir / "config.json").native();
-
-    // Create config with master_enabled = false
-    ptd::AppConfig cfg;
-    cfg.master_enabled = false;
-    cfg.trail.enabled = true;
-    cfg.click.enabled = true;
-
-    QVERIFY(ptd::ConfigStorage::save_to_file(cfg, temp_config));
-    const auto loaded = ptd::ConfigStorage::load_from_file(temp_config);
-    QVERIFY(!loaded.master_enabled);
-
-    // Tray initialized from persisted state reflects Disabled state
-    ptd::ui::TrayIcon tray(loaded.master_enabled);
-    QVERIFY(!tray.is_master_enabled());
-    QCOMPARE(tray.tooltip(), QString::fromUtf8("ProTrail \u2014 Disabled"));
-    QCOMPARE(tray.toggle_action_text(), QStringLiteral("Enable"));
-
-    std::filesystem::remove_all(temp_dir, ec);
-}
-
-void TestTray::application_lifecycle_persistence_isolation() {
-    // 1. Verify normal production construction uses real default config path (without opening it)
-    {
-        Application default_app;
-        QCOMPARE(QString::fromStdWString(default_app.config_path()),
-                 QString::fromStdWString(ptd::ConfigStorage::default_config_path()));
-    }
-
-    // 2. Prepare isolated temporary directory and config path
-    const auto temp_dir = std::filesystem::temp_directory_path() / "protrail_test_persistence_isolation";
-    std::error_code ec;
-    std::filesystem::remove_all(temp_dir, ec);
-    std::filesystem::create_directories(temp_dir, ec);
-    const auto isolated_config_path = (temp_dir / "config.json").native();
-
-    // 3. Create a disposable sentinel file at a separate temporary path (Phase 6: no production reads)
-    const auto sentinel_dir = temp_dir / "production-sentinel";
-    std::filesystem::create_directories(sentinel_dir, ec);
-    const auto sentinel_path = (sentinel_dir / "sentinel.json").native();
-
-    const std::string sentinel_original_bytes = "{\"sentinel\": \"untouched_production_substitute\"}";
-    {
-        std::ofstream sentinel_out(sentinel_path, std::ios::binary);
-        sentinel_out << sentinel_original_bytes;
-    }
-    QVERIFY(std::filesystem::exists(sentinel_path, ec));
-
-    // 4. Place distinctive non-default settings in the isolated temporary config
-    ptd::AppConfig distinctive_cfg;
-    distinctive_cfg.master_enabled = false;
-    distinctive_cfg.trail.lifetime_ms = 777.0;
-    distinctive_cfg.trail.glow_strength = 0.88f;
-    distinctive_cfg.click.particle_amount = 19;
-    distinctive_cfg.click.duration_ms = 888.0f;
-    QVERIFY(ptd::ConfigStorage::save_to_file(distinctive_cfg, isolated_config_path));
-    QVERIFY(std::filesystem::exists(isolated_config_path, ec));
-
-    // 5. Execute relevant Application shutdown lifecycle targeting isolated config
-    {
-        Application app(isolated_config_path);
-        QCOMPARE(QString::fromStdWString(app.config_path()),
-                 QString::fromStdWString(isolated_config_path));
-        QVERIFY(app.initialize());
-        app.request_exit();
-        app.shutdown();
-    }
-
-    // 6. Verify isolated temporary config receives expected persisted state
-    QVERIFY(std::filesystem::exists(isolated_config_path, ec));
-    const auto loaded = ptd::ConfigStorage::load_from_file(isolated_config_path);
-    QCOMPARE(loaded.master_enabled, false);
-    QCOMPARE(loaded.trail.lifetime_ms, 777.0);
-    QCOMPARE(loaded.trail.glow_strength, 0.88f);
-    QCOMPARE(loaded.click.particle_amount, static_cast<uint8_t>(19));
-    QCOMPARE(loaded.click.duration_ms, 888.0f);
-
-    // 7. Verify disposable sentinel file remained untouched and byte-identical
-    {
-        std::ifstream sentinel_in(sentinel_path, std::ios::binary);
-        const std::string sentinel_current_bytes(
-            (std::istreambuf_iterator<char>(sentinel_in)),
-            std::istreambuf_iterator<char>());
-        QCOMPARE(sentinel_current_bytes, sentinel_original_bytes);
-    }
-
-    // Clean up temporary directory
-    std::filesystem::remove_all(temp_dir, ec);
-}
-
-void TestTray::startup_path_resolution_normal_mode() {
-    // Case 1: no smoke environment -> default config path and default log path
-    const auto paths = ptd::resolve_startup_paths(nullptr, nullptr);
-    QVERIFY(paths.valid);
-    QVERIFY(paths.error_message.empty());
-    QCOMPARE(QString::fromStdWString(paths.config_path),
-             QString::fromStdWString(ptd::ConfigStorage::default_config_path()));
-    QCOMPARE(QString::fromStdWString(paths.log_path),
-             QString::fromStdWString(ptd::default_log_path()));
-}
-
-void TestTray::startup_path_resolution_smoke_auto_exit_without_state_dir_fails_closed() {
-    // Case 2: auto-exit armed without isolation directory -> fail closed
-    const auto paths1 = ptd::resolve_startup_paths(L"3000", nullptr);
-    QVERIFY(!paths1.valid);
-    QVERIFY(!paths1.error_message.empty());
-    QVERIFY(paths1.config_path.empty());
-    QVERIFY(paths1.log_path.empty());
-
-    const auto paths2 = ptd::resolve_startup_paths(L"1500", L"");
-    QVERIFY(!paths2.valid);
-    QVERIFY(!paths2.error_message.empty());
-}
-
-void TestTray::startup_path_resolution_smoke_mode_with_state_dir() {
-    // Case 3: auto-exit + valid state dir -> isolated paths under state dir
-    const std::wstring test_dir = L"C:\\temp\\smoke_test_run_42";
-    const auto paths = ptd::resolve_startup_paths(L"3000", test_dir.c_str());
-    QVERIFY(paths.valid);
-    QVERIFY(paths.error_message.empty());
-    QCOMPARE(QString::fromStdWString(paths.config_path),
-             QString::fromStdWString(test_dir + L"\\config.json"));
-    QCOMPARE(QString::fromStdWString(paths.log_path),
-             QString::fromStdWString(test_dir + L"\\protrail.log"));
-}
-
-void TestTray::startup_path_resolution_state_dir_without_smoke_mode_is_ignored() {
-    // Case 4: state dir set without smoke auto-exit -> state dir ignored, normal production paths
-    const std::wstring test_dir = L"C:\\temp\\smoke_test_run_42";
-    const auto paths1 = ptd::resolve_startup_paths(nullptr, test_dir.c_str());
-    QVERIFY(paths1.valid);
-    QVERIFY(paths1.error_message.empty());
-    QCOMPARE(QString::fromStdWString(paths1.config_path),
-             QString::fromStdWString(ptd::ConfigStorage::default_config_path()));
-    QCOMPARE(QString::fromStdWString(paths1.log_path),
-             QString::fromStdWString(ptd::default_log_path()));
-
-    const auto paths2 = ptd::resolve_startup_paths(L"", test_dir.c_str());
-    QVERIFY(paths2.valid);
-    QCOMPARE(QString::fromStdWString(paths2.config_path),
-             QString::fromStdWString(ptd::ConfigStorage::default_config_path()));
-
-    const auto paths3 = ptd::resolve_startup_paths(L"0", test_dir.c_str());
-    QVERIFY(paths3.valid);
-    QCOMPARE(QString::fromStdWString(paths3.config_path),
-             QString::fromStdWString(ptd::ConfigStorage::default_config_path()));
-
-    const auto paths4 = ptd::resolve_startup_paths(L"-100", test_dir.c_str());
-    QVERIFY(paths4.valid);
-    QCOMPARE(QString::fromStdWString(paths4.config_path),
-             QString::fromStdWString(ptd::ConfigStorage::default_config_path()));
-}
-
-// CORE-001: an unsupported future-schema config must survive the full
-// Application lifecycle byte-identically, with no .corrupt file, and no
-// rewrite of schema 11 as schema 10.
-void TestTray::future_schema_survives_application_shutdown() {
-    const auto temp_dir = std::filesystem::temp_directory_path() / "protrail_core001_future";
-    std::error_code ec;
-    std::filesystem::remove_all(temp_dir, ec);
-    std::filesystem::create_directories(temp_dir, ec);
-    const auto config_path = (temp_dir / "config.json").native();
-
-    const std::string body =
-        "{ \"schema_version\": 12, \"master_enabled\": true, "
-        "\"unknown_future_object\": { \"x\": 1, \"y\": [2, 3] }, "
-        "\"trail\": { \"enabled\": true } }";
-    {
-        std::ofstream out(config_path, std::ios::binary);
-        out << body;
-    }
-
-    {
-        Application app(config_path);
-        QVERIFY(app.initialize());
-        QVERIFY(!app.persistence_allowed());
-        app.request_exit();
-        app.shutdown();
-    }
-
-    // Original bytes unchanged, schema 11 preserved, no .corrupt.
-    QVERIFY(std::filesystem::exists(config_path, ec));
-    QVERIFY(!std::filesystem::exists(std::filesystem::path(config_path).wstring() + L".corrupt", ec));
-    std::ifstream in(config_path, std::ios::binary);
-    const std::string after((std::istreambuf_iterator<char>(in)),
-                            std::istreambuf_iterator<char>());
-    QCOMPARE(after, body);
-    QVERIFY(after.find("\"schema_version\": 12") != std::string::npos);
-
-    std::filesystem::remove_all(temp_dir, ec);
-}
-
-// CORE-001: an ordinary settings persistence attempt while the future-schema
-// protection is active must still leave the source byte-identical.
-void TestTray::future_schema_survives_settings_save_attempt() {
-    const auto temp_dir = std::filesystem::temp_directory_path() / "protrail_core001_future_save";
-    std::error_code ec;
-    std::filesystem::remove_all(temp_dir, ec);
-    std::filesystem::create_directories(temp_dir, ec);
-    const auto config_path = (temp_dir / "config.json").native();
-
-    const std::string body =
-        "{ \"schema_version\": 12, \"master_enabled\": true, "
-        "\"unknown_future_object\": { \"value\": 42 } }";
-    {
-        std::ofstream out(config_path, std::ios::binary);
-        out << body;
-    }
-
-    Application app(config_path);
-    QVERIFY(app.initialize());
-    QVERIFY(!app.persistence_allowed());
-    // The ordinary settings persistence path is refused by the protection.
-    QVERIFY(!app.save_config_for_tests());
-    app.shutdown();
-
-    std::ifstream in(config_path, std::ios::binary);
-    const std::string after((std::istreambuf_iterator<char>(in)),
-                            std::istreambuf_iterator<char>());
-    QCOMPARE(after, body);
-
-    std::filesystem::remove_all(temp_dir, ec);
-}
-
-// CORE-001: malformed config whose backup FAILED must survive shutdown.
-void TestTray::malformed_backup_failure_survives_application_shutdown() {
-    const auto temp_dir = std::filesystem::temp_directory_path() / "protrail_core001_badbackup";
-    std::error_code ec;
-    std::filesystem::remove_all(temp_dir, ec);
-    std::filesystem::create_directories(temp_dir, ec);
-    const auto config_path = (temp_dir / "config.json").native();
-
-    const std::string body = "{ malformed and unbackupable ";
-    {
-        std::ofstream out(config_path, std::ios::binary);
-        out << body;
-    }
-    const auto corrupt = std::filesystem::path(config_path).wstring() + L".corrupt";
-    std::filesystem::create_directories(std::filesystem::path(corrupt) / "blocker", ec);
-
-    {
-        Application app(config_path);
-        QVERIFY(app.initialize());
-        QVERIFY(!app.persistence_allowed());
-        app.request_exit();
-        app.shutdown();
-    }
-
-    std::ifstream in(config_path, std::ios::binary);
-    const std::string after((std::istreambuf_iterator<char>(in)),
-                            std::istreambuf_iterator<char>());
-    QCOMPARE(after, body);
-
-    std::filesystem::remove_all(temp_dir, ec);
-}
-
-// CORE-001: a read failure must never gain permission to overwrite the source.
-void TestTray::read_failure_survives_application_shutdown() {
-    const auto temp_dir = std::filesystem::temp_directory_path() / "protrail_core001_readfail";
-    std::error_code ec;
-    std::filesystem::remove_all(temp_dir, ec);
-    std::filesystem::create_directories(temp_dir, ec);
-    const auto config_path = (temp_dir / "config.json").native();
-    // A non-empty directory at the config path forces open() to fail.
-    std::filesystem::create_directories(std::filesystem::path(config_path) / "blocker", ec);
-    {
-        std::ofstream marker(std::filesystem::path(config_path) / "marker.txt");
-        marker << "marker";
-    }
-
-    {
-        Application app(config_path);
-        QVERIFY(app.initialize());
-        QVERIFY(!app.persistence_allowed());
-        app.request_exit();
-        app.shutdown();
-    }
-
-    // The unread source directory still exists and was not replaced by a file.
-    QVERIFY(std::filesystem::is_directory(config_path, ec));
-
-    std::filesystem::remove_all(temp_dir, ec);
-}
-
-// CORE-002: with the preference OFF and a stale owned Run value present, the
-// Application startup reconcile must remove exactly that value.
-void TestTray::autostart_off_startup_removes_stale_owned_value() {
-    const auto temp_dir = std::filesystem::temp_directory_path() / "protrail_core002_off";
-    std::error_code ec;
-    std::filesystem::remove_all(temp_dir, ec);
-    std::filesystem::create_directories(temp_dir, ec);
-    const auto config_path = (temp_dir / "config.json").native();
-
-    // Preference OFF, but the machine still carries ProTrail's owned value.
-    ptd::AppConfig cfg{};
-    cfg.start_with_windows = false;
-    QVERIFY(ptd::ConfigStorage::save_to_file(cfg, config_path));
-
-    ptd::InMemoryAutostartBackend backend;
-    backend.values.emplace_back(ptd::AutostartManager::kValueName,
-                                ptd::AutostartManager::build_command(L"C:\\Old\\protrail.exe"));
-
-    {
-        Application app(config_path);
-        app.set_autostart_backend_for_tests(&backend);
-        QVERIFY(app.initialize());
-        app.shutdown();
-    }
-
-    // Owned value gone; no unrelated entries were seeded.
-    QVERIFY(backend.values.empty());
-
-    std::filesystem::remove_all(temp_dir, ec);
-}
-
-// CORE-002: the OFF startup reconcile must never touch unrelated entries.
-void TestTray::autostart_off_never_touches_unrelated_values() {
-    const auto temp_dir = std::filesystem::temp_directory_path() / "protrail_core002_neighbours";
-    std::error_code ec;
-    std::filesystem::remove_all(temp_dir, ec);
-    std::filesystem::create_directories(temp_dir, ec);
-    const auto config_path = (temp_dir / "config.json").native();
-
-    ptd::AppConfig cfg{};
-    cfg.start_with_windows = false;
-    QVERIFY(ptd::ConfigStorage::save_to_file(cfg, config_path));
-
-    ptd::InMemoryAutostartBackend backend;
-    backend.values.emplace_back(L"SomeOtherApp", L"C:\\Other\\other.exe --minimized");
-    backend.values.emplace_back(L"Unrelated", L"C:\\nope.exe");
-    backend.values.emplace_back(ptd::AutostartManager::kValueName,
-                                ptd::AutostartManager::build_command(L"C:\\Old\\protrail.exe"));
-    const auto neighbours = backend.values;
-
-    {
-        Application app(config_path);
-        app.set_autostart_backend_for_tests(&backend);
-        QVERIFY(app.initialize());
-        app.shutdown();
-    }
-
-    // Exactly the owned value was removed; the two unrelated entries are
-    // byte-identical and in order.
-    QCOMPARE(backend.values.size(), neighbours.size() - 1);
-    QCOMPARE(backend.values[0], neighbours[0]);
-    QCOMPARE(backend.values[1], neighbours[1]);
-
-    std::filesystem::remove_all(temp_dir, ec);
-}
-
-// W2-005: startup must read the durable configuration exactly ONCE. The old
-// implementation loaded it in initialize() AND again in run(); this proves the
-// single-snapshot contract.
-void TestTray::startup_loads_configuration_exactly_once() {
-    const auto temp_dir = std::filesystem::temp_directory_path() / "protrail_w2005_single_load";
-    std::error_code ec;
-    std::filesystem::remove_all(temp_dir, ec);
-    std::filesystem::create_directories(temp_dir, ec);
-    const auto config_path = (temp_dir / "config.json").native();
-
-    ptd::AppConfig cfg{};
-    cfg.master_enabled = true;
-    cfg.trail.lifetime_ms = 333.0f;
-    QVERIFY(ptd::ConfigStorage::save_to_file(cfg, config_path));
-
-    ptd::ConfigStorage::reset_load_count_for_tests();
-    {
-        Application app(config_path);
-        QVERIFY(app.initialize());
-        // Drive the production event loop bounded so run()'s own startup path
-        // executes: the old implementation performed a SECOND load there.
-        QTimer::singleShot(0, QApplication::instance(), [&app] { app.request_exit(); });
-        QTimer::singleShot(5000, QApplication::instance(), [&app] { app.request_exit(); });
-        app.run();
-        app.shutdown();
-    }
-    QCOMPARE(ptd::ConfigStorage::load_count_for_tests(), 1);
-
-    std::filesystem::remove_all(temp_dir, ec);
-}
-// PERF-002: a burst of visual edits must produce ONE durable write after the
-// debounce settles, and any still-pending edit must be flushed on shutdown.
-void TestTray::deferred_save_coalesces_and_shutdown_flushes() {
-    const auto temp_dir = std::filesystem::temp_directory_path() / "protrail_perf002_debounce";
-    std::error_code ec;
-    std::filesystem::remove_all(temp_dir, ec);
-    std::filesystem::create_directories(temp_dir, ec);
-    const auto config_path = (temp_dir / "config.json").native();
-    QVERIFY(ptd::ConfigStorage::save_to_file(ptd::AppConfig{}, config_path));
-
-    Application app(config_path);
-    QVERIFY(app.initialize());
-    app.set_save_debounce_ms_for_tests(40);
-    app.reset_save_invocation_count_for_tests();
-
-    // Simulate a burst: many deferred requests inside the debounce window.
-    for (int i = 0; i < 50; ++i) {
-        app.request_deferred_save();
-    }
-    QCOMPARE(app.save_invocation_count_for_tests(), 0);  // nothing written yet
-    QVERIFY(app.config_dirty_for_tests());
-
-    // Let the restartable single-shot fire exactly once.
-    QTest::qWait(120);
-    QCOMPARE(app.save_invocation_count_for_tests(), 1);
-    QVERIFY(!app.config_dirty_for_tests());
-
-    // A pending edit at shutdown must be flushed synchronously.
-    app.request_deferred_save();
-    QVERIFY(app.config_dirty_for_tests());
-    app.shutdown();
-
-    std::filesystem::remove_all(temp_dir, ec);
-}
-void TestTray::single_instance_activation_contract() {
-    // T-018: verify registered message for single instance activation
-    const UINT wm_activate = RegisterWindowMessageW(L"ProTrail_ActivateInstance");
-    QVERIFY(wm_activate >= 0xC000 && wm_activate <= 0xFFFF);
-
-    // Verify startup paths identify smoke mode correctly
-    const auto paths_normal = ptd::resolve_startup_paths(nullptr, nullptr);
-    QVERIFY(!paths_normal.is_smoke_mode);
-
-    const auto paths_smoke = ptd::resolve_startup_paths(L"3000", L"C:\\temp\\smoke");
-    QVERIFY(paths_smoke.is_smoke_mode);
-}
-
-// T-018R1 Phase 8: the production activation path (Application::show_settings)
-// restores a HIDDEN canonical SettingsWindow; repeated activation never
-// creates a second window.
-void TestTray::activation_restores_hidden_settings_window() {
-    ptd::TrailConfig trail{};
-    ptd::ClickConfig click{};
-    ptd::ui::SettingsWindow settings(trail, click, true);
-    QWidget* canonical = &settings;
-
-    settings.show();
-    settings.close();
-    QVERIFY(settings.isHidden());
-
-    // Exact Application::show_settings sequence, executed twice.
-    for (int i = 0; i < 2; ++i) {
-        if (settings.isMinimized()) {
-            settings.showNormal();
-        } else {
-            settings.show();
-        }
-        settings.raise();
-        settings.activateWindow();
-        HWND hwnd = reinterpret_cast<HWND>(settings.winId());
-        QVERIFY(hwnd != nullptr);
-    }
-    QVERIFY(settings.isVisible());
-    QCOMPARE(static_cast<QWidget*>(&settings), canonical);
-}
-
-// T-018R1 Phase 8: the production activation path restores a MINIMIZED
-// canonical SettingsWindow through showNormal(), still exactly one window.
-void TestTray::activation_restores_minimized_settings_window_no_duplicate() {
-    ptd::TrailConfig trail{};
-    ptd::ClickConfig click{};
-    ptd::ui::SettingsWindow settings(trail, click, true);
-    QWidget* canonical = &settings;
-
-    settings.show();
-    settings.showMinimized();
-    QVERIFY(settings.isMinimized());
-
-    if (settings.isMinimized()) {
-        settings.showNormal();
-    } else {
-        settings.show();
-    }
-    settings.raise();
-    settings.activateWindow();
-
-    QVERIFY(settings.isVisible());
-    QVERIFY(!settings.isMinimized());
-    QCOMPARE(static_cast<QWidget*>(&settings), canonical);
-}
-
-// T-018R1 Phase 8: smoke mode resolves WITHOUT production single-instance
-// participation -- the startup contract that keeps main.cpp from ever
-// handing a SingleInstance authority to a smoke run.
-void TestTray::smoke_mode_does_not_participate_in_production_ownership() {
-    const auto smoke = ptd::resolve_startup_paths(L"3000", L"C:\\temp\\smoke_iso");
-    QVERIFY(smoke.valid);
-    QVERIFY(smoke.is_smoke_mode);
-
-    const auto normal = ptd::resolve_startup_paths(nullptr, nullptr);
-    QVERIFY(normal.valid);
-    QVERIFY(!normal.is_smoke_mode);
-    // Only the normal paths may reach set_single_instance(); this assert
-    // pins the discriminator main.cpp relies on.
-    QVERIFY(smoke.is_smoke_mode != normal.is_smoke_mode);
-}
-
-// T-018R2 Phase 7: Application::run() must fail closed when readiness
-// publication fails: log the exact Win32 error context, never enter the
-// event loop advertising a healthy runtime whose activation cannot be
-// delivered. Controlled path: run() returns before exec(); shutdown()
-// still executes (begin_shutdown handshake included).
-void TestTray::mark_ready_failure_fails_closed_without_event_loop() {
-    const auto temp_dir = std::filesystem::temp_directory_path() / "protrail_tray_test_mark_ready_fail";
-    std::error_code ec;
-    std::filesystem::remove_all(temp_dir, ec);
-    std::filesystem::create_directories(temp_dir, ec);
-    const auto temp_config = (temp_dir / "config.json").native();
-
-    // A SingleInstance with no ownership/transport: mark_ready() must fail.
-    // Unique per-process names (test isolation across parallel runs).
-    const std::wstring tag = std::to_wstring(GetCurrentProcessId());
-    ptd::SingleInstanceConfig cfg;
-    cfg.mutex_name = L"Local\\ProTrail_T018R2_appfail_Mutex_" + tag;
-    cfg.ready_event_name = L"Local\\ProTrail_T018R2_appfail_Ready_" + tag;
-    cfg.activate_event_name = L"Local\\ProTrail_T018R2_appfail_Activate_" + tag;
-    cfg.shutdown_event_name = L"Local\\ProTrail_T018R2_appfail_Shutdown_" + tag;
-    ptd::SingleInstance broken(cfg);
-    QVERIFY(!broken.mark_ready());
-
-    Application app(temp_config);
-    QVERIFY(app.initialize());
-    app.set_single_instance(&broken);
-
-    // run() must return before starting the event loop (fail closed).
-    const int rc = app.run();
-    QCOMPARE(rc, 1);
-
-    // Controlled teardown still executes the shutdown handshake (the
-    // non-owner begin_shutdown is a guarded no-op).
-    app.shutdown();
-
-    std::filesystem::remove_all(temp_dir, ec);
-}
-
-void TestTray::overlay_device_loss_recreation() {
-    // T-018: verify overlay window can recreate render resources cleanly on device loss
-    ptd::OverlayWindow overlay;
-    RECT r{0, 0, 320, 240};
-    QVERIFY(overlay.create(GetModuleHandleW(nullptr), false, &r));
-    QVERIFY(overlay.hwnd() != nullptr);
-
-    // Recreate render resources directly (simulates recovery after D2DERR_RECREATE_TARGET)
-    QVERIFY(overlay.recreate_render_resources());
-
-    overlay.destroy();
-    QVERIFY(overlay.hwnd() == nullptr);
-}
-
-// T-37 Target A: a manual launch opens the compact product home and does NOT
-// immediately open the full advanced editor.
-void TestTray::manual_startup_shows_main_and_not_settings() {
-    with_running_application("manual", ptd::StartupMode::Normal,
-                             [](Application& app) {
-        auto* main_w = app.main_window_for_tests();
-        auto* settings = app.settings_window_for_tests();
-        QVERIFY(main_w != nullptr);
-        QVERIFY(settings != nullptr);
-        QVERIFY(main_w != static_cast<QWidget*>(settings));
-
-        QVERIFY(main_w->isVisible());
-        QVERIFY(!settings->isVisible());
-        QVERIFY(settings->isHidden());
-
-        // Exactly one product home exists, and it is the Essentials surface.
-        QCOMPARE(top_level_windows_titled(QStringLiteral("ProTrail")), 1);
-        QVERIFY(main_w->findChild<QCheckBox*>(QStringLiteral("main_chk_master")) != nullptr);
-        QVERIFY(main_w->findChild<QWidget*>(QStringLiteral("main_chk_start_with_windows")) != nullptr);
-    });
-}
-
-// T-37 Target A: an autostart launch stays tray-only. No Main, no Settings,
-// no minimized-but-present window, no focus claim.
-void TestTray::autostart_startup_shows_neither_surface() {
-    with_running_application("autostart", ptd::StartupMode::AutostartMinimized,
-                             [](Application& app) {
-        auto* main_w = app.main_window_for_tests();
-        auto* settings = app.settings_window_for_tests();
-        QVERIFY(main_w != nullptr);
-        QVERIFY(settings != nullptr);
-
-        QVERIFY(!main_w->isVisible());
-        QVERIFY(main_w->isHidden());
-        QVERIFY(!main_w->isMinimized());
-        QVERIFY(!settings->isVisible());
-        QVERIFY(settings->isHidden());
-
-        // The tray is the only way in, and it is present.
-        auto* tray = app.tray_icon_for_tests();
-        QVERIFY(tray != nullptr);
-        QCOMPARE(top_level_windows_titled(QStringLiteral("ProTrail")), 1);
-    });
-}
-
-// T-37 Target A/B: the tray's product-home action restores the EXISTING Main
-// instance after a hide-to-tray close, repeatedly, without ever constructing
-// a second one.
-void TestTray::tray_home_action_restores_the_single_main_instance() {
-    with_running_application("tray_home", ptd::StartupMode::Normal,
-                             [](Application& app) {
-        auto* main_w = app.main_window_for_tests();
-        auto* tray = app.tray_icon_for_tests();
-        QVERIFY(main_w != nullptr);
-        QVERIFY(tray != nullptr);
-
-        QCOMPARE(tray->action_home()->text(), QStringLiteral("Open ProTrail"));
-
-        // Closing the home surface is a hide, not a shutdown: ProTrail keeps
-        // running and the tray still holds the canonical instance.
-        main_w->close();
-        QVERIFY(!main_w->isVisible());
-        QVERIFY(main_w->isHidden());
-
-        for (int i = 0; i < 3; ++i) {
-            tray->action_home()->trigger();
-            QVERIFY(main_w->isVisible());
-            QCOMPARE(app.main_window_for_tests(), main_w);
-            QCOMPARE(top_level_windows_titled(QStringLiteral("ProTrail")), 1);
-        }
-    });
-}
-
-// T-37 Target A: "Advanced Settings..." on the product home opens the EXISTING
-// SettingsWindow -- the complete advanced editor stays reachable, and stays a
-// single instance.
-void TestTray::advanced_settings_action_opens_the_single_settings_instance() {
-    with_running_application("advanced", ptd::StartupMode::Normal,
-                             [](Application& app) {
-        auto* main_w = app.main_window_for_tests();
-        auto* settings = app.settings_window_for_tests();
-        QVERIFY(main_w != nullptr);
-        QVERIFY(settings != nullptr);
-        QVERIFY(!settings->isVisible());
-
-        auto* button = main_w->findChild<QPushButton*>(QStringLiteral("main_btn_advanced_settings"));
-        QVERIFY(button != nullptr);
-
-        button->click();
-        QVERIFY(settings->isVisible());
-        QCOMPARE(app.settings_window_for_tests(), settings);
-
-        // Closing the advanced editor hides it; the next request restores the
-        // same object rather than a duplicate. The product home is untouched.
-        settings->close();
-        QVERIFY(!settings->isVisible());
-        button->click();
-        QVERIFY(settings->isVisible());
-        QCOMPARE(app.settings_window_for_tests(), settings);
-        QVERIFY(app.main_window_for_tests() == main_w);
-    });
-}
-
-// T-37 Target A: the single-instance activation path restores the product
-// home (the activation handler calls exactly this operation), idempotently.
-void TestTray::activation_restores_the_single_main_instance() {
-    with_running_application("activation", ptd::StartupMode::Normal,
-                             [](Application& app) {
-        auto* main_w = app.main_window_for_tests();
-        auto* settings = app.settings_window_for_tests();
-        QVERIFY(main_w != nullptr);
-
-        main_w->close();
-        QVERIFY(!main_w->isVisible());
-
-        app.show_main();
-        QVERIFY(main_w->isVisible());
-        QCOMPARE(app.main_window_for_tests(), main_w);
-        QCOMPARE(app.settings_window_for_tests(), settings);
-        QVERIFY(!settings->isVisible());
-
-        // A repeated activation burst restores the SAME window once.
-        for (int i = 0; i < 4; ++i) app.show_main();
-        QCOMPARE(app.main_window_for_tests(), main_w);
-        QCOMPARE(top_level_windows_titled(QStringLiteral("ProTrail")), 1);
-    });
-}
-
-// T-37 Target B: ONE config authority. A Main edit lands in Settings, and a
-// Settings publication lands back in Main, with no second configuration store
-// on either surface.
-void TestTray::main_and_settings_stay_synchronized_both_ways() {
-    with_running_application("sync", ptd::StartupMode::Normal,
-                             [](Application& app) {
-        auto* main_w = app.main_window_for_tests();
-        auto* settings = app.settings_window_for_tests();
-        QVERIFY(main_w != nullptr);
-        QVERIFY(settings != nullptr);
-
-        auto* trail_style = main_w->findChild<QComboBox*>(QStringLiteral("main_cmb_trail_style"));
-        auto* click_style = main_w->findChild<QComboBox*>(QStringLiteral("main_cmb_click_style"));
-        QVERIFY(trail_style != nullptr);
-        QVERIFY(click_style != nullptr);
-
-        // Main -> canonical -> Settings.
-        trail_style->setCurrentIndex(static_cast<int>(ptd::TrailStyle::Dotted));
-        QVERIFY(settings->capture_current_settings().trail.style == ptd::TrailStyle::Dotted);
-
-        // Settings -> canonical -> Main.
-        ptd::AppConfig from_settings = settings->capture_current_settings();
-        from_settings.trail.style = ptd::TrailStyle::Ribbon;
-        from_settings.trail.sparkle_mode = ptd::TrailSparkleMode::Firefly;
-        from_settings.click.style = ptd::ClickStyle::Water;
-        from_settings.click.hold_wake_density = 1.5f;
-        settings->apply_config(from_settings);
-
-        QCOMPARE(trail_style->currentIndex(), static_cast<int>(ptd::TrailStyle::Ribbon));
-        QCOMPARE(main_w->findChild<QComboBox*>(QStringLiteral("main_cmb_sparkle_mode"))->currentIndex(),
-                 static_cast<int>(ptd::TrailSparkleMode::Firefly));
-        QCOMPARE(click_style->currentIndex(), static_cast<int>(ptd::ClickStyle::Water));
-        QCOMPARE(main_w->findChild<QSlider*>(QStringLiteral("main_sld_wake_density"))->value(),
-                 150);
-
-        // The Settings surface itself agrees with what it published.
-        QVERIFY(settings->capture_current_settings().click.style == ptd::ClickStyle::Water);
-    });
-}
-
-// T-37 Target B/D: Restore Defaults from the product home applies the
-// canonical Release Defaults to BOTH surfaces as ONE transaction, silently,
-// with exactly one persistence commit and no publication storm.
-void TestTray::restore_defaults_updates_both_surfaces_in_one_transaction() {
-    with_running_application("restore", ptd::StartupMode::Normal,
-                             [](Application& app) {
-        auto* main_w = app.main_window_for_tests();
-        auto* settings = app.settings_window_for_tests();
-        QVERIFY(main_w != nullptr);
-        QVERIFY(settings != nullptr);
-
-        auto* trail_style = main_w->findChild<QComboBox*>(QStringLiteral("main_cmb_trail_style"));
-        auto* density = main_w->findChild<QSlider*>(QStringLiteral("main_sld_wake_density"));
-        QVERIFY(trail_style != nullptr);
-        QVERIFY(density != nullptr);
-
-        // Move well away from the canonical defaults first.
-        trail_style->setCurrentIndex(static_cast<int>(ptd::TrailStyle::Neon));
-        density->setValue(45);
-        QVERIFY(settings->capture_current_settings().click.hold_wake_density != 1.0f);
-
-        const ptd::AppConfig& canonical = ptd::release_defaults();
-        QSignalSpy main_trail(main_w, &ptd::ui::MainWindow::trail_config_changed);
-        QSignalSpy main_click(main_w, &ptd::ui::MainWindow::click_config_changed);
-        app.reset_save_invocation_count_for_tests();
-
-        main_w->findChild<QPushButton*>(QStringLiteral("main_btn_restore_defaults"))->click();
-
-        // Both surfaces observe the canonical defaults.
-        QCOMPARE(trail_style->currentIndex(), static_cast<int>(canonical.trail.style));
-        QCOMPARE(density->value(), static_cast<int>(canonical.click.hold_wake_density * 100.0f));
-        QVERIFY(settings->capture_current_settings().trail.style == canonical.trail.style);
-        QVERIFY(settings->capture_current_settings().click.style == canonical.click.style);
-        QVERIFY(settings->capture_current_settings().master_enabled == canonical.master_enabled);
-
-        // Silent: restoring is a push INTO the surfaces, never a publication
-        // out of them, and the whole operation is ONE persistence commit.
-        QCOMPARE(main_trail.count(), 0);
-        QCOMPARE(main_click.count(), 0);
-        QCOMPARE(app.save_invocation_count_for_tests(), 1);
-        QVERIFY(!app.config_dirty_for_tests());
-    });
-}
-
-// Target D: "Set Defaults" on the product home routes to the SAME controller
-// operation the Settings developer panel publishes, and that operation takes
-// the COMPLETE canonical Application::app_config -- including fields no Main
-// control can reach -- rather than reconstructing a snapshot from whichever
-// widgets happen to exist. Redirected at the canonical-path seam so the
-// repository's own resources/release_defaults.json is provably untouched.
-void TestTray::developer_set_defaults_captures_the_complete_canonical_state() {
-    const auto dir = std::filesystem::temp_directory_path()
-                     / "protrail_t37_set_defaults";
+template <typename Body>
+void with_running_application(const char* tag, ptd::StartupMode mode, Body&& body) {
+    const auto dir = std::filesystem::temp_directory_path() /
+                     (std::string("protrail_unified_") + tag);
     std::error_code ec;
     std::filesystem::remove_all(dir, ec);
     std::filesystem::create_directories(dir, ec);
-    const auto promoted = dir / "release_defaults.json";
 
-    // The repository source must still be byte-identical when the test ends.
-    const auto repository_source = ptd::canonical_release_defaults_path();
-    const auto read_all = [](const std::filesystem::path& p) {
-        std::ifstream in(p, std::ios::binary);
-        return std::string((std::istreambuf_iterator<char>(in)),
+    const auto log_dir = std::filesystem::temp_directory_path() /
+                         "protrail_unified_test_logs";
+    std::filesystem::create_directories(log_dir, ec);
+    if (!ptd::is_log_initialized()) {
+        QVERIFY(ptd::log_init((log_dir / "protrail.log").native()));
+    }
+
+    Application app((dir / "config.json").native());
+    // Destroyed before `app` (reverse declaration order), so any still-armed
+    // fallback watchdog single-shot is auto-cancelled and can never fire on a
+    // destroyed Application in a later test sharing this process.
+    QObject exit_guard;
+    app.set_startup_mode(mode);
+    QVERIFY(app.initialize());
+    QTimer::singleShot(20, &exit_guard, [&app, &body] {
+        body(app);
+        app.request_exit();
+    });
+    QTimer::singleShot(5000, &exit_guard, [&app] { app.request_exit(); });
+    QCOMPARE(app.run(), 0);
+    app.shutdown();
+    std::filesystem::remove_all(dir, ec);
+}
+
+struct RetryTopologyFixture {
+    const std::wstring left_name = L"\\\\.\\RETRYDISPLAY-A";
+    const std::wstring right_name = L"\\\\.\\RETRYDISPLAY-B";
+    std::vector<ptd::MonitorInfo> monitors;
+    bool fail_right_first = true;
+    // W2-001 changed-monitor case: fail the NEXT right creation exactly once
+    // (armed after the initial healthy topology, cleared on the failing call).
+    bool fail_right_next_once = false;
+    int left_attempts = 0;
+    int right_attempts = 0;
+    ptd::OverlayWindow* healthy_left = nullptr;
+};
+
+std::unique_ptr<ptd::OverlayManager> make_retry_topology(RetryTopologyFixture& fixture) {
+    const auto add = [&](const std::wstring& name, long left, long right, bool primary) {
+        ptd::MonitorInfo info{};
+        info.device_name = name;
+        info.bounds = RECT{left, 0, right, 100};
+        info.work_area = info.bounds;
+        info.is_primary = primary;
+        info.dpi_x = 96;
+        info.dpi_y = 96;
+        info.scale = 1.0f;
+        fixture.monitors.push_back(std::move(info));
+    };
+    add(fixture.left_name, 0, 100, true);
+    add(fixture.right_name, 100, 200, false);
+
+    auto manager = std::make_unique<ptd::OverlayManager>();
+    manager->set_enumeration_for_test([&fixture] { return fixture.monitors; });
+    manager->set_window_dpi_for_test([](HWND, UINT& x, UINT& y) {
+        x = 96;
+        y = 96;
+        return true;
+    });
+    manager->set_create_window_for_test(
+        [&fixture](const ptd::MonitorInfo& monitor, HINSTANCE, bool)
+            -> std::unique_ptr<ptd::OverlayWindow> {
+            if (monitor.device_name == fixture.left_name) {
+                ++fixture.left_attempts;
+                auto window = std::make_unique<ptd::OverlayWindow>();
+                if (!fixture.healthy_left) fixture.healthy_left = window.get();
+                return window;
+            }
+            if (monitor.device_name == fixture.right_name) {
+                ++fixture.right_attempts;
+                if (fixture.fail_right_first && fixture.right_attempts == 1) return nullptr;
+                if (fixture.fail_right_next_once) {
+                    fixture.fail_right_next_once = false;
+                    return nullptr;
+                }
+                return std::make_unique<ptd::OverlayWindow>();
+            }
+            return nullptr;
+        });
+    return manager;
+}
+
+} // namespace
+
+void TestTray::topology_retry_converges_autonomously() {
+    int refresh_calls = 0;
+    std::unique_ptr<ptd::TopologyRetry> retry;
+    retry = std::make_unique<ptd::TopologyRetry>([&] {
+        ++refresh_calls;
+        retry->observe(ptd::OverlayManager::Convergence::Complete);
+    }, ptd::TopologyRetry::Policy{5, 1, 1});
+
+    retry->observe(ptd::OverlayManager::Convergence::Incomplete);
+    QVERIFY(retry->pending());
+    QTRY_COMPARE_WITH_TIMEOUT(refresh_calls, 1, 2000);
+    QTest::qWait(20);
+    QCOMPARE(refresh_calls, 1);
+    QVERIFY(!retry->pending());
+    QCOMPARE(retry->attempts(), 0);
+}
+
+void TestTray::topology_retry_stays_bounded_on_persistent_failure() {
+    int refresh_calls = 0;
+    std::unique_ptr<ptd::TopologyRetry> retry;
+    retry = std::make_unique<ptd::TopologyRetry>([&] {
+        ++refresh_calls;
+        retry->observe(ptd::OverlayManager::Convergence::Incomplete);
+    }, ptd::TopologyRetry::Policy{3, 1, 1});
+
+    retry->observe(ptd::OverlayManager::Convergence::Incomplete);
+    QTRY_COMPARE_WITH_TIMEOUT(refresh_calls, 3, 2000);
+    QTest::qWait(20);
+    QCOMPARE(refresh_calls, 3);
+    QVERIFY(!retry->pending());
+    QCOMPARE(retry->attempts(), 3);
+}
+
+void TestTray::topology_retry_cancel_stops_pending_work() {
+    int refresh_calls = 0;
+    ptd::TopologyRetry retry([&] { ++refresh_calls; },
+                             ptd::TopologyRetry::Policy{5, 10, 10});
+    retry.observe(ptd::OverlayManager::Convergence::Incomplete);
+    QVERIFY(retry.pending());
+    retry.cancel();
+    QTest::qWait(30);
+    QCOMPARE(refresh_calls, 0);
+    QVERIFY(!retry.pending());
+}
+
+void TestTray::application_startup_incomplete_topology_retries_autonomously() {
+    const auto log_dir = std::filesystem::temp_directory_path() /
+                         "protrail_topology_retry_logs";
+    const auto dir = std::filesystem::temp_directory_path() /
+                     "protrail_topology_retry_startup";
+    std::error_code ec;
+    std::filesystem::create_directories(log_dir, ec);
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    if (!ptd::is_log_initialized()) {
+        QVERIFY(ptd::log_init((log_dir / "protrail.log").native()));
+    }
+
+    RetryTopologyFixture fixture;
+    auto manager = make_retry_topology(fixture);
+    auto* manager_view = manager.get();
+    ptd::InMemoryAutostartBackend autostart;
+    Application app((dir / "config.json").native());
+    app.set_startup_mode(ptd::StartupMode::AutostartMinimized);
+    app.set_autostart_backend_for_tests(&autostart);
+    app.set_overlay_manager_for_tests(std::move(manager));
+    app.set_topology_retry_policy_for_tests(5, 1, 1);
+    QVERIFY(app.initialize());
+
+    bool converged = false;
+    QObject exit_guard;
+    QTimer::singleShot(20, &exit_guard, [&] {
+        QTRY_COMPARE_WITH_TIMEOUT(manager_view->overlay_count(), std::size_t(2), 2000);
+        QCOMPARE(fixture.left_attempts, 1);
+        QCOMPARE(fixture.right_attempts, 2);
+        QCOMPARE(manager_view->monitor_overlays().size(), std::size_t(2));
+        QCOMPARE(manager_view->monitor_overlays()[0].window.get(), fixture.healthy_left);
+        QVERIFY(manager_view->monitor_overlays()[0].monitor.device_name == fixture.left_name);
+        QVERIFY(manager_view->monitor_overlays()[1].monitor.device_name == fixture.right_name);
+        converged = true;
+        app.request_exit();
+    });
+    QTimer::singleShot(3000, &exit_guard, [&app] { app.request_exit(); });
+    QCOMPARE(app.run(), 0);
+    app.shutdown();
+    QVERIFY(converged);
+    QCOMPARE(fixture.left_attempts, 1);
+    QCOMPARE(fixture.right_attempts, 2);
+    std::filesystem::remove_all(dir, ec);
+}
+
+void TestTray::application_changed_monitor_retries_without_second_event() {
+    // W2-001 audit contract: a changed/recreated monitor that fails once after
+    // the ONLY external topology event must autonomously recover WITHOUT a
+    // second WM_DISPLAYCHANGE/WM_DPICHANGED. Startup is fully healthy (both
+    // overlays live); one synthetic display event triggers a refresh whose
+    // right-overlay recreation fails once; the internally scheduled retry alone
+    // restores full coverage, and the healthy left overlay identity survives.
+    const auto log_dir = std::filesystem::temp_directory_path() /
+                         "protrail_topology_changed_logs";
+    const auto dir = std::filesystem::temp_directory_path() /
+                     "protrail_topology_changed_monitor";
+    std::error_code ec;
+    std::filesystem::create_directories(log_dir, ec);
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    if (!ptd::is_log_initialized()) {
+        QVERIFY(ptd::log_init((log_dir / "protrail.log").native()));
+    }
+
+    RetryTopologyFixture fixture;
+    fixture.fail_right_first = false; // startup is fully healthy
+    auto manager = make_retry_topology(fixture);
+    auto* manager_view = manager.get();
+    ptd::InMemoryAutostartBackend autostart;
+    Application app((dir / "config.json").native());
+    app.set_startup_mode(ptd::StartupMode::AutostartMinimized);
+    app.set_autostart_backend_for_tests(&autostart);
+    app.set_overlay_manager_for_tests(std::move(manager));
+    app.set_topology_retry_policy_for_tests(5, 1, 1);
+    QVERIFY(app.initialize());
+
+    bool recovered = false;
+    QObject exit_guard;
+    QTimer::singleShot(20, &exit_guard, [&] {
+        // Startup healthy: both overlays live, no retry pending.
+        QCOMPARE(manager_view->overlay_count(), std::size_t(2));
+        QVERIFY(!app.topology_retry_pending_for_tests());
+        const int right_before = fixture.right_attempts;
+        // Healthy left overlay identity captured AFTER startup created it.
+        ptd::OverlayWindow* healthy_left_before =
+            manager_view->monitor_overlays()[0].window.get();
+
+        // Change the right monitor bounds so the ONE external event forces its
+        // recreation, and arm exactly one recreation failure.
+        fixture.monitors[1].bounds = RECT{100, 0, 260, 100};
+        fixture.monitors[1].work_area = fixture.monitors[1].bounds;
+        fixture.fail_right_next_once = true;
+
+        // The ONLY external topology event.
+        ptd::OverlayWindow::fire_display_change_for_tests();
+
+        // The internally scheduled retry alone (no second event) restores it.
+        // Converge on the RECREATED right overlay (new bounds), not merely a
+        // count of 2 -- the count is already 2 and would pass before the
+        // deferred refresh even runs.
+        QTRY_VERIFY_WITH_TIMEOUT(
+            manager_view->monitor_overlays().size() == std::size_t(2) &&
+            manager_view->monitor_overlays()[1].monitor.bounds.right == 260l,
+            3000);
+        QVERIFY(fixture.right_attempts >= right_before + 2); // failed once, retried
+        QCOMPARE(manager_view->monitor_overlays().size(), std::size_t(2));
+        // Healthy left overlay identity is preserved across the retry.
+        QCOMPARE(manager_view->monitor_overlays()[0].window.get(), healthy_left_before);
+        QVERIFY(manager_view->monitor_overlays()[0].monitor.device_name == fixture.left_name);
+        QVERIFY(manager_view->monitor_overlays()[1].monitor.device_name == fixture.right_name);
+        QVERIFY(manager_view->monitor_overlays()[1].monitor.bounds.right == 260l);
+        recovered = true;
+        app.request_exit();
+    });
+    QTimer::singleShot(3000, &exit_guard, [&app] { app.request_exit(); });
+    QCOMPARE(app.run(), 0);
+    app.shutdown();
+    QVERIFY(recovered);
+    std::filesystem::remove_all(dir, ec);
+}
+
+void TestTray::application_shutdown_cancels_topology_retry() {
+    const auto log_dir = std::filesystem::temp_directory_path() /
+                         "protrail_topology_cancel_logs";
+    const auto dir = std::filesystem::temp_directory_path() /
+                     "protrail_topology_cancel_shutdown";
+    std::error_code ec;
+    std::filesystem::create_directories(log_dir, ec);
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    if (!ptd::is_log_initialized()) {
+        QVERIFY(ptd::log_init((log_dir / "protrail.log").native()));
+    }
+
+    RetryTopologyFixture fixture;
+    auto manager = make_retry_topology(fixture);
+    auto* manager_view = manager.get();
+    ptd::InMemoryAutostartBackend autostart;
+    Application app((dir / "config.json").native());
+    app.set_startup_mode(ptd::StartupMode::AutostartMinimized);
+    app.set_autostart_backend_for_tests(&autostart);
+    app.set_overlay_manager_for_tests(std::move(manager));
+    app.set_topology_retry_policy_for_tests(5, 500, 500);
+    QVERIFY(app.initialize());
+
+    bool had_live_overlay_at_exit = false;
+    QObject exit_guard;
+    QTimer::singleShot(20, &exit_guard, [&] {
+        QCOMPARE(manager_view->overlay_count(), std::size_t(1));
+        QCOMPARE(fixture.right_attempts, 1);
+        QVERIFY(app.topology_retry_pending_for_tests());
+        had_live_overlay_at_exit = true;
+        app.request_exit();
+    });
+    QTimer::singleShot(3000, &exit_guard, [&app] { app.request_exit(); });
+    QCOMPARE(app.run(), 0);
+    QVERIFY(app.topology_retry_pending_for_tests());
+    app.shutdown();
+    QVERIFY(had_live_overlay_at_exit);
+    QVERIFY(!app.topology_retry_pending_for_tests());
+    QTest::qWait(600);
+    QCOMPARE(fixture.right_attempts, 1);
+    std::filesystem::remove_all(dir, ec);
+}
+
+void TestTray::application_initialize_requires_startup_log_bootstrap() {
+    ptd::reset_log_for_tests();
+    const auto blocker = std::filesystem::temp_directory_path() /
+                         "protrail_log_guard_blocker";
+    {
+        std::ofstream out(blocker, std::ios::trunc);
+        QVERIFY(out.good());
+        out << "parent path blocker";
+    }
+    const auto config_path = (blocker / "config.json").native();
+    {
+        Application app(config_path);
+        QVERIFY(!app.initialize());
+        QVERIFY(!ptd::is_log_initialized());
+    }
+    QVERIFY(!std::filesystem::exists(config_path));
+    std::error_code ec;
+    std::filesystem::remove(blocker, ec);
+}
+
+void TestTray::probe_error_blocks_application_save_and_shutdown() {
+    const auto log_dir = std::filesystem::temp_directory_path() /
+                         "protrail_probe_error_test_logs";
+    std::error_code ec;
+    std::filesystem::create_directories(log_dir, ec);
+    if (!ptd::is_log_initialized()) {
+        QVERIFY(ptd::log_init((log_dir / "protrail.log").native()));
+    }
+
+    const auto dir = std::filesystem::temp_directory_path() /
+                     "protrail_core001_probe_error_application";
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    const std::filesystem::path config_path = dir / "config.json";
+    ptd::AppConfig original = ptd::release_defaults();
+    original.master_enabled = false;
+    original.click.duration_ms = 2345;
+    QVERIFY(ptd::ConfigStorage::save_to_file(original, config_path.native()));
+
+    const auto read_bytes = [](const std::filesystem::path& path) {
+        std::ifstream in(path, std::ios::binary);
+        return std::string(std::istreambuf_iterator<char>(in),
                            std::istreambuf_iterator<char>());
     };
-    const std::string before = read_all(repository_source);
+    const std::string before = read_bytes(config_path);
     QVERIFY(!before.empty());
 
-    ptd::set_dev_build_override_for_tests(true);
-    ptd::set_canonical_release_defaults_path_for_tests(promoted);
-    {
-        with_running_application("set_defaults", ptd::StartupMode::Normal,
-                                 [](Application& app) {
-            auto* main_w = app.main_window_for_tests();
-            auto* settings = app.settings_window_for_tests();
-            QVERIFY(main_w != nullptr);
-            QVERIFY(settings != nullptr);
+    ptd::InMemoryAutostartBackend backend;
+    backend.values.emplace_back(ptd::AutostartManager::kValueName,
+                                L"preserved existing command");
+    backend.values.emplace_back(L"UnrelatedApp", L"unrelated command");
+    const auto backend_before = backend.values;
 
-            auto* promote = main_w->findChild<QPushButton*>(QStringLiteral("main_btn_set_defaults"));
-            QVERIFY(promote != nullptr);
-
-            // Two fields that NO Main Essentials control can reach are moved
-            // through the canonical Settings publication path first; they are
-            // exactly what a UI-reconstructed snapshot would silently drop.
-            ptd::AppConfig rich = settings->capture_current_settings();
-            rich.trail.glow_strength = 0.22f;
-            rich.click.particle_amount = 19;
-            settings->apply_config(rich);
-
-            // Two fields the product home CAN reach.
-            main_w->findChild<QComboBox*>(QStringLiteral("main_cmb_trail_style"))
-                ->setCurrentIndex(static_cast<int>(ptd::TrailStyle::Comet));
-            main_w->findChild<QSlider*>(QStringLiteral("main_sld_wake_density"))->setValue(175);
-
-            promote->click();
+    const std::wstring protected_path = config_path.native();
+    ptd::ConfigStorage::set_filesystem_probe_for_tests(
+        [protected_path](const std::wstring& path) {
+            if (path == protected_path) {
+                return std::tuple<bool, std::error_code>{
+                    false, std::make_error_code(std::errc::permission_denied)};
+            }
+            std::error_code probe_ec;
+            const bool exists = std::filesystem::exists(path, probe_ec);
+            return std::tuple<bool, std::error_code>{exists, probe_ec};
         });
+    struct ProbeReset {
+        ~ProbeReset() { ptd::ConfigStorage::clear_filesystem_probe_for_tests(); }
+    } reset_probe;
+
+    {
+        Application app(config_path.native());
+        app.set_startup_mode(ptd::StartupMode::AutostartMinimized);
+        app.set_autostart_backend_for_tests(&backend);
+        QVERIFY(app.initialize());
+        QVERIFY(!app.persistence_allowed());
+        QVERIFY(!app.save_config_for_tests());
+        QCOMPARE(backend.write_calls, 0);
+        QCOMPARE(backend.remove_calls, 0);
+        QVERIFY(backend.values == backend_before);
+        app.shutdown();
     }
-    ptd::reset_canonical_release_defaults_path_for_tests();
-    ptd::set_dev_build_override_for_tests(std::nullopt);
 
-    QVERIFY(std::filesystem::exists(promoted, ec));
-    const std::string written = read_all(promoted);
-    QVERIFY(!written.empty());
-
-    QString err;
-    const auto parsed = ptd::ConfigStorage::deserialize_json(
-        QByteArray::fromStdString(written), &err);
-    QVERIFY2(parsed.has_value(), qPrintable(err));
-    QVERIFY(parsed->schema_version == ptd::AppConfig::kCurrentSchemaVersion);
-    QVERIFY(parsed->trail.style == ptd::TrailStyle::Comet);
-    QVERIFY(std::abs(parsed->click.hold_wake_density - 1.75f) < 0.0001f);
-    // The fields no surface control exposes survived the promotion.
-    QVERIFY(std::abs(parsed->trail.glow_strength - 0.22f) < 0.0001f);
-    QCOMPARE(static_cast<int>(parsed->click.particle_amount), 19);
-
-    // The repository's canonical source was not touched: the promotion wrote
-    // exactly the path the seam redirected it to.
-    QCOMPARE(read_all(repository_source), before);
-
+    QVERIFY(std::filesystem::exists(config_path));
+    QCOMPARE(read_bytes(config_path), before);
+    QCOMPARE(backend.write_calls, 0);
+    QCOMPARE(backend.remove_calls, 0);
+    QVERIFY(backend.values == backend_before);
     std::filesystem::remove_all(dir, ec);
+}
+
+void TestTray::protected_provenance_blocks_autostart_and_ui_changes() {
+    const auto log_dir = std::filesystem::temp_directory_path() /
+                         "protrail_protected_autostart_test_logs";
+    std::error_code ec;
+    std::filesystem::create_directories(log_dir, ec);
+    if (!ptd::is_log_initialized()) {
+        QVERIFY(ptd::log_init((log_dir / "protrail.log").native()));
+    }
+
+    auto exercise_protected_source = [&](const char* tag, bool probe_error) {
+        const auto dir = std::filesystem::temp_directory_path() /
+                         (std::string("protrail_core002_") + tag);
+        std::filesystem::remove_all(dir, ec);
+        std::filesystem::create_directories(dir, ec);
+        const std::filesystem::path config_path = dir / "config.json";
+        if (probe_error) {
+            ptd::AppConfig source = ptd::release_defaults();
+            source.start_with_windows = true;
+            QVERIFY(ptd::ConfigStorage::save_to_file(source, config_path.native()));
+        } else {
+            std::ofstream out(config_path, std::ios::binary | std::ios::trunc);
+            QVERIFY(out.good());
+            out << "{\"schema_version\":"
+                << (ptd::AppConfig::kCurrentSchemaVersion + 1)
+                << ",\"start_with_windows\":true}";
+            out.close();
+            QVERIFY(out.good());
+        }
+
+        const auto read_bytes = [](const std::filesystem::path& path) {
+            std::ifstream in(path, std::ios::binary);
+            return std::string(std::istreambuf_iterator<char>(in),
+                               std::istreambuf_iterator<char>());
+        };
+        const std::string before = read_bytes(config_path);
+        ptd::InMemoryAutostartBackend backend;
+        backend.values.emplace_back(ptd::AutostartManager::kValueName,
+                                    L"old registered command");
+        backend.values.emplace_back(L"UnrelatedApp", L"unrelated command");
+        const auto backend_before = backend.values;
+
+        if (probe_error) {
+            const std::wstring protected_path = config_path.native();
+            ptd::ConfigStorage::set_filesystem_probe_for_tests(
+                [protected_path](const std::wstring& path) {
+                    if (path == protected_path) {
+                        return std::tuple<bool, std::error_code>{
+                            false, std::make_error_code(std::errc::permission_denied)};
+                    }
+                    std::error_code probe_ec;
+                    const bool exists = std::filesystem::exists(path, probe_ec);
+                    return std::tuple<bool, std::error_code>{exists, probe_ec};
+                });
+        }
+        struct ProbeReset {
+            ~ProbeReset() { ptd::ConfigStorage::clear_filesystem_probe_for_tests(); }
+        } reset_probe;
+
+        bool toggle_found = false;
+        bool initially_off = false;
+        bool finally_off = false;
+        bool backend_unchanged_during_toggle = false;
+        {
+            Application app(config_path.native());
+            QObject exit_guard;
+            app.set_startup_mode(ptd::StartupMode::Normal);
+            app.set_autostart_backend_for_tests(&backend);
+            QVERIFY(app.initialize());
+            QVERIFY(!app.persistence_allowed());
+            QCOMPARE(backend.write_calls, 0);
+            QCOMPARE(backend.remove_calls, 0);
+            QVERIFY(backend.values == backend_before);
+
+            QTimer::singleShot(20, &exit_guard, [&] {
+                auto* product = app.product_window_for_tests();
+                auto* toggle = product
+                    ? product->findChild<QCheckBox*>(QStringLiteral("chk_start_with_windows"))
+                    : nullptr;
+                toggle_found = toggle != nullptr;
+                if (toggle) {
+                    initially_off = !toggle->isChecked();
+                    toggle->click();
+                    finally_off = !toggle->isChecked();
+                }
+                backend_unchanged_during_toggle =
+                    backend.write_calls == 0 && backend.remove_calls == 0
+                    && backend.values == backend_before;
+                app.request_exit();
+            });
+            QTimer::singleShot(5000, &exit_guard, [&app] {
+                app.request_exit();
+            });
+            QCOMPARE(app.run(), 0);
+            app.shutdown();
+        }
+
+        QVERIFY(toggle_found);
+        QVERIFY(initially_off);
+        QVERIFY(finally_off);
+        QVERIFY(backend_unchanged_during_toggle);
+        QCOMPARE(backend.write_calls, 0);
+        QCOMPARE(backend.remove_calls, 0);
+        QVERIFY(backend.values == backend_before);
+        QVERIFY(std::filesystem::exists(config_path));
+        QCOMPARE(read_bytes(config_path), before);
+        std::filesystem::remove_all(dir, ec);
+    };
+
+    exercise_protected_source("future_schema", false);
+    exercise_protected_source("read_failure", true);
+}
+
+void TestTray::authoritative_config_reconciles_autostart_both_directions() {
+    const auto log_dir = std::filesystem::temp_directory_path() /
+                         "protrail_trusted_autostart_test_logs";
+    std::error_code ec;
+    std::filesystem::create_directories(log_dir, ec);
+    if (!ptd::is_log_initialized()) {
+        QVERIFY(ptd::log_init((log_dir / "protrail.log").native()));
+    }
+
+    const std::wstring executable = ptd::current_executable_path();
+    QVERIFY(!executable.empty());
+    const std::wstring expected_command =
+        ptd::AutostartManager::build_command(executable);
+
+    auto exercise_trusted_source = [&](bool desired) {
+        const auto tag = desired ? "enabled" : "disabled";
+        const auto dir = std::filesystem::temp_directory_path() /
+                         (std::string("protrail_core002_trusted_") + tag);
+        std::filesystem::remove_all(dir, ec);
+        std::filesystem::create_directories(dir, ec);
+        const auto config_path = dir / "config.json";
+        ptd::AppConfig config = ptd::release_defaults();
+        config.start_with_windows = desired;
+        QVERIFY(ptd::ConfigStorage::save_to_file(config, config_path.native()));
+
+        ptd::InMemoryAutostartBackend backend;
+        backend.values.emplace_back(ptd::AutostartManager::kValueName,
+                                    L"stale registered command");
+        backend.values.emplace_back(L"UnrelatedApp", L"unrelated command");
+        {
+            Application app(config_path.native());
+            app.set_autostart_backend_for_tests(&backend);
+            QVERIFY(app.initialize());
+            QVERIFY(app.persistence_allowed());
+            if (desired) {
+                QCOMPARE(backend.write_calls, 1);
+                QCOMPARE(backend.remove_calls, 0);
+                std::wstring actual;
+                QVERIFY(backend.read(ptd::AutostartManager::kValueName, actual));
+                QCOMPARE(QString::fromStdWString(actual),
+                         QString::fromStdWString(expected_command));
+            } else {
+                QCOMPARE(backend.write_calls, 0);
+                QCOMPARE(backend.remove_calls, 1);
+                std::wstring actual;
+                QVERIFY(!backend.read(ptd::AutostartManager::kValueName, actual));
+            }
+            std::wstring unrelated;
+            QVERIFY(backend.read(L"UnrelatedApp", unrelated));
+            QCOMPARE(unrelated, std::wstring(L"unrelated command"));
+            app.shutdown();
+        }
+        std::filesystem::remove_all(dir, ec);
+    };
+
+    exercise_trusted_source(false);
+    exercise_trusted_source(true);
+}
+
+void TestTray::autostart_persistence_failure_blocks_run_key_mutation() {
+    // W2-002: durable desired preference is the commit authority for autostart.
+    // A forced config-save failure must leave the on-disk preference unchanged
+    // and the Run key untouched; a successful save followed by an injected
+    // registry failure must still leave the desired preference durable. Proven
+    // through BOTH the checkbox path (apply_start_with_windows) and the whole-
+    // AppConfig transaction (Restore All / apply_app_config_transaction).
+    const auto log_dir = std::filesystem::temp_directory_path() /
+                         "protrail_w2002_persist_fail_logs";
+    std::error_code ec;
+    std::filesystem::create_directories(log_dir, ec);
+    if (!ptd::is_log_initialized()) {
+        QVERIFY(ptd::log_init((log_dir / "protrail.log").native()));
+    }
+
+    const std::wstring executable = ptd::current_executable_path();
+    QVERIFY(!executable.empty());
+    const std::wstring expected_command =
+        ptd::AutostartManager::build_command(executable);
+
+    const auto read_bytes = [](const std::filesystem::path& path) {
+        std::ifstream in(path, std::ios::binary);
+        return std::string(std::istreambuf_iterator<char>(in),
+                           std::istreambuf_iterator<char>());
+    };
+
+    struct SaveSeamReset {
+        ~SaveSeamReset() { ptd::ConfigStorage::clear_save_failure_path_for_tests(); }
+    } reset_save_seam;
+
+    // Case A: durable ON + registered Run entry, request OFF via the checkbox
+    // path while config save is forced to fail -> disk stays ON, backend is
+    // never asked to remove, controller/UI desired value returns to ON.
+    {
+        const auto dir = std::filesystem::temp_directory_path() /
+                         "protrail_w2002_checkbox_off";
+        std::filesystem::remove_all(dir, ec);
+        std::filesystem::create_directories(dir, ec);
+        const auto config_path = dir / "config.json";
+        ptd::AppConfig on_config = ptd::release_defaults();
+        on_config.start_with_windows = true;
+        QVERIFY(ptd::ConfigStorage::save_to_file(on_config, config_path.native()));
+        const std::string before = read_bytes(config_path);
+
+        ptd::InMemoryAutostartBackend backend;
+        backend.values.emplace_back(ptd::AutostartManager::kValueName, expected_command);
+        backend.values.emplace_back(L"UnrelatedApp", L"unrelated command");
+        const auto backend_before = backend.values;
+
+        bool toggle_found = false;
+        bool initially_on = false;
+        bool ui_returned_on = false;
+        {
+            Application app(config_path.native());
+            QObject exit_guard;
+            app.set_startup_mode(ptd::StartupMode::Normal);
+            app.set_autostart_backend_for_tests(&backend);
+            QVERIFY(app.initialize());
+            QVERIFY(app.persistence_allowed());
+            const int writes_after_init = backend.write_calls;
+            const int removes_after_init = backend.remove_calls;
+
+            QTimer::singleShot(20, &exit_guard, [&] {
+                auto* product = app.product_window_for_tests();
+                auto* toggle = product
+                    ? product->findChild<QCheckBox*>(QStringLiteral("chk_start_with_windows"))
+                    : nullptr;
+                toggle_found = toggle != nullptr;
+                if (toggle) {
+                    initially_on = toggle->isChecked();
+                    // Force the durable write to fail for exactly this config.
+                    ptd::ConfigStorage::set_save_failure_path_for_tests(config_path.native());
+                    toggle->click(); // request OFF
+                    ptd::ConfigStorage::clear_save_failure_path_for_tests();
+                    ui_returned_on = toggle->isChecked();
+                }
+                // The Run key was never mutated by the blocked OFF request.
+                QCOMPARE(backend.remove_calls, removes_after_init);
+                QCOMPARE(backend.write_calls, writes_after_init);
+                app.request_exit();
+            });
+            QTimer::singleShot(5000, &exit_guard, [&app] { app.request_exit(); });
+            QCOMPARE(app.run(), 0);
+            // Shutdown save must also be blocked for this protected-from-write
+            // test path; arm the seam again so the final save cannot rewrite it.
+            ptd::ConfigStorage::set_save_failure_path_for_tests(config_path.native());
+            app.shutdown();
+            ptd::ConfigStorage::clear_save_failure_path_for_tests();
+        }
+
+        QVERIFY(toggle_found);
+        QVERIFY(initially_on);
+        QVERIFY(ui_returned_on); // desired preference resynced to durable ON
+        QCOMPARE(backend.remove_calls, 0);
+        QVERIFY(backend.values == backend_before);
+        QCOMPARE(read_bytes(config_path), before); // disk still ON, byte-identical
+        std::filesystem::remove_all(dir, ec);
+    }
+
+    // Case B: durable OFF + no Run entry, request ON via the checkbox path with
+    // forced save failure -> disk stays OFF, backend receives no write.
+    {
+        const auto dir = std::filesystem::temp_directory_path() /
+                         "protrail_w2002_checkbox_on";
+        std::filesystem::remove_all(dir, ec);
+        std::filesystem::create_directories(dir, ec);
+        const auto config_path = dir / "config.json";
+        ptd::AppConfig off_config = ptd::release_defaults();
+        off_config.start_with_windows = false;
+        QVERIFY(ptd::ConfigStorage::save_to_file(off_config, config_path.native()));
+        const std::string before = read_bytes(config_path);
+
+        ptd::InMemoryAutostartBackend backend;
+        backend.values.emplace_back(L"UnrelatedApp", L"unrelated command");
+        const auto backend_before = backend.values;
+
+        bool toggle_found = false;
+        bool initially_off = false;
+        bool ui_returned_off = false;
+        {
+            Application app(config_path.native());
+            QObject exit_guard;
+            app.set_startup_mode(ptd::StartupMode::Normal);
+            app.set_autostart_backend_for_tests(&backend);
+            QVERIFY(app.initialize());
+            const int writes_after_init = backend.write_calls;
+
+            QTimer::singleShot(20, &exit_guard, [&] {
+                auto* product = app.product_window_for_tests();
+                auto* toggle = product
+                    ? product->findChild<QCheckBox*>(QStringLiteral("chk_start_with_windows"))
+                    : nullptr;
+                toggle_found = toggle != nullptr;
+                if (toggle) {
+                    initially_off = !toggle->isChecked();
+                    ptd::ConfigStorage::set_save_failure_path_for_tests(config_path.native());
+                    toggle->click(); // request ON
+                    ptd::ConfigStorage::clear_save_failure_path_for_tests();
+                    ui_returned_off = !toggle->isChecked();
+                }
+                QCOMPARE(backend.write_calls, writes_after_init);
+                app.request_exit();
+            });
+            QTimer::singleShot(5000, &exit_guard, [&app] { app.request_exit(); });
+            QCOMPARE(app.run(), 0);
+            ptd::ConfigStorage::set_save_failure_path_for_tests(config_path.native());
+            app.shutdown();
+            ptd::ConfigStorage::clear_save_failure_path_for_tests();
+        }
+
+        QVERIFY(toggle_found);
+        QVERIFY(initially_off);
+        QVERIFY(ui_returned_off); // desired preference resynced to durable OFF
+        QCOMPARE(backend.write_calls, 0);
+        std::wstring value;
+        QVERIFY(!backend.read(ptd::AutostartManager::kValueName, value));
+        QVERIFY(backend.values == backend_before);
+        QCOMPARE(read_bytes(config_path), before); // disk still OFF
+        std::filesystem::remove_all(dir, ec);
+    }
+
+    // Case C: successful persistence followed by an injected registry
+    // reconciliation failure -> the desired preference stays durable ON so a
+    // later startup reconciliation can converge machine state.
+    {
+        const auto dir = std::filesystem::temp_directory_path() /
+                         "protrail_w2002_registry_fail";
+        std::filesystem::remove_all(dir, ec);
+        std::filesystem::create_directories(dir, ec);
+        const auto config_path = dir / "config.json";
+        ptd::AppConfig off_config = ptd::release_defaults();
+        off_config.start_with_windows = false;
+        QVERIFY(ptd::ConfigStorage::save_to_file(off_config, config_path.native()));
+
+        ptd::InMemoryAutostartBackend backend;
+        backend.fail_writes = true; // registry write fails AFTER durable commit
+        {
+            Application app(config_path.native());
+            QObject exit_guard;
+            app.set_startup_mode(ptd::StartupMode::Normal);
+            app.set_autostart_backend_for_tests(&backend);
+            QVERIFY(app.initialize());
+
+            QTimer::singleShot(20, &exit_guard, [&] {
+                auto* product = app.product_window_for_tests();
+                auto* toggle = product
+                    ? product->findChild<QCheckBox*>(QStringLiteral("chk_start_with_windows"))
+                    : nullptr;
+                QVERIFY(toggle != nullptr);
+                toggle->click(); // request ON; save succeeds, registry write fails
+                app.request_exit();
+            });
+            QTimer::singleShot(5000, &exit_guard, [&app] { app.request_exit(); });
+            QCOMPARE(app.run(), 0);
+            app.shutdown();
+        }
+
+        // The durable preference committed to disk as ON despite registry fail.
+        const auto reloaded = ptd::ConfigStorage::load_from_file_result(config_path.native());
+        QVERIFY(reloaded.config.start_with_windows);
+        std::filesystem::remove_all(dir, ec);
+    }
+
+    // Case D: the SAME persistence-first rule holds through the whole-AppConfig
+    // Restore-All transaction, not only the narrow checkbox path. Start durable
+    // ON, drive a whole-config apply that flips Start-with-Windows OFF while
+    // save is forced to fail -> disk stays ON, backend never removes.
+    {
+        const auto dir = std::filesystem::temp_directory_path() /
+                         "protrail_w2002_whole_config";
+        std::filesystem::remove_all(dir, ec);
+        std::filesystem::create_directories(dir, ec);
+        const auto config_path = dir / "config.json";
+        ptd::AppConfig on_config = ptd::release_defaults();
+        on_config.start_with_windows = true;
+        QVERIFY(ptd::ConfigStorage::save_to_file(on_config, config_path.native()));
+        const std::string before = read_bytes(config_path);
+
+        ptd::InMemoryAutostartBackend backend;
+        backend.values.emplace_back(ptd::AutostartManager::kValueName, expected_command);
+        const auto backend_before = backend.values;
+
+        {
+            Application app(config_path.native());
+            QObject exit_guard;
+            app.set_startup_mode(ptd::StartupMode::Normal);
+            app.set_autostart_backend_for_tests(&backend);
+            QVERIFY(app.initialize());
+            const int removes_after_init = backend.remove_calls;
+
+            QTimer::singleShot(20, &exit_guard, [&] {
+                auto* product = app.product_window_for_tests();
+                QVERIFY(product != nullptr);
+                // Emit a whole-config transaction that turns Start-with-Windows
+                // OFF while the durable write is forced to fail.
+                ptd::AppConfig next = on_config;
+                next.start_with_windows = false;
+                ptd::ConfigStorage::set_save_failure_path_for_tests(config_path.native());
+                emit product->app_config_applied(next);
+                ptd::ConfigStorage::clear_save_failure_path_for_tests();
+                // Run key untouched by the blocked whole-config OFF.
+                QCOMPARE(backend.remove_calls, removes_after_init);
+                app.request_exit();
+            });
+            QTimer::singleShot(5000, &exit_guard, [&app] { app.request_exit(); });
+            QCOMPARE(app.run(), 0);
+            ptd::ConfigStorage::set_save_failure_path_for_tests(config_path.native());
+            app.shutdown();
+            ptd::ConfigStorage::clear_save_failure_path_for_tests();
+        }
+
+        QCOMPARE(backend.remove_calls, 0);
+        QVERIFY(backend.values == backend_before);
+        QCOMPARE(read_bytes(config_path), before); // disk still ON
+        std::filesystem::remove_all(dir, ec);
+    }
+}
+
+void TestTray::protected_schema_sources_cannot_be_rewritten_by_application() {
+    const auto log_dir = std::filesystem::temp_directory_path() /
+                         "protrail_protected_schema_test_logs";
+    std::error_code ec;
+    std::filesystem::create_directories(log_dir, ec);
+    if (!ptd::is_log_initialized()) {
+        QVERIFY(ptd::log_init((log_dir / "protrail.log").native()));
+    }
+
+    std::vector<std::string> documents = {
+        R"({"master_enabled":true})",
+        R"({"schema_version":"11","master_enabled":true})",
+        R"({"schema_version":{"value":11},"master_enabled":true})",
+        R"({"schema_version":true,"master_enabled":true})",
+        R"({"schema_version":10.5,"master_enabled":true})",
+        "{\"schema_version\":"
+            + std::to_string(ptd::AppConfig::kCurrentSchemaVersion + 1)
+            + ",\"master_enabled\":true}",
+    };
+    const auto read_bytes = [](const std::filesystem::path& path) {
+        std::ifstream in(path, std::ios::binary);
+        return std::string(std::istreambuf_iterator<char>(in),
+                           std::istreambuf_iterator<char>());
+    };
+
+    for (std::size_t index = 0; index < documents.size(); ++index) {
+        const auto dir = std::filesystem::temp_directory_path() /
+                         ("protrail_core003_protected_" + std::to_string(index));
+        std::filesystem::remove_all(dir, ec);
+        std::filesystem::create_directories(dir, ec);
+        const auto config_path = dir / "config.json";
+        {
+            std::ofstream out(config_path, std::ios::binary | std::ios::trunc);
+            QVERIFY(out.good());
+            out.write(documents[index].data(),
+                      static_cast<std::streamsize>(documents[index].size()));
+            out.close();
+            QVERIFY(out.good());
+        }
+        const std::string before = read_bytes(config_path);
+
+        ptd::InMemoryAutostartBackend backend;
+        backend.values.emplace_back(ptd::AutostartManager::kValueName,
+                                    L"preserved command");
+        backend.values.emplace_back(L"UnrelatedApp", L"unrelated command");
+        const auto backend_before = backend.values;
+        {
+            Application app(config_path.native());
+            app.set_autostart_backend_for_tests(&backend);
+            QVERIFY(app.initialize());
+            QVERIFY(!app.persistence_allowed());
+            QVERIFY(!app.save_config_for_tests());
+            app.shutdown();
+        }
+
+        QVERIFY(std::filesystem::exists(config_path));
+        QCOMPARE(read_bytes(config_path), before);
+        QVERIFY(!std::filesystem::exists(config_path.native() + L".corrupt"));
+        QCOMPARE(backend.write_calls, 0);
+        QCOMPARE(backend.remove_calls, 0);
+        QVERIFY(backend.values == backend_before);
+        std::filesystem::remove_all(dir, ec);
+    }
+}
+
+void TestTray::application_window_capture_retains_loaded_render_config() {
+    const auto log_dir = std::filesystem::temp_directory_path() /
+                         "protrail_render_baseline_test_logs";
+    std::error_code ec;
+    std::filesystem::create_directories(log_dir, ec);
+    if (!ptd::is_log_initialized()) {
+        QVERIFY(ptd::log_init((log_dir / "protrail.log").native()));
+    }
+
+    const auto dir = std::filesystem::temp_directory_path() /
+                     "protrail_core004_application_capture";
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    const auto config_path = dir / "config.json";
+    ptd::AppConfig source = ptd::release_defaults();
+    source.render.diagnostic_primitives = true;
+    source.trail.lifetime_ms = 850.0f;
+    source.click.duration_ms = 450.0f;
+    QVERIFY(ptd::ConfigStorage::save_to_file(source, config_path.native()));
+
+    ptd::InMemoryAutostartBackend backend;
+    ptd::AppConfig captured;
+    bool captured_window = false;
+    {
+        Application app(config_path.native());
+        QObject exit_guard;
+        app.set_startup_mode(ptd::StartupMode::Normal);
+        app.set_autostart_backend_for_tests(&backend);
+        QVERIFY(app.initialize());
+        QTimer::singleShot(20, &exit_guard, [&] {
+            auto* product = app.product_window_for_tests();
+            if (product) {
+                captured = product->capture_current_settings();
+                captured_window = true;
+            }
+            app.request_exit();
+        });
+        QTimer::singleShot(5000, &exit_guard, [&app] {
+            app.request_exit();
+        });
+        QCOMPARE(app.run(), 0);
+        app.shutdown();
+    }
+
+    QVERIFY(captured_window);
+    QCOMPARE(captured, source);
+    QVERIFY(captured.render.diagnostic_primitives);
+    std::filesystem::remove_all(dir, ec);
+}
+
+void TestTray::tray_has_one_open_action() {
+    ptd::ui::TrayIcon tray(true);
+    QCOMPARE(tray.action_home()->text(), QStringLiteral("Open ProTrail"));
+    QCOMPARE(tray.action_toggle()->text(), QStringLiteral("Disable"));
+    QCOMPARE(tray.action_exit()->text(), QStringLiteral("Exit"));
+
+    int open_actions = 0;
+    for (QAction* action : tray.menu()->actions()) {
+        if (action->text() == QStringLiteral("Open ProTrail")) ++open_actions;
+        QVERIFY(action->text() != QStringLiteral("Settings..."));
+    }
+    QCOMPARE(open_actions, 1);
+}
+
+// The approved icon's one authority is the IDI_ICON1 PE resource. This test
+// binary links the same generated protrail.rc, so resource availability must
+// agree with what configure saw; with the resource present every shell size
+// resolves and the enabled tray state IS the product icon.
+void TestTray::product_icon_resource_matches_build_input() {
+    QCOMPARE(ptd::ui::branding::has_product_icon(), PROTRAIL_EXPECT_FINAL_ICON != 0);
+    const QIcon product = ptd::ui::branding::product_icon();
+    if (!ptd::ui::branding::has_product_icon()) {
+        QVERIFY(product.isNull());
+        const QImage tray = ptd::ui::TrayIcon::create_icon(true).pixmap(16, 16).toImage();
+        const QImage fallback =
+            ptd::ui::branding::development_fallback_icon(true).pixmap(16, 16).toImage();
+        QCOMPARE(tray, fallback);
+        return;
+    }
+    QVERIFY(!product.isNull());
+    for (int size : ptd::ui::branding::kProductIconSizes) {
+        const QPixmap pm = product.pixmap(size, size);
+        QVERIFY2(pm.width() == size && pm.height() == size,
+                 qPrintable(QStringLiteral("product icon lacks a %1px entry").arg(size)));
+    }
+    QCOMPARE(ptd::ui::TrayIcon::create_icon(true).pixmap(32, 32).toImage(),
+             product.pixmap(32, 32).toImage());
+}
+
+// Enabled and disabled must differ visibly at the real tray sizes: the mean
+// premultiplied RGBA difference over the drawn pixels has to exceed a
+// generous floor, so a near-identical tint cannot pass.
+void TestTray::tray_states_are_distinguishable_at_tray_sizes() {
+    for (int size : {16, 20, 24, 32}) {
+        const QImage on = ptd::ui::TrayIcon::create_icon(true).pixmap(size, size)
+                              .toImage().convertToFormat(QImage::Format_ARGB32_Premultiplied);
+        const QImage off = ptd::ui::TrayIcon::create_icon(false).pixmap(size, size)
+                               .toImage().convertToFormat(QImage::Format_ARGB32_Premultiplied);
+        QCOMPARE(on.size(), off.size());
+        double diff = 0.0;
+        int drawn = 0;
+        for (int y = 0; y < on.height(); ++y) {
+            for (int x = 0; x < on.width(); ++x) {
+                const QRgb a = on.pixel(x, y);
+                const QRgb b = off.pixel(x, y);
+                if (qAlpha(a) == 0 && qAlpha(b) == 0) continue;
+                ++drawn;
+                diff += std::abs(qRed(a) - qRed(b)) + std::abs(qGreen(a) - qGreen(b)) +
+                        std::abs(qBlue(a) - qBlue(b)) + std::abs(qAlpha(a) - qAlpha(b));
+            }
+        }
+        QVERIFY2(drawn > 0, qPrintable(QStringLiteral("empty tray icon at %1px").arg(size)));
+        const double mean = diff / (drawn * 4.0);
+        QVERIFY2(mean >= 24.0,
+                 qPrintable(QStringLiteral("tray states too similar at %1px: mean diff %2")
+                                .arg(size).arg(mean)));
+    }
+}
+
+void TestTray::disabled_treatment_desaturates_and_dims() {
+    QImage src(2, 1, QImage::Format_ARGB32);
+    src.setPixel(0, 0, qRgba(220, 40, 10, 255));
+    src.setPixel(1, 0, qRgba(0, 0, 0, 0));
+    const QImage out = ptd::ui::branding::disabled_treatment(src);
+    const QRgb px = out.pixel(0, 0);
+    QCOMPARE(qRed(px), qGray(qRgb(220, 40, 10)));
+    QCOMPARE(qGreen(px), qRed(px));
+    QCOMPARE(qBlue(px), qRed(px));
+    QCOMPARE(qAlpha(px), 115);
+    QCOMPARE(qAlpha(out.pixel(1, 0)), 0);
+}
+
+void TestTray::manual_startup_shows_one_general_window() {
+    with_running_application("manual", ptd::StartupMode::Normal,
+                             [](Application& app) {
+        auto* product = app.product_window_for_tests();
+        QVERIFY(product != nullptr);
+        QCOMPARE(static_cast<QWidget*>(product), static_cast<QWidget*>(app.product_window_for_tests()));
+        QVERIFY(product->isVisible());
+        QCOMPARE(product->windowTitle(), QStringLiteral("ProTrail"));
+        QCOMPARE(product_window_count(), 1);
+        auto* tabs = product->findChild<QTabWidget*>();
+        QVERIFY(tabs != nullptr);
+        QCOMPARE(tabs->count(), ptd::is_dev_build() ? 4 : 3);
+        QCOMPARE(tabs->currentIndex(), 0);
+        QVERIFY(product->findChild<QPushButton*>(QStringLiteral("btn_restore_all")) != nullptr);
+    });
+}
+
+void TestTray::autostart_is_tray_only() {
+    with_running_application("autostart", ptd::StartupMode::AutostartMinimized,
+                             [](Application& app) {
+        auto* product = app.product_window_for_tests();
+        QVERIFY(product != nullptr);
+        QVERIFY(product->isHidden());
+        QVERIFY(!product->isVisible());
+        QCOMPARE(product_window_count(), 1);
+        QVERIFY(app.tray_icon_for_tests() != nullptr);
+        QVERIFY(app.tray_icon_for_tests()->is_visible());
+    });
+}
+
+void TestTray::close_hides_and_open_reuses_window() {
+    with_running_application("reuse", ptd::StartupMode::Normal,
+                             [](Application& app) {
+        auto* product = app.product_window_for_tests();
+        auto* tray = app.tray_icon_for_tests();
+        QVERIFY(product != nullptr);
+        QVERIFY(tray != nullptr);
+        product->close();
+        QVERIFY(product->isHidden());
+        QCOMPARE(product_window_count(), 1);
+        app.show_main(); // second-instance interactive activation path
+        QVERIFY(product->isVisible());
+        QCOMPARE(product_window_count(), 1);
+        QCOMPARE(app.product_window_for_tests(), product);
+        product->close();
+        tray->action_home()->trigger();
+        QVERIFY(product->isVisible());
+        QCOMPARE(product_window_count(), 1);
+        QCOMPARE(app.product_window_for_tests(), product);
+        tray->action_home()->trigger();
+        QCOMPARE(app.product_window_for_tests(), product);
+    });
+}
+
+void TestTray::restore_defaults_is_one_application_transaction() {
+    with_running_application("restore", ptd::StartupMode::Normal,
+                             [](Application& app) {
+        auto* product = app.product_window_for_tests();
+        QVERIFY(product != nullptr);
+        auto* restore = product->findChild<QPushButton*>(QStringLiteral("btn_restore_all"));
+        QVERIFY(restore != nullptr);
+        QSignalSpy bulk(product, &ptd::ui::SettingsWindow::app_config_applied);
+        app.reset_save_invocation_count_for_tests();
+        restore->click();
+        QCOMPARE(bulk.count(), 1);
+        QCOMPARE(app.save_invocation_count_for_tests(), 1);
+    });
+}
+
+void TestTray::shutdown_persistence_is_bounded_and_coalesced() {
+    // W2-005: a last-moment debounced visual edit flushed successfully during
+    // shutdown must produce EXACTLY ONE durable write, not the flush + an
+    // unconditional second identical shutdown save. With no pending dirty edit
+    // shutdown still performs its one intended final save. And the final
+    // on-disk bytes equal the final in-memory visual state.
+    const auto log_dir = std::filesystem::temp_directory_path() /
+                         "protrail_w2005_shutdown_logs";
+    std::error_code ec;
+    std::filesystem::create_directories(log_dir, ec);
+    if (!ptd::is_log_initialized()) {
+        QVERIFY(ptd::log_init((log_dir / "protrail.log").native()));
+    }
+
+    const auto read_config = [](const std::filesystem::path& path) {
+        return ptd::ConfigStorage::load_from_file(path.wstring());
+    };
+
+    // Case A: pending dirty debounced edit + shutdown before the debounce
+    // fires -> exactly one successful durable write, and the on-disk trail
+    // lifetime equals the last in-memory edit.
+    float final_lifetime = 0.0f;
+    {
+        const auto dir = std::filesystem::temp_directory_path() /
+                         "protrail_w2005_dirty_flush";
+        std::filesystem::remove_all(dir, ec);
+        std::filesystem::create_directories(dir, ec);
+        const auto config_path = dir / "config.json";
+
+        Application app(config_path.native());
+        QObject exit_guard;
+        app.set_startup_mode(ptd::StartupMode::Normal);
+        // Long debounce so the timer cannot fire before shutdown.
+        app.set_save_debounce_ms_for_tests(100000);
+        QVERIFY(app.initialize());
+
+        QTimer::singleShot(20, &exit_guard, [&] {
+            auto* product = app.product_window_for_tests();
+            QVERIFY(product != nullptr);
+            ptd::TrailConfig edited = ptd::release_defaults().trail;
+            edited.lifetime_ms = 1234.0f;
+            final_lifetime = edited.lifetime_ms;
+            app.reset_save_invocation_count_for_tests();
+            emit product->trail_config_changed(edited); // arms the debounce
+            QVERIFY(app.config_dirty_for_tests());
+            QCOMPARE(app.save_invocation_count_for_tests(), 0); // not yet written
+            app.request_exit();
+        });
+        QTimer::singleShot(5000, &exit_guard, [&app] { app.request_exit(); });
+        QCOMPARE(app.run(), 0);
+        app.shutdown(); // one flush; NO unconditional duplicate write
+        QCOMPARE(app.save_invocation_count_for_tests(), 1);
+        QVERIFY(!app.config_dirty_for_tests());
+
+        const ptd::AppConfig on_disk = read_config(config_path);
+        QCOMPARE(on_disk.trail.lifetime_ms, final_lifetime);
+        std::filesystem::remove_all(dir, ec);
+    }
+
+    // Case B: no pending dirty edit -> shutdown still performs exactly one
+    // intended final save (the documented product contract).
+    {
+        const auto dir = std::filesystem::temp_directory_path() /
+                         "protrail_w2005_no_pending";
+        std::filesystem::remove_all(dir, ec);
+        std::filesystem::create_directories(dir, ec);
+        const auto config_path = dir / "config.json";
+
+        Application app(config_path.native());
+        QObject exit_guard;
+        app.set_startup_mode(ptd::StartupMode::Normal);
+        QVERIFY(app.initialize());
+
+        QTimer::singleShot(20, &exit_guard, [&] {
+            QVERIFY(!app.config_dirty_for_tests());
+            app.reset_save_invocation_count_for_tests();
+            app.request_exit();
+        });
+        QTimer::singleShot(5000, &exit_guard, [&app] { app.request_exit(); });
+        QCOMPARE(app.run(), 0);
+        app.shutdown();
+        QCOMPARE(app.save_invocation_count_for_tests(), 1); // one final save
+        std::filesystem::remove_all(dir, ec);
+    }
+
+    // Case C: the first dirty flush fails -> shutdown performs exactly one
+    // bounded fallback save attempt, never an unbounded/duplicate sequence.
+    {
+        const auto dir = std::filesystem::temp_directory_path() /
+                         "protrail_w2005_flush_fail";
+        std::filesystem::remove_all(dir, ec);
+        std::filesystem::create_directories(dir, ec);
+        const auto config_path = dir / "config.json";
+
+        struct SaveSeamReset {
+            ~SaveSeamReset() { ptd::ConfigStorage::clear_save_failure_path_for_tests(); }
+        } reset_save_seam;
+
+        Application app(config_path.native());
+        QObject exit_guard;
+        app.set_startup_mode(ptd::StartupMode::Normal);
+        app.set_save_debounce_ms_for_tests(100000);
+        QVERIFY(app.initialize());
+
+        QTimer::singleShot(20, &exit_guard, [&] {
+            auto* product = app.product_window_for_tests();
+            QVERIFY(product != nullptr);
+            ptd::TrailConfig edited = ptd::release_defaults().trail;
+            edited.lifetime_ms = 777.0f;
+            emit product->trail_config_changed(edited);
+            QVERIFY(app.config_dirty_for_tests());
+            app.reset_save_invocation_count_for_tests();
+            // Force EVERY save to fail so the shutdown flush fails and the
+            // one bounded fallback save also fails: exactly two attempts, then
+            // stop -- never an unbounded retry storm.
+            ptd::ConfigStorage::set_save_failure_path_for_tests(std::wstring());
+            app.request_exit();
+        });
+        QTimer::singleShot(5000, &exit_guard, [&app] { app.request_exit(); });
+        QCOMPARE(app.run(), 0);
+        app.shutdown(); // failed flush (1) + bounded fallback save (1)
+        QCOMPARE(app.save_invocation_count_for_tests(), 2);
+        ptd::ConfigStorage::clear_save_failure_path_for_tests();
+        std::filesystem::remove_all(dir, ec);
+    }
 }
 
 QTEST_MAIN(TestTray)

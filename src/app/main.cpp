@@ -4,6 +4,7 @@
 #include "startup_paths.h"
 
 #include "../core/log.h"
+#include "../platform/autostart.h"
 #include "../platform/dpi_awareness.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -24,9 +25,13 @@ int APIENTRY wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int) {
         return 2;
     }
 
-    // T-018R1: the log file exists before the single-instance protocol
-    // runs, so claim/notify evidence is durable, not only on stdout.
-    ptd::log_init(paths.log_path);
+    // T-018R1/W2-003: establish the one resolved log sink before the
+    // single-instance protocol. An explicit-path failure terminates either
+    // launch mode; Application never resolves a replacement destination.
+    if (ptd::initialize_startup_logging(paths)
+        != ptd::StartupLogBootstrapStatus::Ready) {
+        return ptd::kStartupLogFailureExitCode;
+    }
     if (!ptd::dpi::establish_process_contract())
         ptd::log_write(ptd::LogLevel::Warn,
                        "dpi: physical-pixel contract could not be verified");
@@ -98,7 +103,15 @@ int APIENTRY wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int) {
 
     int rc = 0;
     {
+        // A smoke run owns an isolated state directory; its fresh config must
+        // not reconcile (and so delete) the operator's real Start with Windows
+        // entry. The in-memory backend keeps the whole autostart path live
+        // while the per-user Run key stays untouched.
+        ptd::InMemoryAutostartBackend smoke_autostart;
         Application app(paths.config_path);
+        if (paths.is_smoke_mode) {
+            app.set_autostart_backend(&smoke_autostart);
+        }
         app.set_startup_mode(startup_mode);
         if (!app.initialize()) {
             return 1;

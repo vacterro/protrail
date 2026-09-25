@@ -8,6 +8,7 @@
 
 #include "../src/platform/dpi_awareness.h"
 #include "../src/render/overlay_manager.h"
+#include "../src/render/render_scheduler.h"
 #include "../src/render/screen_map.h"
 #include "../src/render/frame_geometry.h"
 #include "../src/render/deferred_coalescer.h"
@@ -70,11 +71,14 @@ private slots:
     void recovery_hresult_classification_separates_device_loss();
     void recovery_failed_attempt_exposes_no_stale_resources();
     // PERF-001: one world-space frame build per scheduler frame, per-overlay
-    // dirty presentation, and frame bounding-box culling.
+    // dirty presentation.
     void perf001_single_effect_build_regardless_of_overlay_count();
     void perf001_dirty_overlay_presents_then_skips_when_clear();
-    void perf001_frame_bounds_cull_unintersected_monitor();
+    void perf002_sparse_overlay_buckets_preserve_seams_and_clear_once();
+    void perf002_thousands_primitives_use_single_pass_and_reuse_buckets();
     void perf001_global_content_death_clears_each_dirty_overlay_once();
+    void perf001_scheduler_rate_follows_populated_buckets();
+    void perf001_refresh_only_metadata_updates_without_recreating_overlay();
 };
 
 void TestMultiMonitor::monitor_enumeration_returns_valid_displays() {
@@ -1323,7 +1327,12 @@ void TestMultiMonitor::recovery_failed_attempt_exposes_no_stale_resources() {
     const int64_t now = 123'456'789;
     ptd::FrameGeometry frame;
     frame.build(trail, history, tc, click, now);
-    w.render_frame(frame, /*intersects=*/true, now);
+    frame.append_segment(100.0f, 100.0f, 120.0f, 100.0f,
+                         0.9f, 3.0f, ptd::TrailColorF{1.0f, 1.0f, 0.0f});
+    const std::vector<ptd::FrameGeometry::OverlayInput> bounds{
+        ptd::FrameGeometry::OverlayInput{RECT{0, 0, 1000, 1000}, 60}};
+    const auto& partitions = frame.partition_for_overlays(bounds);
+    w.render_frame(frame, partitions[0].primitive_indices, now);
     QCOMPARE(calls, 1);                    // exactly the gated attempt
     QCOMPARE(w.recovery_phase(), ptd::OverlayWindow::RecoveryPhase::RecoveryPending);
     w.destroy();
@@ -1410,6 +1419,9 @@ void TestMultiMonitor::perf001_single_effect_build_regardless_of_overlay_count()
     // repair each overlay ran TrailEffect::build_geometry + Click draw, so the
     // build count scaled with monitor count.
     auto synthetic = perf001_row();
+    synthetic[0].refresh_rate_hz = 60;
+    synthetic[1].refresh_rate_hz = 120;
+    synthetic[2].refresh_rate_hz = 240;
     ptd::OverlayManager manager;
     manager.set_enumeration_for_test([synthetic] { return synthetic; });
     manager.set_create_window_for_test(
@@ -1420,9 +1432,7 @@ void TestMultiMonitor::perf001_single_effect_build_regardless_of_overlay_count()
     QVERIFY(manager.create(GetModuleHandleW(nullptr), false));
     QCOMPARE(manager.overlay_count(), std::size_t(3));
 
-    ptd::CursorHistory history;
     const int64_t base = 1'000'000'000LL;
-    perf001_push_span(history, 100, 500, 300, base);
     const int64_t now = base + 500 * 1'000'000;
 
     ptd::TrailEffect trail;
@@ -1433,11 +1443,23 @@ void TestMultiMonitor::perf001_single_effect_build_regardless_of_overlay_count()
     ptd::ClickBubbleEffect click;
     ptd::ClickConfig cc{};
 
-    manager.render_frame(trail, history, tc, click, cc, now);
-    manager.render_frame(trail, history, tc, click, cc, now);
-    // Two global frames -> exactly two world-space builds, independent of the
-    // three live overlays that share the frame.
-    QCOMPARE(manager.frame_build_count(), 2ULL);
+    auto render_span = [&](int32_t x0, int32_t x1, int expected_hz,
+                           std::size_t expected_overlays) {
+        ptd::CursorHistory history;
+        if (x0 <= x1) perf001_push_span(history, x0, x1, 300, base);
+        manager.render_frame(trail, history, tc, click, cc, now);
+        QCOMPARE(manager.content_refresh_rate_hz(), expected_hz);
+        QCOMPARE(manager.last_presenting_overlays(), expected_overlays);
+    };
+
+    render_span(-1500, -1400, 60, 1);  // content only on A
+    render_span(100, 200, 120, 1);     // content only on B
+    render_span(2500, 2600, 240, 1);   // content only on C
+    render_span(1850, 1990, 240, 2);  // seam B/C selects the faster panel
+    render_span(1, 0, 0, 0);           // empty frame has no content source
+    // One world-frame build per application frame, independent of three
+    // live overlays and sparse bucket membership.
+    QCOMPARE(manager.frame_build_count(), 5ULL);
 
     ptd::OverlayWindow::clear_display_change_callback();
 }
@@ -1473,45 +1495,138 @@ void TestMultiMonitor::perf001_dirty_overlay_presents_then_skips_when_clear() {
     QVERIFY(!fresh.is_clear());
 }
 
-void TestMultiMonitor::perf001_frame_bounds_cull_unintersected_monitor() {
+void TestMultiMonitor::perf002_sparse_overlay_buckets_preserve_seams_and_clear_once() {
     ptd::FrameGeometry frame;
     ptd::TrailColorF color{1.0f, 1.0f, 0.0f};
-    frame.append_segment(100.0f, 300.0f, 800.0f, 300.0f, 0.9f, 3.0f, color);
-    const RECT mon_a{-1920, 0, 0, 1080};
-    const RECT mon_b{0, 0, 1920, 1080};
-    const RECT mon_c{1920, 0, 3840, 1080};
-    QVERIFY(!frame.intersects(mon_a));
-    QVERIFY(frame.intersects(mon_b));
-    QVERIFY(!frame.intersects(mon_c));
+    using OverlayInput = ptd::FrameGeometry::OverlayInput;
+    const std::vector<OverlayInput> three_monitors{
+        OverlayInput{RECT{-1920, 0, 0, 1080}, 60},
+        OverlayInput{RECT{0, 0, 1920, 1080}, 120},
+        OverlayInput{RECT{1920, 0, 3840, 1080}, 240}};
+    frame.append_segment(-1700.0f, 300.0f, -1500.0f, 300.0f,
+                         0.9f, 3.0f, color);
+    frame.append_segment(2800.0f, 300.0f, 3000.0f, 300.0f,
+                         0.9f, 3.0f, color);
+    frame.append_segment(-1200.0f, 400.0f, -1100.0f, 400.0f,
+                         0.9f, 3.0f, color);
+    const auto& sparse = frame.partition_for_overlays(three_monitors);
+    QCOMPARE(sparse.size(), std::size_t(3));
+    QCOMPARE(sparse[0].primitive_indices.size(), std::size_t(2));
+    QCOMPARE(sparse[0].primitive_indices[0], std::size_t(0));
+    QCOMPARE(sparse[0].primitive_indices[1], std::size_t(2));
+    QVERIFY(sparse[1].primitive_indices.empty());
+    QVERIFY(!sparse[1].intersects());
+    QCOMPARE(sparse[2].primitive_indices.size(), std::size_t(1));
+    QCOMPARE(sparse[2].primitive_indices[0], std::size_t(1));
+    // OverlayWindow receives exactly these indices, so the empty middle
+    // display has no unrelated primitive to visit.
+    std::size_t middle_overlay_visits = 0;
+    for (const std::size_t index : sparse[1].primitive_indices) {
+        Q_UNUSED(index);
+        ++middle_overlay_visits;
+    }
+    QCOMPARE(middle_overlay_visits, std::size_t(0));
 
-    // A seam-crossing segment intersects BOTH neighbours, never only the
-    // "cursor" monitor: x from 1850 (B) through 1990 (C).
+    // Physical seam overlap assigns a crossing primitive to both neighbours.
     ptd::FrameGeometry seam;
-    seam.append_segment(1850.0f, 500.0f, 1990.0f, 500.0f, 0.9f, 3.0f, color);
-    QVERIFY(!seam.intersects(mon_a));
-    QVERIFY(seam.intersects(mon_b));
-    QVERIFY(seam.intersects(mon_c));
+    seam.append_segment(1850.0f, 500.0f, 1990.0f, 500.0f,
+                        0.9f, 3.0f, color);
+    const auto& seam_buckets = seam.partition_for_overlays(three_monitors);
+    QVERIFY(seam_buckets[0].primitive_indices.empty());
+    QCOMPARE(seam_buckets[1].primitive_indices.size(), std::size_t(1));
+    QCOMPARE(seam_buckets[2].primitive_indices.size(), std::size_t(1));
 
-    // Negative-coordinate monitor is handled by the same pure box math.
-    ptd::FrameGeometry negative;
-    negative.append_segment(-1500.0f, 400.0f, -1400.0f, 400.0f, 0.9f, 3.0f, color);
-    QVERIFY(negative.intersects(mon_a));
-    QVERIFY(!negative.intersects(mon_b));
+    // One shared conservative-bound function covers stroke width and sparkle
+    // extent, so both primitives survive partitioning at the physical seam.
+    const std::vector<OverlayInput> seam_monitors{
+        OverlayInput{RECT{-100, 0, 0, 100}, 60},
+        OverlayInput{RECT{0, 0, 100, 100}, 240}};
+    ptd::FrameGeometry margins;
+    margins.append_segment(-8.0f, 40.0f, -4.0f, 40.0f,
+                           0.9f, 3.0f, color);
+    margins.append_sparkle(-4.0f, 60.0f, 8.0f, 0.0f,
+                           0.9f, color, ptd::TrailSparkleShape::Cross);
+    const auto& margin_buckets = margins.partition_for_overlays(seam_monitors);
+    QCOMPARE(margin_buckets[0].primitive_indices.size(), std::size_t(2));
+    QCOMPARE(margin_buckets[1].primitive_indices.size(), std::size_t(2));
 
-    // Empty frame: no bounds, intersects nothing, so every overlay skips.
-    ptd::FrameGeometry empty;
-    QVERIFY(!empty.has_bounds());
-    QVERIFY(!empty.intersects(mon_b));
+    ptd::OverlayDirtyState a;
+    ptd::OverlayDirtyState b;
+    ptd::OverlayDirtyState c;
+    QCOMPARE(a.decide(sparse[0].intersects()),
+             ptd::OverlayDirtyState::Decision::PresentContent);
+    QCOMPARE(b.decide(sparse[1].intersects()),
+             ptd::OverlayDirtyState::Decision::Skip);
+    QCOMPARE(c.decide(sparse[2].intersects()),
+             ptd::OverlayDirtyState::Decision::PresentContent);
+    frame.clear();
+    const auto& cleared = frame.partition_for_overlays(three_monitors);
+    QCOMPARE(a.decide(cleared[0].intersects()),
+             ptd::OverlayDirtyState::Decision::PresentClear);
+    QCOMPARE(b.decide(cleared[1].intersects()),
+             ptd::OverlayDirtyState::Decision::Skip);
+    QCOMPARE(c.decide(cleared[2].intersects()),
+             ptd::OverlayDirtyState::Decision::PresentClear);
+    QCOMPARE(a.decide(cleared[0].intersects()),
+             ptd::OverlayDirtyState::Decision::Skip);
+    QCOMPARE(b.decide(cleared[1].intersects()),
+             ptd::OverlayDirtyState::Decision::Skip);
+    QCOMPARE(c.decide(cleared[2].intersects()),
+             ptd::OverlayDirtyState::Decision::Skip);
+}
+
+void TestMultiMonitor::perf002_thousands_primitives_use_single_pass_and_reuse_buckets() {
+    constexpr std::size_t kPerSide = 3000;
+    constexpr std::size_t kTotal = kPerSide * 2;
+    using OverlayInput = ptd::FrameGeometry::OverlayInput;
+    const std::vector<OverlayInput> monitors{
+        OverlayInput{RECT{-1920, 0, 0, 1080}, 60},
+        OverlayInput{RECT{0, 0, 1920, 1080}, 120},
+        OverlayInput{RECT{1920, 0, 3840, 1080}, 240}};
+    const ptd::TrailColorF color{0.2f, 0.8f, 1.0f};
+    ptd::FrameGeometry frame;
+    auto fill = [&]() {
+        for (std::size_t i = 0; i < kPerSide; ++i) {
+            const float y = 20.0f + static_cast<float>(i % 1000);
+            const float left_x = -1800.0f + static_cast<float>(i % 100);
+            const float right_x = 2800.0f + static_cast<float>(i % 100);
+            frame.append_segment(left_x, y, left_x + 10.0f, y,
+                                 0.8f, 2.0f, color);
+            frame.append_segment(right_x, y, right_x + 10.0f, y,
+                                 0.8f, 2.0f, color);
+        }
+    };
+    fill();
+    const auto& first = frame.partition_for_overlays(monitors);
+    QCOMPARE(frame.primitive_partition_visits_for_tests(), kTotal);
+    QCOMPARE(frame.overlay_candidate_checks_for_tests(), kTotal);
+    QCOMPARE(first[0].primitive_indices.size(), kPerSide);
+    QVERIFY(first[1].primitive_indices.empty());
+    QCOMPARE(first[2].primitive_indices.size(), kPerSide);
+    const std::size_t a_capacity = first[0].primitive_indices.capacity();
+    const std::size_t b_capacity = first[1].primitive_indices.capacity();
+    const std::size_t c_capacity = first[2].primitive_indices.capacity();
+
+    frame.clear();
+    fill();
+    const auto& second = frame.partition_for_overlays(monitors);
+    QCOMPARE(frame.primitive_partition_visits_for_tests(), kTotal);
+    QCOMPARE(frame.overlay_candidate_checks_for_tests(), kTotal);
+    QCOMPARE(second[0].primitive_indices.capacity(), a_capacity);
+    QCOMPARE(second[1].primitive_indices.capacity(), b_capacity);
+    QCOMPARE(second[2].primitive_indices.capacity(), c_capacity);
 }
 
 void TestMultiMonitor::perf001_global_content_death_clears_each_dirty_overlay_once() {
     // Global content death: an empty world-space frame must make every
     // previously-visible overlay present ONE clear and then stop presenting.
     ptd::FrameGeometry frame;
-    const RECT mon_a{-1920, 0, 0, 1080};
-    const RECT mon_b{0, 0, 1920, 1080};
-    QVERIFY(!frame.intersects(mon_a));
-    QVERIFY(!frame.intersects(mon_b));
+    const std::vector<ptd::FrameGeometry::OverlayInput> monitors{
+        ptd::FrameGeometry::OverlayInput{RECT{-1920, 0, 0, 1080}, 60},
+        ptd::FrameGeometry::OverlayInput{RECT{0, 0, 1920, 1080}, 240}};
+    const auto& partitions = frame.partition_for_overlays(monitors);
+    QVERIFY(!partitions[0].intersects());
+    QVERIFY(!partitions[1].intersects());
 
     ptd::OverlayDirtyState a;
     ptd::OverlayDirtyState b;
@@ -1521,19 +1636,121 @@ void TestMultiMonitor::perf001_global_content_death_clears_each_dirty_overlay_on
     QVERIFY(!b.is_clear());
 
     // Frame with no content: each dirty overlay clears exactly once...
-    QCOMPARE(a.decide(frame.intersects(mon_a)),
+    QCOMPARE(a.decide(partitions[0].intersects()),
              ptd::OverlayDirtyState::Decision::PresentClear);
-    QCOMPARE(b.decide(frame.intersects(mon_b)),
+    QCOMPARE(b.decide(partitions[1].intersects()),
              ptd::OverlayDirtyState::Decision::PresentClear);
     QVERIFY(a.is_clear());
     QVERIFY(b.is_clear());
 
     // ...and from then on both skip: the scheduler can reach Idle without a
     // transparent-frame storm on unrelated monitors.
-    QCOMPARE(a.decide(frame.intersects(mon_a)),
+    QCOMPARE(a.decide(partitions[0].intersects()),
              ptd::OverlayDirtyState::Decision::Skip);
-    QCOMPARE(b.decide(frame.intersects(mon_b)),
+    QCOMPARE(b.decide(partitions[1].intersects()),
              ptd::OverlayDirtyState::Decision::Skip);
+}
+
+void TestMultiMonitor::perf001_scheduler_rate_follows_populated_buckets() {
+    using OverlayInput = ptd::FrameGeometry::OverlayInput;
+    const std::vector<OverlayInput> monitors{
+        OverlayInput{RECT{0, 0, 1920, 1080}, 60},
+        OverlayInput{RECT{1920, 0, 3840, 1080}, 240}};
+    const ptd::TrailColorF color{1.0f, 1.0f, 1.0f};
+    ptd::FrameGeometry frame;
+
+    // Only the 60 Hz display contains current content.
+    frame.append_segment(400.0f, 200.0f, 500.0f, 200.0f,
+                         0.8f, 3.0f, color);
+    const auto& low_only = frame.partition_for_overlays(monitors);
+    QVERIFY(low_only[0].intersects());
+    QVERIFY(!low_only[1].intersects());
+    QCOMPARE(frame.content_refresh_rate_hz(), 60);
+    QCOMPARE(ptd::RenderScheduler::resolve_target_fps(
+                 frame.content_refresh_rate_hz(), 240), 60);
+
+    // Content only on the 240 Hz display follows 240 Hz despite the lower-rate
+    // neighbouring overlay.
+    frame.clear();
+    frame.append_segment(2400.0f, 200.0f, 2500.0f, 200.0f,
+                         0.8f, 3.0f, color);
+    const auto& high_only = frame.partition_for_overlays(monitors);
+    QVERIFY(!high_only[0].intersects());
+    QVERIFY(high_only[1].intersects());
+    QCOMPARE(frame.content_refresh_rate_hz(), 240);
+    QCOMPARE(ptd::RenderScheduler::resolve_target_fps(
+                 frame.content_refresh_rate_hz(), 60), 240);
+
+    // A physical seam crossing belongs to both buckets and uses the faster
+    // of the displays that actually receive it.
+    frame.clear();
+    frame.append_segment(1900.0f, 500.0f, 1940.0f, 500.0f,
+                         0.8f, 3.0f, color);
+    const auto& seam = frame.partition_for_overlays(monitors);
+    QVERIFY(seam[0].intersects());
+    QVERIFY(seam[1].intersects());
+    QCOMPARE(frame.content_refresh_rate_hz(), 240);
+
+    // Empty frame has no content-derived display and uses the bounded live
+    // monitor fallback. Refresh-only metadata updates flow through the same
+    // bucket inputs without changing physical geometry.
+    frame.clear();
+    const auto& empty = frame.partition_for_overlays(monitors);
+    QVERIFY(!empty[0].intersects());
+    QVERIFY(!empty[1].intersects());
+    QCOMPARE(frame.content_refresh_rate_hz(), 0);
+    QCOMPARE(ptd::RenderScheduler::resolve_target_fps(
+                 frame.content_refresh_rate_hz(), 240), 240);
+
+    auto changed_refresh = monitors;
+    changed_refresh[1].refresh_rate_hz = 144;
+    frame.clear();
+    frame.append_segment(2400.0f, 200.0f, 2500.0f, 200.0f,
+                         0.8f, 3.0f, color);
+    const auto& after_refresh_change =
+        frame.partition_for_overlays(changed_refresh);
+    QVERIFY(!after_refresh_change[0].intersects());
+    QVERIFY(after_refresh_change[1].intersects());
+    QCOMPARE(frame.content_refresh_rate_hz(), 144);
+}
+
+void TestMultiMonitor::perf001_refresh_only_metadata_updates_without_recreating_overlay() {
+    int live_refresh_hz = 240;
+    int create_calls = 0;
+    ptd::MonitorInfo monitor{};
+    monitor.bounds = make_rect(0, 0, 1920, 1080);
+    monitor.work_area = monitor.bounds;
+    monitor.is_primary = true;
+    monitor.refresh_rate_hz = live_refresh_hz;
+
+    ptd::OverlayManager manager;
+    manager.set_enumeration_for_test([&] {
+        monitor.refresh_rate_hz = live_refresh_hz;
+        return std::vector<ptd::MonitorInfo>{monitor};
+    });
+    manager.set_create_window_for_test(
+        [&](const ptd::MonitorInfo&, HINSTANCE, bool)
+            -> std::unique_ptr<ptd::OverlayWindow> {
+            ++create_calls;
+            return std::make_unique<ptd::OverlayWindow>();
+        });
+    QVERIFY(manager.create(GetModuleHandleW(nullptr), false));
+    QCOMPARE(create_calls, 1);
+    QCOMPARE(manager.monitor_overlays().size(), std::size_t(1));
+    ptd::OverlayWindow* const window_owner =
+        manager.monitor_overlays()[0].window.get();
+
+    // Same identity, bounds, work area, DPI and primary status; only refresh
+    // metadata changes. The coalesced topology owner updates it in place.
+    live_refresh_hz = 144;
+    QCOMPARE(manager.refresh_topology_ex(),
+             ptd::OverlayManager::Convergence::Unchanged);
+    QCOMPARE(create_calls, 1);
+    QCOMPARE(manager.monitor_overlays()[0].window.get(), window_owner);
+    QCOMPARE(manager.monitor_overlays()[0].monitor.refresh_rate_hz, 144);
+    QCOMPARE(manager.monitors()[0].refresh_rate_hz, 144);
+    manager.destroy();
+    ptd::OverlayWindow::clear_display_change_callback();
 }
 
 QTEST_MAIN(TestMultiMonitor)

@@ -16,19 +16,30 @@
 #include "../src/config/config_storage.h"
 #include "../src/config/release_defaults.h"
 #include "../src/config/dev_defaults.h"
+#include "../src/app/startup_paths.h"
 #include "../src/core/log.h"
 
 #include <QtTest/QtTest>
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <limits>
 #include <string>
 #include <string_view>
+#include <system_error>
+#include <tuple>
 #include <vector>
 
 namespace {
 // T-030: captured log messages for the fallback assertions.
 std::vector<std::string> g_captured_logs;
+int g_known_folder_probe_calls = 0;
+
+bool counting_known_folder_failure_probe(std::wstring& out) {
+    ++g_known_folder_probe_calls;
+    out.clear();
+    return false;
+}
 }
 
 class TestConfig : public QObject {
@@ -96,6 +107,8 @@ private slots:
     // T-030: a %LOCALAPPDATA% probe failure must produce a logged,
     // deterministic fallback, never a silent working-directory path.
     void default_paths_fail_deterministic_fallback();
+    void long_module_path_keeps_state_fallbacks_aligned();
+    void module_path_failure_uses_absolute_shared_fallback();
 
     // T-029: a failed persistence write must be observable, never silent.
     void persistence_failure_is_observable();
@@ -107,6 +120,8 @@ private slots:
     // malformed-backed-up/backup-failed/future-schema/read-failure, and a
     // protected source must never become ordinary writable state.
     void load_result_classifies_every_provenance();
+    void filesystem_probe_error_is_protected();
+    void schema_provenance_requires_supported_integral_tag();
     void future_schema_is_unsupported_not_corrupt();
     void malformed_backup_failure_disables_persistence();
     void read_failure_disables_persistence();
@@ -114,12 +129,15 @@ private slots:
     // T-41: log directory creation failure must report error and not mark sink initialized.
     void log_init_directory_creation_failure_is_reported();
     void log_init_normal_path_creates_directory_and_writes_file();
+    void startup_logging_bootstrap_uses_resolved_explicit_path();
+    void startup_log_failure_is_terminal_for_normal_and_smoke();
 
     // T-34: Developer Release Defaults & Dev Presets
     void dev_diff_exhaustive_field_coverage();
     void dev_diff_reports_no_diff_for_identical();
     void dev_preset_lifecycle_isolated();
     void dev_promote_lifecycle_and_safeguards();
+    void dev_promote_rollback_under_injected_failures();
 
 private:
     std::filesystem::path test_dir_;
@@ -1692,6 +1710,113 @@ void TestConfig::default_paths_fail_deterministic_fallback() {
             == std::filesystem::path(base) / "ProTrail" / "protrail.log");
 }
 
+void TestConfig::long_module_path_keeps_state_fallbacks_aligned() {
+    struct ProbeReset {
+        ~ProbeReset() {
+            ptd::clear_module_path_query_for_tests();
+            ptd::set_known_folder_probe_for_tests(nullptr);
+            ptd::clear_log_sink();
+        }
+    } reset_probes;
+
+    g_captured_logs.clear();
+    ptd::set_log_sink([](ptd::LogLevel, const std::string_view& message) {
+        g_captured_logs.emplace_back(message);
+    });
+    ptd::set_known_folder_probe_for_tests(
+        +[](std::wstring& out) { out.clear(); return false; });
+
+    std::wstring module_path = std::filesystem::temp_directory_path().wstring();
+    for (int i = 0; i < 18; ++i) {
+        module_path += L"\\segment_0123456789abcdef";
+    }
+    module_path += L"\\ProTrail.exe";
+    QVERIFY(module_path.size() > 260);
+    const std::filesystem::path expected_dir =
+        std::filesystem::path(module_path).parent_path();
+
+    std::size_t query_calls = 0;
+    ptd::set_module_path_query_for_tests(
+        [module_path, &query_calls](wchar_t* buffer, std::size_t capacity) {
+            ++query_calls;
+            const std::size_t copied = module_path.size() < capacity
+                ? module_path.size() : capacity;
+            std::copy_n(module_path.data(), copied, buffer);
+            return module_path.size() >= capacity ? capacity : module_path.size();
+        });
+
+    QVERIFY(std::filesystem::path(ptd::executable_directory()) == expected_dir);
+    QCOMPARE(query_calls, std::size_t{2});
+
+    query_calls = 0;
+    const std::filesystem::path config_path(ptd::ConfigStorage::default_config_path());
+    const std::filesystem::path log_path(ptd::default_log_path());
+    const ptd::StartupPaths startup = ptd::resolve_startup_paths(nullptr, nullptr);
+    QVERIFY(startup.valid);
+    QVERIFY(config_path.is_absolute());
+    QVERIFY(log_path.is_absolute());
+    QVERIFY(config_path == expected_dir / "config.json");
+    QVERIFY(log_path == expected_dir / "protrail.log");
+    QVERIFY(std::filesystem::path(startup.config_path) == config_path);
+    QVERIFY(std::filesystem::path(startup.log_path) == log_path);
+    QCOMPARE(query_calls, std::size_t{8});
+
+    bool config_fallback_logged = false;
+    bool log_fallback_logged = false;
+    for (const std::string& line : g_captured_logs) {
+        config_fallback_logged |=
+            line.find("config: %LOCALAPPDATA% unavailable") != std::string::npos;
+        log_fallback_logged |=
+            line.find("log: %LOCALAPPDATA% unavailable") != std::string::npos;
+    }
+    QVERIFY(config_fallback_logged);
+    QVERIFY(log_fallback_logged);
+}
+
+void TestConfig::module_path_failure_uses_absolute_shared_fallback() {
+    struct ProbeReset {
+        ~ProbeReset() {
+            ptd::clear_module_path_query_for_tests();
+            ptd::set_known_folder_probe_for_tests(nullptr);
+            ptd::clear_log_sink();
+        }
+    } reset_probes;
+
+    g_captured_logs.clear();
+    ptd::set_log_sink([](ptd::LogLevel, const std::string_view& message) {
+        g_captured_logs.emplace_back(message);
+    });
+    ptd::set_known_folder_probe_for_tests(
+        +[](std::wstring& out) { out.clear(); return false; });
+    ptd::set_module_path_query_for_tests(
+        [](wchar_t*, std::size_t) { return std::size_t{0}; });
+
+    QVERIFY(ptd::executable_directory().empty());
+    const std::filesystem::path expected_dir = std::filesystem::temp_directory_path();
+    const std::filesystem::path config_path(ptd::ConfigStorage::default_config_path());
+    const std::filesystem::path log_path(ptd::default_log_path());
+    const ptd::StartupPaths startup = ptd::resolve_startup_paths(nullptr, nullptr);
+
+    QVERIFY(config_path.is_absolute());
+    QVERIFY(log_path.is_absolute());
+    QVERIFY(config_path == expected_dir / "config.json");
+    QVERIFY(log_path == expected_dir / "protrail.log");
+    QVERIFY(config_path.parent_path() == log_path.parent_path());
+    QVERIFY(std::filesystem::path(startup.config_path) == config_path);
+    QVERIFY(std::filesystem::path(startup.log_path) == log_path);
+
+    bool config_failure_logged = false;
+    bool log_failure_logged = false;
+    for (const std::string& line : g_captured_logs) {
+        config_failure_logged |=
+            line.find("config: executable path resolution failed") != std::string::npos;
+        log_failure_logged |=
+            line.find("log: executable path resolution failed") != std::string::npos;
+    }
+    QVERIFY(config_failure_logged);
+    QVERIFY(log_failure_logged);
+}
+
 // T-029: a failing persistence target must be OBSERVABLE -- the save reports
 // non-success and emits an error line instead of silently pretending the
 // settings were stored.
@@ -1789,10 +1914,16 @@ void TestConfig::load_result_classifies_every_provenance() {
     // MissingFresh
     {
         const std::wstring missing = (test_dir_ / "core001_missing.json").wstring();
+        QVERIFY(!std::filesystem::exists(missing));
         const auto r = ptd::ConfigStorage::load_from_file_result(missing);
         QCOMPARE(static_cast<int>(r.status), static_cast<int>(ptd::ConfigLoadStatus::MissingFresh));
         QVERIFY(r.persistence_allowed);
         QCOMPARE(r.config, ptd::release_defaults());
+        QVERIFY(ptd::ConfigStorage::save_to_file(r.config, missing));
+        QVERIFY(std::filesystem::exists(missing));
+        const auto saved = ptd::ConfigStorage::load_from_file_result(missing);
+        QCOMPARE(static_cast<int>(saved.status), static_cast<int>(ptd::ConfigLoadStatus::LoadedCurrent));
+        QVERIFY(saved.persistence_allowed);
     }
     // LoadedCurrent
     {
@@ -1973,6 +2104,145 @@ void TestConfig::log_init_normal_path_creates_directory_and_writes_file() {
 
     ptd::reset_log_for_tests();
     std::filesystem::remove_all(log_dir, ec);
+}
+
+void TestConfig::filesystem_probe_error_is_protected() {
+    const std::filesystem::path existing = test_dir_ / "core001_probe_error.json";
+    ptd::AppConfig original = ptd::release_defaults();
+    original.master_enabled = false;
+    original.click.duration_ms = 1234;
+    QVERIFY(ptd::ConfigStorage::save_to_file(original, existing.wstring()));
+
+    const auto read_bytes = [](const std::filesystem::path& path) {
+        std::ifstream in(path, std::ios::binary);
+        return std::string(std::istreambuf_iterator<char>(in),
+                           std::istreambuf_iterator<char>());
+    };
+    const std::string before = read_bytes(existing);
+    QVERIFY(!before.empty());
+
+    const std::wstring protected_path = existing.wstring();
+    ptd::ConfigStorage::set_filesystem_probe_for_tests(
+        [protected_path](const std::wstring& path) {
+            if (path == protected_path) {
+                return std::tuple<bool, std::error_code>{
+                    false, std::make_error_code(std::errc::permission_denied)};
+            }
+            std::error_code ec;
+            const bool exists = std::filesystem::exists(path, ec);
+            return std::tuple<bool, std::error_code>{exists, ec};
+        });
+    struct ProbeReset {
+        ~ProbeReset() { ptd::ConfigStorage::clear_filesystem_probe_for_tests(); }
+    } reset_probe;
+
+    const auto result = ptd::ConfigStorage::load_from_file_result(protected_path);
+    QCOMPARE(static_cast<int>(result.status), static_cast<int>(ptd::ConfigLoadStatus::ReadFailure));
+    QVERIFY(!result.persistence_allowed);
+    QVERIFY(std::filesystem::exists(existing));
+    QCOMPARE(read_bytes(existing), before);
+    QVERIFY(!std::filesystem::exists(existing.wstring() + L".corrupt"));
+}
+
+void TestConfig::schema_provenance_requires_supported_integral_tag() {
+    struct SchemaCase {
+        const char* label;
+        std::string json;
+    };
+    const std::vector<SchemaCase> cases = {
+        {"missing", R"({"master_enabled":true})"},
+        {"string", R"({"schema_version":"11","master_enabled":true})"},
+        {"object", R"({"schema_version":{"value":11},"master_enabled":true})"},
+        {"boolean", R"({"schema_version":true,"master_enabled":true})"},
+        {"non_integral", R"({"schema_version":10.5,"master_enabled":true})"},
+        {"future", "{\"schema_version\":"
+                    + std::to_string(ptd::AppConfig::kCurrentSchemaVersion + 1)
+                    + ",\"master_enabled\":true}"},
+    };
+
+    const auto read_bytes = [](const std::filesystem::path& path) {
+        std::ifstream in(path, std::ios::binary);
+        return std::string(std::istreambuf_iterator<char>(in),
+                           std::istreambuf_iterator<char>());
+    };
+    for (const SchemaCase& test_case : cases) {
+        const std::filesystem::path path =
+            test_dir_ / (std::string("core003_") + test_case.label + ".json");
+        {
+            std::ofstream out(path, std::ios::binary | std::ios::trunc);
+            QVERIFY(out.good());
+            out.write(test_case.json.data(),
+                      static_cast<std::streamsize>(test_case.json.size()));
+            out.close();
+            QVERIFY(out.good());
+        }
+        const std::string before = read_bytes(path);
+        const auto result = ptd::ConfigStorage::load_from_file_result(path.wstring());
+        QVERIFY2(result.status == ptd::ConfigLoadStatus::UnsupportedFutureSchema,
+                 test_case.label);
+        QVERIFY(!result.persistence_allowed);
+        QCOMPARE(result.config, ptd::release_defaults());
+        QCOMPARE(read_bytes(path), before);
+        QVERIFY(!std::filesystem::exists(path.wstring() + L".corrupt"));
+    }
+}
+
+void TestConfig::startup_logging_bootstrap_uses_resolved_explicit_path() {
+    ptd::reset_log_for_tests();
+    g_known_folder_probe_calls = 0;
+    ptd::set_known_folder_probe_for_tests(
+        &counting_known_folder_failure_probe);
+
+    const auto log_dir = test_dir_ / "startup_explicit_log";
+    std::error_code ec;
+    std::filesystem::remove_all(log_dir, ec);
+    ptd::StartupPaths paths{};
+    paths.valid = true;
+    paths.is_smoke_mode = true;
+    paths.log_path = (log_dir / "protrail.log").wstring();
+
+    QCOMPARE(ptd::initialize_startup_logging(paths),
+             ptd::StartupLogBootstrapStatus::Ready);
+    QVERIFY(ptd::is_log_initialized());
+    QCOMPARE(g_known_folder_probe_calls, 0);
+    ptd::log_write(ptd::LogLevel::Info, "startup_explicit_path_probe");
+    QVERIFY(std::filesystem::exists(paths.log_path));
+    std::ifstream in(paths.log_path);
+    const std::string content((std::istreambuf_iterator<char>(in)),
+                              std::istreambuf_iterator<char>());
+    QVERIFY(content.find("startup_explicit_path_probe") != std::string::npos);
+
+    ptd::reset_log_for_tests();
+    std::filesystem::remove_all(log_dir, ec);
+}
+
+void TestConfig::startup_log_failure_is_terminal_for_normal_and_smoke() {
+    ptd::reset_log_for_tests();
+    g_known_folder_probe_calls = 0;
+    ptd::set_known_folder_probe_for_tests(
+        &counting_known_folder_failure_probe);
+    const auto blocker = test_dir_ / "startup_log_blocker";
+    {
+        std::ofstream out(blocker, std::ios::trunc);
+        QVERIFY(out.good());
+        out << "file blocks the explicit log directory";
+    }
+
+    for (const bool smoke_mode : {false, true}) {
+        ptd::StartupPaths paths{};
+        paths.valid = true;
+        paths.is_smoke_mode = smoke_mode;
+        paths.log_path = (blocker / "child" / "protrail.log").wstring();
+        QCOMPARE(ptd::initialize_startup_logging(paths),
+                 ptd::StartupLogBootstrapStatus::Failed);
+        QCOMPARE(ptd::kStartupLogFailureExitCode, 2);
+        QVERIFY(!ptd::is_log_initialized());
+    }
+    QCOMPARE(g_known_folder_probe_calls, 0);
+
+    ptd::reset_log_for_tests();
+    std::error_code ec;
+    std::filesystem::remove(blocker, ec);
 }
 
 void TestConfig::dev_diff_reports_no_diff_for_identical() {
@@ -2362,6 +2632,100 @@ void TestConfig::dev_promote_lifecycle_and_safeguards() {
     QCOMPARE(reloaded.render.diagnostic_primitives, true);
 
     // Clean up
+    ptd::reset_canonical_release_defaults_path_for_tests();
+    ptd::set_dev_build_override_for_tests(std::nullopt);
+    std::filesystem::remove(target_file, ec);
+}
+
+void TestConfig::dev_promote_rollback_under_injected_failures() {
+    // W2-004: prove the checked transaction stages. Every recoverable failure
+    // must leave a pre-existing canonical file byte-identical, or restore the
+    // prior "absent" state when there was none; rollback failure is reported
+    // distinctly and never claims a false "restored" success.
+    const auto target_file = test_dir_ / "rel_defaults_rollback_test.json";
+    std::error_code ec;
+    ptd::set_canonical_release_defaults_path_for_tests(target_file);
+    ptd::set_dev_build_override_for_tests(true);
+
+    const auto read_bytes = [](const std::filesystem::path& path) {
+        std::ifstream in(path, std::ios::binary);
+        return std::string(std::istreambuf_iterator<char>(in),
+                           std::istreambuf_iterator<char>());
+    };
+
+    // Establish a known-good canonical file (the "previous" bytes) whose
+    // glow_strength differs from the promotion candidate so a silent overwrite
+    // would be detectable.
+    ptd::AppConfig prior = ptd::release_defaults();
+    prior.trail.glow_strength = 0.11f;
+    QVERIFY(ptd::promote_to_release_defaults(prior).success);
+    QVERIFY(std::filesystem::exists(target_file));
+    const std::string prior_disk = read_bytes(target_file);
+    QVERIFY(!prior_disk.empty());
+
+    ptd::AppConfig candidate = ptd::release_defaults();
+    candidate.trail.glow_strength = 0.93f;
+
+    // --- With a pre-existing canonical file: each recoverable failure must
+    // leave the prior bytes byte-identical and NOT claim success. ---
+
+    // 1. Temp flush failure BEFORE canonical replace: canonical untouched.
+    ptd::set_promote_fault_for_tests(ptd::PromoteFault::TempFlush);
+    auto r_flush = ptd::promote_to_release_defaults(candidate);
+    QVERIFY(!r_flush.success);
+    QCOMPARE(read_bytes(target_file), prior_disk);
+
+    // 2. Post-replace canonical read failure: rollback restores prior bytes.
+    ptd::set_promote_fault_for_tests(ptd::PromoteFault::PostReplaceRead);
+    auto r_read = ptd::promote_to_release_defaults(candidate);
+    QVERIFY(!r_read.success);
+    QVERIFY(std::filesystem::exists(target_file));
+    QCOMPARE(read_bytes(target_file), prior_disk);
+
+    // 3. Post-replace semantic verification failure: rollback restores prior.
+    ptd::set_promote_fault_for_tests(ptd::PromoteFault::SemanticVerify);
+    auto r_sem = ptd::promote_to_release_defaults(candidate);
+    QVERIFY(!r_sem.success);
+    QCOMPARE(read_bytes(target_file), prior_disk);
+    // A successful rollback reports "restored", not a rollback-failure hard error.
+    QVERIFY(r_sem.message.find("restored") != std::string::npos);
+    QVERIFY(r_sem.message.find("RESTORATION FAILED") == std::string::npos);
+
+    // 4. Rollback write/flush failure during semantic-verify rollback: the
+    //    result must be a DISTINCT hard failure, never a false "restored".
+    ptd::set_promote_fault_for_tests(ptd::PromoteFault::RollbackWriteFlush);
+    auto r_rbwf = ptd::promote_to_release_defaults(candidate);
+    QVERIFY(!r_rbwf.success);
+    QVERIFY(r_rbwf.message.find("RESTORATION FAILED") != std::string::npos);
+
+    // Recover the canonical file to a trusted state for the next stage.
+    QVERIFY(ptd::promote_to_release_defaults(prior).success);
+    QCOMPARE(read_bytes(target_file), prior_disk);
+
+    // 5. Rollback MoveFileEx failure: also a distinct hard failure.
+    ptd::set_promote_fault_for_tests(ptd::PromoteFault::RollbackMove);
+    auto r_rbmv = ptd::promote_to_release_defaults(candidate);
+    QVERIFY(!r_rbmv.success);
+    QVERIFY(r_rbmv.message.find("RESTORATION FAILED") != std::string::npos);
+
+    // 6. Happy path still yields full semantic equality.
+    ptd::reset_promote_fault_for_tests();
+    auto r_ok = ptd::promote_to_release_defaults(candidate);
+    QVERIFY2(r_ok.success, r_ok.message.c_str());
+    auto reloaded = ptd::ConfigStorage::load_from_file(target_file.wstring());
+    QCOMPARE(reloaded.trail.glow_strength, 0.93f);
+
+    // --- With NO pre-existing canonical file: a recoverable post-replace
+    // failure must restore the prior "absent" state, not leave an unverified
+    // canonical target. ---
+    std::filesystem::remove(target_file, ec);
+    QVERIFY(!std::filesystem::exists(target_file));
+    ptd::set_promote_fault_for_tests(ptd::PromoteFault::SemanticVerify);
+    auto r_absent = ptd::promote_to_release_defaults(candidate);
+    QVERIFY(!r_absent.success);
+    QVERIFY(!std::filesystem::exists(target_file)); // absence restored
+
+    ptd::reset_promote_fault_for_tests();
     ptd::reset_canonical_release_defaults_path_for_tests();
     ptd::set_dev_build_override_for_tests(std::nullopt);
     std::filesystem::remove(target_file, ec);

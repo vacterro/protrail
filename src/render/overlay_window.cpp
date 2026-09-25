@@ -39,6 +39,10 @@ void OverlayWindow::clear_display_change_callback() {
     s_display_change_callback_ = nullptr;
 }
 
+void OverlayWindow::fire_display_change_for_tests() {
+    if (s_display_change_callback_) s_display_change_callback_();
+}
+
 OverlayWindow::OverlayWindow() {
     // Default recreate step: full chain rebuild via the pure init_render().
     // The recovery authority is the ONLY caller after a loss; init_render
@@ -527,25 +531,15 @@ void OverlayWindow::draw_diagnostic_frame() {
     // every frame begins with a full Clear (see init_render rationale).
 }
 
-void OverlayWindow::render_frame(const FrameGeometry& frame, bool intersects,
+void OverlayWindow::render_frame(const FrameGeometry& frame,
+                                 const std::vector<std::size_t>& primitive_indices,
                                  int64_t now_ns) {
     (void)now_ns;
     if (recovery_.pending || !has_render_resources()) {
-        // T-018R1: absent resources after a recoverable device failure keep
-        // RecoveryPending and retry ONLY when the bounded policy permits. A
-        // transient GPU failure must not permanently disable rendering, and
-        // a persistent one must not spin per frame. This runs BEFORE any
-        // dirty-state skip so a clean overlay never suppresses an already-due
-        // device recovery attempt.
         try_recovery();
         return;
     }
-
-    // PERF-001 dirty-overlay contract. Asked BEFORE presenting, committed only
-    // after a successful present (see the early returns below): a frame that
-    // fails mid-present must not record the overlay as clear. Known-clear and
-    // not intersected: skip BeginDraw/Clear/Present/Commit entirely. Previous
-    // content, none now: present exactly ONE transparent clear.
+    const bool intersects = !primitive_indices.empty();
     const OverlayDirtyState::Decision decision = dirty_.peek(intersects);
     if (decision == OverlayDirtyState::Decision::Skip) return;
     const bool clear_only = decision == OverlayDirtyState::Decision::PresentClear;
@@ -565,15 +559,16 @@ void OverlayWindow::render_frame(const FrameGeometry& frame, bool intersects,
             const float fh = static_cast<float>(rc.bottom - rc.top);
             ComPtr<ID2D1SolidColorBrush> ring;
             d2d_context_->CreateSolidColorBrush(D2D1::ColorF(255, 255, 255, 0.15f),
-                                                ring.GetAddressOf());
+                                                 ring.GetAddressOf());
             D2D1_RECT_F border{0.5f, 0.5f, fw - 0.5f, fh - 0.5f};
             d2d_context_->DrawRectangle(border, ring.Get(), 1.0f);
         }
-
-        // PERF-001: replay the immutable world-space frame in canonical
-        // emission order. No effect model, no geometry build and no config
-        // is touched here -- every overlay consumes the same primitives.
-        for (const FramePrimitive& primitive : frame.primitives()) {
+        // PERF-002: replay ONLY this overlay's primitive partition, in
+        // canonical emission order. No global-vector scan: an empty partition
+        // is the sparse-frame Skip path.
+        const auto& primitives = frame.primitives();
+        for (std::size_t idx : primitive_indices) {
+            const FramePrimitive& primitive = primitives[idx];
             switch (primitive.kind) {
                 case FramePrimitiveKind::TrailSegment: emit_trail_segment(primitive); break;
                 case FramePrimitiveKind::TrailSparkle: emit_sparkle(primitive); break;
@@ -589,7 +584,6 @@ void OverlayWindow::render_frame(const FrameGeometry& frame, bool intersects,
         return;
     }
     if (FAILED(hr)) {
-        // Non-device failure: logged, no blind full device-chain rebuild.
         overlay_log(ptd::LogLevel::Error, std::string("render_frame EndDraw hr=") + std::to_string(hr));
         return;
     }
@@ -602,9 +596,6 @@ void OverlayWindow::render_frame(const FrameGeometry& frame, bool intersects,
         overlay_log(ptd::LogLevel::Error, std::string("render_frame Present hr=") + std::to_string(hr));
         return;
     }
-    // The frame reached the swap chain: NOW record the dirty-state transition
-    // that this present performed. A frame that failed before here returned
-    // without committing, so the overlay is not falsely marked clear.
     dirty_.commit(intersects);
     hr = dcomp_device_->Commit();
     if (is_device_loss_hresult(hr)) {
@@ -614,8 +605,6 @@ void OverlayWindow::render_frame(const FrameGeometry& frame, bool intersects,
     if (FAILED(hr)) {
         overlay_log(ptd::LogLevel::Warn, std::string("render_frame Commit hr=") + std::to_string(hr));
     }
-    // No manual flip-model rebind: see init_render rationale (D2D device
-    // context rebinds internally; full-frame Clear keeps buffers exact).
 }
 
 ID2D1StrokeStyle1* OverlayWindow::stroke_style_for(TrailCapPolicy policy) const {
@@ -645,19 +634,9 @@ void OverlayWindow::emit_trail_segment(const FramePrimitive& segment) {
     const float lx2 = transform_.to_local_x(segment.x2);
     const float ly2 = transform_.to_local_y(segment.y2);
 
-    // Keep seam-crossing segments: each adjacent overlay draws/culls the
-    // same canonical virtual segment independently. The conservative margin
-    // mirrors FrameGeometry's bounding-box extent -- the widest stroke this
-    // segment can draw (core, or the SoftGlow/Neon outer pass) -- so the
-    // frame box never admits a segment whose stroke is then clipped at a
-    // seam. The legacy 2x core margin stays as the floor, unchanged.
-    const float draw_thickness_max = segment.has_outer
-        ? (segment.outer_width_px > segment.thickness
-               ? segment.outer_width_px : segment.thickness)
-        : segment.thickness;
-    const float margin = segment.thickness * 2.0f > draw_thickness_max * 0.5f + 1.0f
-                       ? segment.thickness * 2.0f
-                       : draw_thickness_max * 0.5f + 1.0f;
+    // Partitioning and the local cull share this one conservative extent.
+    // Each seam-neighbour receives the segment and clips it to its target.
+    const float margin = FrameGeometry::conservative_margin(segment);
     if (transform_.cull_segment(lx1, ly1, lx2, ly2, margin)) return;
 
     trail_brush_->SetColor(D2D1::ColorF(segment.color.r, segment.color.g,
@@ -699,10 +678,8 @@ void OverlayWindow::emit_sparkle(const FramePrimitive& sparkle) {
     if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(size_px)
         || !std::isfinite(alpha)) return;
 
-    // Cull with a conservative outer radius (rotated Cross/Diamond arms
-    // reach size_px/2 from the center; size_px covers every shape plus
-    // stroke half-width headroom).
-    if (transform_.cull_circle(x, y, size_px)) return;
+    if (transform_.cull_circle(
+            x, y, FrameGeometry::conservative_margin(sparkle))) return;
 
     const float lx = transform_.to_local_x(x);
     const float ly = transform_.to_local_y(y);
@@ -785,7 +762,8 @@ void OverlayWindow::emit_particle(const FramePrimitive& particle) {
     if (!(alpha > 0.0f) || !(radius_px > 0.0f)) return;
     const float lx = transform_.to_local_x(cx);
     const float ly = transform_.to_local_y(cy);
-    if (transform_.cull_circle(cx, cy, radius_px)) return;
+    if (transform_.cull_circle(
+            cx, cy, FrameGeometry::conservative_margin(particle))) return;
     const auto norm = normalize_click_rgb(particle.r, particle.g, particle.b);
     bubble_brush_->SetColor(D2D1::ColorF(norm.r, norm.g, norm.b, alpha));
     d2d_context_->FillEllipse(
@@ -814,7 +792,8 @@ void OverlayWindow::emit_bubble(const FramePrimitive& bubble) {
     // contract as emit_trail_segment/unit-correct culling helper).
     const float lx = transform_.to_local_x(cx);
     const float ly = transform_.to_local_y(cy);
-    if (transform_.cull_circle(cx, cy, radius_px + outline_thickness_px))
+    if (transform_.cull_circle(
+            cx, cy, FrameGeometry::conservative_margin(bubble)))
         return;
 
     const auto norm = normalize_click_rgb(bubble.r, bubble.g, bubble.b);

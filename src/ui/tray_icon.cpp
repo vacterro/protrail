@@ -1,43 +1,18 @@
 ﻿#include "tray_icon.h"
 
+#include "branding.h"
+
 #include <QSystemTrayIcon>
 #include <QMenu>
 #include <QAction>
-#include <QPixmap>
-#include <QPainter>
-#include <QPolygonF>
-#include <QPointF>
 
 namespace ptd {
 namespace ui {
 
+// One icon authority: the product icon resource when present, otherwise the
+// generated development fallback (see branding.h).
 QIcon TrayIcon::create_icon(bool enabled) {
-    QIcon icon;
-    for (int size : {16, 32}) {
-        QPixmap pm(size, size);
-        pm.fill(Qt::transparent);
-        QPainter p(&pm);
-        p.setRenderHint(QPainter::Antialiasing);
-
-        // Gold palette for enabled, neutral gray for disabled
-        const QColor fill = enabled ? QColor(212, 160, 23) : QColor(120, 120, 120);
-        const QColor border = enabled ? QColor(255, 223, 70) : QColor(160, 160, 160);
-
-        const qreal s = size / 16.0;
-        p.setPen(QPen(border, 1.0 * s));
-        p.setBrush(fill);
-
-        // Arrow cursor shape pointing top-left
-        QPolygonF poly;
-        poly << QPointF(3.0 * s, 2.0 * s)
-             << QPointF(13.0 * s, 8.0 * s)
-             << QPointF(8.5 * s, 9.5 * s)
-             << QPointF(6.0 * s, 14.0 * s);
-        p.drawPolygon(poly);
-
-        icon.addPixmap(pm);
-    }
-    return icon;
+    return branding::tray_icon(enabled);
 }
 
 TrayIcon::TrayIcon(bool master_enabled, QObject* parent)
@@ -46,11 +21,9 @@ TrayIcon::TrayIcon(bool master_enabled, QObject* parent)
       tray_icon_(std::make_unique<QSystemTrayIcon>(this)),
       menu_(std::make_unique<QMenu>()) {
 
-    // Product home is the primary tray action; advanced editing remains explicit.
+    // One product surface. Tray navigation never forks into a second editor.
     action_home_ = menu_->addAction(QStringLiteral("Open ProTrail"));
     connect(action_home_, &QAction::triggered, this, &TrayIcon::home_requested);
-    action_settings_ = menu_->addAction(QStringLiteral("Settings..."));
-    connect(action_settings_, &QAction::triggered, this, &TrayIcon::settings_requested);
 
     // Action 2: Enable / Disable
     action_toggle_ = menu_->addAction(master_enabled_ ? QStringLiteral("Disable") : QStringLiteral("Enable"));
@@ -126,10 +99,6 @@ QString TrayIcon::toggle_action_text() const {
 
 QAction* TrayIcon::action_home() const {
     return action_home_;
-}
-
-QAction* TrayIcon::action_settings() const {
-    return action_settings_;
 }
 
 QAction* TrayIcon::action_toggle() const {

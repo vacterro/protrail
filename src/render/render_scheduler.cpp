@@ -52,7 +52,9 @@ void RenderScheduler::set_target_fps(int fps) {
     if (fps <= 0) {
         fps = detect_display_refresh_rate();
     }
-    target_fps_ = std::clamp(fps, 30, 360);
+    const int next_target_fps = std::clamp(fps, 30, 360);
+    if (next_target_fps == target_fps_) return;
+    target_fps_ = next_target_fps;
     metrics_.target_fps = target_fps_;
     update_pacing_interval();
 }
@@ -62,6 +64,12 @@ void RenderScheduler::update_pacing_interval() {
     // PERF-004: frame_interval_ms_ remains a diagnostic/legacy accessor only;
     // it no longer drives runtime scheduling (see schedule_timer()).
     frame_interval_ms_ = std::max(1, static_cast<int>(1000.0 / target_fps_ + 0.5));
+    // QChronoTimer::setInterval() rearms an active timer. Do this only after
+    // a real target transition; the current callback retains its old cadence.
+    if (timer_ && state_ != SchedulerState::Idle) {
+        timer_->setInterval(std::chrono::nanoseconds(frame_interval_ns_));
+        ++timer_arm_count_;
+    }
 }
 
 // PERF-004: schedule from the EXACT chrono interval. Active-only operation and
@@ -69,6 +77,7 @@ void RenderScheduler::update_pacing_interval() {
 void RenderScheduler::schedule_timer() {
     timer_->setInterval(std::chrono::nanoseconds(frame_interval_ns_));
     timer_->start();
+    ++timer_arm_count_;
 }
 
 void RenderScheduler::wake() {

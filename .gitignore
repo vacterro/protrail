@@ -6,6 +6,7 @@ out/
 .vs/
 Testing/
 artifacts/
+dist/
 .freebuff/
 
 # Local tooling state (editor/agent caches, never product sources)
@@ -33,3 +34,8 @@ dev/presets/
 /*.dmp
 /*.zip
 /*.rar
+
+# SAIPEN runtime (per-run, never versioned)
+.saipen/cache/
+.saipen/locks/
+.saipen/recovery/conformance/

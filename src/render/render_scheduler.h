@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <cstddef>
 #include <functional>
 #include <memory>
 
@@ -58,9 +59,17 @@ public:
 
     // Configure target frame rate. If <= 0, automatically detects from display.
     void set_target_fps(int fps);
+    // Select the fastest valid content display; when no content bucket has a
+    // valid rate, use the bounded live-display fallback or retain auto policy.
+    static int resolve_target_fps(int content_hz, int fallback_hz) {
+        const auto valid = [](int hz) { return hz >= 30 && hz <= 360; };
+        if (valid(content_hz)) return content_hz;
+        return valid(fallback_hz) ? fallback_hz : 0;
+    }
     int target_fps() const { return target_fps_; }
     int frame_interval_ms() const { return frame_interval_ms_; }
     int64_t frame_interval_ns() const { return frame_interval_ns_; }
+    std::size_t timer_arm_count_for_tests() const { return timer_arm_count_; }
 
     // Start/stop scheduler callback.
     void set_frame_callback(FrameCallback cb) { callback_ = std::move(cb); }
@@ -104,6 +113,7 @@ private:
     int target_fps_ = 60;
     int frame_interval_ms_ = 16;
     int64_t frame_interval_ns_ = 16'666'666;
+    std::size_t timer_arm_count_ = 0;
 
     QChronoTimer* timer_ = nullptr;
     FrameCallback callback_;

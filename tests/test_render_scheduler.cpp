@@ -21,6 +21,8 @@ class TestRenderScheduler : public QObject {
 private slots:
     void refresh_rate_detection_within_valid_bounds();
     void pacing_interval_calculated_correctly();
+    void refresh_target_prefers_content_and_uses_bounded_fallback();
+    void pacing_target_changes_rearm_once_and_unchanged_target_does_not_rearm();
     void initial_state_is_idle();
     void wake_transitions_to_active_and_emits_immediate_frame();
     void ticks_maintain_active_while_content_live();
@@ -73,6 +75,46 @@ void TestRenderScheduler::pacing_interval_calculated_correctly() {
     scheduler.set_target_fps(500);
     QCOMPARE(scheduler.target_fps(), 360);
     QCOMPARE(scheduler.frame_interval_ns(), 1'000'000'000LL / 360);
+}
+
+void TestRenderScheduler::refresh_target_prefers_content_and_uses_bounded_fallback() {
+    QCOMPARE(ptd::RenderScheduler::resolve_target_fps(60, 240), 60);
+    QCOMPARE(ptd::RenderScheduler::resolve_target_fps(240, 60), 240);
+    QCOMPARE(ptd::RenderScheduler::resolve_target_fps(0, 240), 240);
+    QCOMPARE(ptd::RenderScheduler::resolve_target_fps(20, 240), 240);
+    QCOMPARE(ptd::RenderScheduler::resolve_target_fps(400, 20), 0);
+}
+
+void TestRenderScheduler::pacing_target_changes_rearm_once_and_unchanged_target_does_not_rearm() {
+    ptd::RenderScheduler scheduler;
+    scheduler.set_target_fps(60);
+
+    std::vector<int> immediate_frame_rates;
+    scheduler.set_frame_callback([&](int64_t, double, ptd::FrameAction action) {
+        if (action != ptd::FrameAction::RenderContent) return;
+        immediate_frame_rates.push_back(scheduler.target_fps());
+        if (immediate_frame_rates.size() == 1) {
+            scheduler.set_target_fps(
+                ptd::RenderScheduler::resolve_target_fps(240, 60));
+        }
+    });
+    scheduler.wake();
+    QCOMPARE(immediate_frame_rates.size(), std::size_t(1));
+    QCOMPARE(immediate_frame_rates[0], 60); // first wake uses the old cadence
+    QCOMPARE(scheduler.target_fps(), 240);
+    QCOMPARE(scheduler.frame_interval_ns(), 1'000'000'000LL / 240);
+    QCOMPARE(scheduler.timer_arm_count_for_tests(), std::size_t(2));
+
+    scheduler.set_target_fps(240);
+    QCOMPARE(scheduler.timer_arm_count_for_tests(), std::size_t(2));
+    scheduler.set_target_fps(60);
+    QCOMPARE(scheduler.timer_arm_count_for_tests(), std::size_t(3));
+    scheduler.set_target_fps(60);
+    QCOMPARE(scheduler.timer_arm_count_for_tests(), std::size_t(3));
+    scheduler.set_target_fps(240);
+    QCOMPARE(scheduler.timer_arm_count_for_tests(), std::size_t(4));
+    QCOMPARE(immediate_frame_rates.size(), std::size_t(1));
+    scheduler.force_idle();
 }
 
 void TestRenderScheduler::initial_state_is_idle() {

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstddef>
+#include <functional>
 #include <string>
 #include <string_view>
 
@@ -22,6 +24,14 @@ bool local_app_data_folder(std::wstring& out);
 // T-030: directory of the running executable, or empty when unresolvable.
 // The single deterministic base for user-state fallback paths.
 std::wstring executable_directory();
+
+// The callback mirrors GetModuleFileNameW length semantics: zero means
+// failure, capacity means the result was truncated, and a smaller length is
+// success. Production leaves this seam empty and calls Win32 directly.
+using ModulePathQueryForTests =
+    std::function<std::size_t(wchar_t* buffer, std::size_t capacity)>;
+void set_module_path_query_for_tests(ModulePathQueryForTests query);
+void clear_module_path_query_for_tests();
 
 // Initializes the global log sink (file under %LOCALAPPDATA%\ProTrail +
 // stdout). Idempotent; safe to call from anywhere after init. Returns true on

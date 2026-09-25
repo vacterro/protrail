@@ -59,6 +59,26 @@ private slots:
         QCOMPARE(args[1], std::wstring(ptd::kStartupMinimizedArgument));
     }
 
+    // A portable ZIP may be extracted anywhere, including a non-ASCII user
+    // path; the registered command must carry that exact path unchanged.
+    void command_roundtrips_a_unicode_portable_path() {
+        const std::wstring exe =
+            L"C:\\Users\\J\u00FCrgen\\Pro Trail \u6E2C\u8A66\\nested\\protrail.exe";
+        const std::wstring command = ptd::AutostartManager::build_command(exe);
+        const std::vector<std::wstring> args = ptd::split_command_line(command);
+        QCOMPARE(args.size(), std::size_t(2));
+        QCOMPARE(args[0], exe);
+        QCOMPARE(args[1], std::wstring(ptd::kStartupMinimizedArgument));
+
+        // Registered from an older extraction, then launched from the Unicode
+        // location: reconcile follows the real executable path exactly.
+        ptd::InMemoryAutostartBackend backend;
+        ptd::AutostartManager manager(backend);
+        QVERIFY(manager.enable(L"C:\\Downloads\\ProTrail\\protrail.exe"));
+        QVERIFY(manager.reconcile_desired(true, exe));
+        QCOMPARE(manager.registered_command(), command);
+    }
+
     void command_quoting_survives_quotes_and_trailing_backslashes() {
         const std::vector<std::wstring> hostile = {
             L"C:\\plain\\protrail.exe",
@@ -319,9 +339,9 @@ private slots:
                  ptd::StartupMode::AutostartMinimized);
     }
 
-    void autostart_mode_never_requests_the_settings_window() {
-        QVERIFY(ptd::startup_mode_requests_settings(ptd::StartupMode::Normal));
-        QVERIFY(!ptd::startup_mode_requests_settings(ptd::StartupMode::AutostartMinimized));
+    void autostart_mode_never_requests_the_product_window() {
+        QVERIFY(ptd::startup_mode_requests_product_window(ptd::StartupMode::Normal));
+        QVERIFY(!ptd::startup_mode_requests_product_window(ptd::StartupMode::AutostartMinimized));
         QVERIFY(ptd::startup_mode_is_silent(ptd::StartupMode::AutostartMinimized));
         QVERIFY(!ptd::startup_mode_is_silent(ptd::StartupMode::Normal));
     }

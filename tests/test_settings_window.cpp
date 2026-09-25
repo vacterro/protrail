@@ -19,6 +19,7 @@
 #include <QSignalSpy>
 #include <QApplication>
 #include <QTabWidget>
+#include <QComboBox>
 #include <QCheckBox>
 #include <QPushButton>
 #include <QLabel>
@@ -32,7 +33,6 @@
 #include <QPainter>
 #include <QStyleOption>
 #include <QPixmap>
-#include <QComboBox>
 #include <QButtonGroup>
 #include <QLineEdit>
 #include <QPlainTextEdit>
@@ -175,6 +175,7 @@ private slots:
     void dev_tab_presence_contract();
     void dev_tab_presence_override();
     void dev_tab_capture_and_apply_flow();
+    void full_config_capture_preserves_hidden_render_state();
     void dev_tab_preset_save_and_apply_roundtrip();
     void dev_tab_diff_view_reports_changes();
     void dev_tab_promote_leaves_live_config_identical();
@@ -186,9 +187,6 @@ private slots:
     void motion_wake_gate_on_hold_and_motion_toggles();
     void restore_click_defaults_resets_motion_wake_controls();
 
-    // T-37 silent cross-surface synchronization.
-    void sync_from_app_config_is_silent();
-    void sync_from_app_config_updates_every_surface();
 
 private:
     // Shared helpers.
@@ -230,8 +228,8 @@ void TestSettingsWindow::sparkle_selector_six_modes_exclusive() {
     QCOMPARE(checked, 1);
     QVERIFY(buttons[0]->isChecked());  // Off is the product default
 
-    // The window keeps its zero-combo contract with the new section.
-    QVERIFY(w.findChildren<QComboBox*>().isEmpty());
+    // The window keeps its visible-selector contract with the new section.
+    QVERIFY(w.findChild<QPushButton*>("trail_style_classic") != nullptr);
 
     const struct { ptd::TrailSparkleMode mode; const char* name; } modes[] = {
         {ptd::TrailSparkleMode::Off,      "trail_sparkle_off"},
@@ -518,6 +516,7 @@ void TestSettingsWindow::tab_construction_succeeds() {
     QCOMPARE(w.findChild<QTabWidget*>()->tabText(0), QStringLiteral("General"));
     QCOMPARE(w.findChild<QTabWidget*>()->tabText(1), QStringLiteral("Trail"));
     QCOMPARE(w.findChild<QTabWidget*>()->tabText(2), QStringLiteral("Click"));
+    QVERIFY(w.findChildren<QComboBox*>().isEmpty());
     if (ptd::is_dev_build()) {
         QCOMPARE(w.findChild<QTabWidget*>()->tabText(3), QStringLiteral("Developer"));
     }
@@ -2506,7 +2505,7 @@ void TestSettingsWindow::trail_control_labels_are_user_facing() {
     QVERIFY(w.findChild<QPushButton*>("trail_fade_linear"));
     QVERIFY(w.findChild<QPushButton*>("trail_fade_smooth"));
     QVERIFY(w.findChild<QPushButton*>("trail_fade_ease_out"));
-    QCOMPARE(w.findChildren<QComboBox*>().size(), 0);
+    QVERIFY(w.findChildren<QComboBox*>().isEmpty());
 }
 
 // T-020R1 TARGET 3: the STYLE / COLOR / SHAPE / TRAIL anchors must not move
@@ -4229,6 +4228,52 @@ void TestSettingsWindow::dev_tab_capture_and_apply_flow() {
     ptd::set_dev_build_override_for_tests(std::nullopt);
 }
 
+void TestSettingsWindow::full_config_capture_preserves_hidden_render_state() {
+    ptd::set_dev_build_override_for_tests(true);
+    ptd::AppConfig initial = ptd::release_defaults();
+    initial.render.diagnostic_primitives = true;
+    initial.start_with_windows = true;
+    initial.trail.lifetime_ms = 850.0f;
+    initial.click.duration_ms = 450.0f;
+
+    SettingsWindow w(initial);
+    QSignalSpy whole_config(&w, &SettingsWindow::app_config_applied);
+    QCOMPARE(w.capture_current_settings(), initial);
+    QCOMPARE(whole_config.count(), 0);
+
+    SliderSpin* life = find_slider(w, "trail_lifetime");
+    QVERIFY(life != nullptr);
+    QSlider* inner_life = life->findChild<QSlider*>();
+    QVERIFY(inner_life != nullptr);
+    inner_life->setValue(90);
+    const ptd::AppConfig edited = w.capture_current_settings();
+    QCOMPARE(edited.trail.lifetime_ms, 900.0f);
+    QVERIFY(edited.render.diagnostic_primitives);
+    QCOMPARE(edited.click.duration_ms, initial.click.duration_ms);
+    QCOMPARE(whole_config.count(), 0);
+
+    QPushButton* capture = w.findChild<QPushButton*>("btn_dev_capture");
+    QVERIFY(capture != nullptr);
+    capture->click();
+    QVERIFY(w.captured_config().has_value());
+    QCOMPARE(*w.captured_config(), edited);
+
+    w.apply_config(edited);
+    QCOMPARE(whole_config.count(), 1);
+    QCOMPARE(whole_config.takeFirst().at(0).value<ptd::AppConfig>(), edited);
+
+    QPushButton* defaults = w.findChild<QPushButton*>("btn_dev_apply_defaults");
+    QVERIFY(defaults != nullptr);
+    defaults->click();
+    QCOMPARE(w.capture_current_settings().render.diagnostic_primitives,
+             ptd::release_defaults().render.diagnostic_primitives);
+    QCOMPARE(whole_config.count(), 1);
+    QCOMPARE(whole_config.takeFirst().at(0).value<ptd::AppConfig>(),
+             ptd::release_defaults());
+
+    ptd::set_dev_build_override_for_tests(std::nullopt);
+}
+
 void TestSettingsWindow::dev_tab_preset_save_and_apply_roundtrip() {
     ptd::set_dev_build_override_for_tests(true);
     const auto temp_dir = std::filesystem::temp_directory_path() / ("protrail_test_presets_gui_" + std::to_string(GetCurrentProcessId()));
@@ -4246,6 +4291,7 @@ void TestSettingsWindow::dev_tab_preset_save_and_apply_roundtrip() {
     ptd::AppConfig custom = ptd::release_defaults();
     custom.trail.lifetime_ms = 850.0f;
     custom.click.duration_ms = 450.0f;
+    custom.render.diagnostic_primitives = true;
     w.apply_config(custom);
 
     // Save as preset "gui_test_preset"
@@ -4257,6 +4303,9 @@ void TestSettingsWindow::dev_tab_preset_save_and_apply_roundtrip() {
     btn_save->click();
 
     QVERIFY(std::filesystem::exists(temp_dir / "gui_test_preset.json"));
+    const auto saved_preset = ptd::load_dev_preset("gui_test_preset");
+    QVERIFY(saved_preset.has_value());
+    QCOMPARE(*saved_preset, custom);
 
     // Reset window to defaults
     w.apply_config(ptd::release_defaults());
@@ -4272,8 +4321,21 @@ void TestSettingsWindow::dev_tab_preset_save_and_apply_roundtrip() {
     list_w->setCurrentItem(items.first());
     btn_apply->click();
 
-    QCOMPARE(w.capture_current_settings().trail.lifetime_ms, 850.0f);
-    QCOMPARE(w.capture_current_settings().click.duration_ms, 450.0f);
+    QCOMPARE(w.capture_current_settings(), custom);
+    QVERIFY(w.capture_current_settings().render.diagnostic_primitives);
+
+    SliderSpin* life = find_slider(w, "trail_lifetime");
+    QVERIFY(life != nullptr);
+    QSlider* inner_life = life->findChild<QSlider*>();
+    QVERIFY(inner_life != nullptr);
+    inner_life->setValue(90);
+    QCOMPARE(w.capture_current_settings().trail.lifetime_ms, 900.0f);
+    QVERIFY(w.capture_current_settings().render.diagnostic_primitives);
+    QPushButton* capture = w.findChild<QPushButton*>("btn_dev_capture");
+    QVERIFY(capture != nullptr);
+    capture->click();
+    QVERIFY(w.captured_config().has_value());
+    QVERIFY(w.captured_config()->render.diagnostic_primitives);
 
     ptd::reset_dev_presets_dir_for_tests();
     ptd::set_dev_build_override_for_tests(std::nullopt);
@@ -4299,10 +4361,12 @@ void TestSettingsWindow::dev_tab_diff_view_reports_changes() {
     // Modify a field
     ptd::AppConfig mod = ptd::release_defaults();
     mod.trail.glow_strength = 0.93f;
+    mod.render.diagnostic_primitives = true;
     w.apply_config(mod);
 
     btn_diff->click();
     QVERIFY(txt_diff->toPlainText().contains(QStringLiteral("trail.glow_strength")));
+    QVERIFY(txt_diff->toPlainText().contains(QStringLiteral("render.diagnostic_primitives")));
 
     ptd::set_dev_build_override_for_tests(std::nullopt);
 }
@@ -4470,20 +4534,20 @@ void TestSettingsWindow::motion_wake_controls_object_names_are_stable() {
 void TestSettingsWindow::motion_wake_programmatic_population_is_silent() {
     ptd::TrailConfig tc{};
     ptd::ClickConfig cc{};
+    cc.hold_enabled = true;
+    cc.hold_wake_enabled = true;
+    cc.wake_strength = 1.5f;
+    cc.wake_size = 1.3f;
+    cc.wake_spread = 0.4f;
+    cc.speed_response = 1.7f;
+    cc.min_motion_speed_px_s = 250.0f;
+    cc.turn_accent = true;
+    cc.stop_accent = true;
+
+    // Constructor population is the only canonical silent load path after
+    // the two-window synchronization layer was removed.
     SettingsWindow w(tc, cc);
-
-    ptd::AppConfig cfg = ptd::release_defaults();
-    cfg.click.wake_strength = 1.5f;
-    cfg.click.wake_size = 1.3f;
-    cfg.click.wake_spread = 0.4f;
-    cfg.click.speed_response = 1.7f;
-    cfg.click.min_motion_speed_px_s = 250.0f;
-    cfg.click.turn_accent = true;
-    cfg.click.stop_accent = true;
-
     QSignalSpy clickSpy(&w, &SettingsWindow::click_config_changed);
-    // T-37 silent sync: programmatic population emits nothing.
-    w.sync_from_app_config(cfg);
     QCOMPARE(clickSpy.count(), 0);
 
     QCOMPARE(find_slider(w, "wake_strength")->value(), 150.0);
@@ -4573,47 +4637,6 @@ void TestSettingsWindow::restore_click_defaults_resets_motion_wake_controls() {
     QCOMPARE(find_slider(w, "min_motion_speed")->value(), d.click.min_motion_speed_px_s);
     QCOMPARE(find_checkbox(w, "chk_turn_accent")->isChecked(), d.click.turn_accent);
     QCOMPARE(find_checkbox(w, "chk_stop_accent")->isChecked(), d.click.stop_accent);
-}
-
-// ---- T-37 silent cross-surface synchronization ----
-
-void TestSettingsWindow::sync_from_app_config_is_silent() {
-    ptd::TrailConfig tc{};
-    ptd::ClickConfig cc{};
-    SettingsWindow w(tc, cc);
-    QSignalSpy trailSpy(&w, &SettingsWindow::trail_config_changed);
-    QSignalSpy clickSpy(&w, &SettingsWindow::click_config_changed);
-    QSignalSpy presetSpy(&w, &SettingsWindow::preset_applied);
-    QSignalSpy appSpy(&w, &SettingsWindow::app_config_applied);
-
-    ptd::AppConfig cfg = ptd::release_defaults();
-    cfg.trail.style = ptd::TrailStyle::Neon;
-    cfg.trail.sparkle_mode = ptd::TrailSparkleMode::Glitter;
-    cfg.click.style = ptd::ClickStyle::Fire;
-    cfg.click.hold_intensity = 1.6f;
-    cfg.master_enabled = false;
-    w.sync_from_app_config(cfg);
-
-    QCOMPARE(trailSpy.count(), 0);
-    QCOMPARE(clickSpy.count(), 0);
-    QCOMPARE(presetSpy.count(), 0);
-    QCOMPARE(appSpy.count(), 0);
-}
-
-void TestSettingsWindow::sync_from_app_config_updates_every_surface() {
-    ptd::TrailConfig tc{};
-    ptd::ClickConfig cc{};
-    SettingsWindow w(tc, cc);
-    ptd::AppConfig cfg = ptd::release_defaults();
-    cfg.trail.sparkle_mode = ptd::TrailSparkleMode::Firefly;
-    cfg.click.hold_intensity = 1.4f;
-    w.sync_from_app_config(cfg);
-    QCOMPARE(find_slider(w, "hold_intensity")->value(), 140.0);
-    // The captured config reflects the synced state (capture reads widgets).
-    const ptd::AppConfig captured = w.capture_current_settings();
-    QCOMPARE(static_cast<int>(captured.trail.sparkle_mode),
-             static_cast<int>(ptd::TrailSparkleMode::Firefly));
-    QCOMPARE(captured.click.hold_intensity, 1.4f);
 }
 
 QTEST_MAIN(TestSettingsWindow)

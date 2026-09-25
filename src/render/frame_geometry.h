@@ -28,7 +28,10 @@
 #include "../effects/trail_effect.h"
 #include "../effects/click_bubble_effect.h"
 
+#include <algorithm>
+#include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 namespace ptd {
@@ -126,8 +129,11 @@ public:
 
     void clear() {
         primitives_.clear();
-        has_bounds_ = false;
-        min_x_ = min_y_ = max_x_ = max_y_ = 0.0f;
+        for (auto& partition : partitions_) {
+            partition.primitive_indices.clear();
+            partition.refresh_rate_hz = 0;
+        }
+        sorted_overlays_.clear();
     }
 
     // Builds the canonical frame ONCE from the live effect state. Emission
@@ -152,24 +158,147 @@ public:
     std::size_t size() const { return primitives_.size(); }
     const std::vector<FramePrimitive>& primitives() const { return primitives_; }
 
-    bool has_bounds() const { return has_bounds_; }
-    float min_x() const { return min_x_; }
-    float min_y() const { return min_y_; }
-    float max_x() const { return max_x_; }
-    float max_y() const { return max_y_; }
+    // One bounds authority for partitioning and the renderer's exact cull.
+    // Inclusive overlap deliberately duplicates a seam-touching primitive to
+    // both adjacent overlays; their Direct2D targets clip to local bounds.
+    struct PrimitiveBounds {
+        float left = 0.0f;
+        float top = 0.0f;
+        float right = 0.0f;
+        float bottom = 0.0f;
+    };
 
-    // Conservative world-space bounding-box overlap. The box already carries
-    // each primitive's widest conservative extent (stroke/glow margin,
-    // sparkle envelope, bubble outline), so a `false` here means the overlay's
-    // own per-primitive culling would discard everything too. Inclusive on
-    // boundaries so a seam-touching primitive is never dropped.
-    bool intersects(const RECT& monitor) const {
-        if (!has_bounds_) return false;
-        if (max_x_ < static_cast<float>(monitor.left)) return false;
-        if (min_x_ > static_cast<float>(monitor.right)) return false;
-        if (max_y_ < static_cast<float>(monitor.top)) return false;
-        if (min_y_ > static_cast<float>(monitor.bottom)) return false;
-        return true;
+    static float conservative_margin(const FramePrimitive& primitive) {
+        switch (primitive.kind) {
+            case FramePrimitiveKind::TrailSegment: {
+                const float draw_thickness_max = primitive.has_outer
+                    ? (primitive.outer_width_px > primitive.thickness
+                        ? primitive.outer_width_px : primitive.thickness)
+                    : primitive.thickness;
+                const float core = primitive.thickness * 2.0f;
+                const float wide = draw_thickness_max * 0.5f + 1.0f;
+                return core > wide ? core : wide;
+            }
+            case FramePrimitiveKind::TrailSparkle:
+                return primitive.size_px;
+            case FramePrimitiveKind::Bubble:
+                return primitive.radius_px + primitive.outline_px;
+            case FramePrimitiveKind::Particle:
+                return primitive.radius_px;
+        }
+        return 0.0f;
+    }
+
+    static PrimitiveBounds conservative_bounds(const FramePrimitive& primitive) {
+        float x_min = primitive.x1;
+        float x_max = primitive.x1;
+        float y_min = primitive.y1;
+        float y_max = primitive.y1;
+        if (primitive.kind == FramePrimitiveKind::TrailSegment) {
+            x_min = std::min(x_min, primitive.x2);
+            x_max = std::max(x_max, primitive.x2);
+            y_min = std::min(y_min, primitive.y2);
+            y_max = std::max(y_max, primitive.y2);
+        }
+        const float margin = conservative_margin(primitive);
+        return {x_min - margin, y_min - margin,
+                x_max + margin, y_max + margin};
+    }
+
+    struct OverlayPartition {
+        std::vector<std::size_t> primitive_indices;
+        int refresh_rate_hz = 0;
+        bool intersects() const { return !primitive_indices.empty(); }
+    };
+
+    struct OverlayInput {
+        RECT bounds{};
+        int refresh_rate_hz = 0;
+    };
+
+private:
+    struct IndexedOverlayBounds {
+        std::size_t overlay_index = 0;
+        PrimitiveBounds bounds{};
+        float prefix_max_right = 0.0f;
+    };
+
+public:
+
+    // Partition the frame in one primitive pass. Overlay intervals are sorted
+    // once into retained scratch storage; a prefix-right index skips monitors
+    // that cannot overlap each primitive. Nested index vectors retain their
+    // high-water capacities across frames and topology changes.
+    const std::vector<OverlayPartition>& partition_for_overlays(
+        const std::vector<OverlayInput>& overlays) {
+        partitions_.resize(overlays.size());
+        sorted_overlays_.resize(overlays.size());
+        for (auto& partition : partitions_) {
+            partition.primitive_indices.clear();
+        }
+        for (std::size_t i = 0; i < overlays.size(); ++i) {
+            const RECT& rect = overlays[i].bounds;
+            const int refresh_rate = overlays[i].refresh_rate_hz;
+            partitions_[i].refresh_rate_hz =
+                refresh_rate >= 30 && refresh_rate <= 360 ? refresh_rate : 0;
+            auto& indexed = sorted_overlays_[i];
+            indexed.overlay_index = i;
+            indexed.bounds = {static_cast<float>(rect.left),
+                              static_cast<float>(rect.top),
+                              static_cast<float>(rect.right),
+                              static_cast<float>(rect.bottom)};
+        }
+        std::sort(sorted_overlays_.begin(), sorted_overlays_.end(),
+            [](const IndexedOverlayBounds& a, const IndexedOverlayBounds& b) {
+                if (a.bounds.left != b.bounds.left)
+                    return a.bounds.left < b.bounds.left;
+                return a.overlay_index < b.overlay_index;
+            });
+        float prefix_right = std::numeric_limits<float>::lowest();
+        for (auto& overlay : sorted_overlays_) {
+            prefix_right = std::max(prefix_right, overlay.bounds.right);
+            overlay.prefix_max_right = prefix_right;
+        }
+
+        primitive_partition_visits_ = 0;
+        overlay_candidate_checks_ = 0;
+        for (std::size_t i = 0; i < primitives_.size(); ++i) {
+            ++primitive_partition_visits_;
+            const PrimitiveBounds bounds = conservative_bounds(primitives_[i]);
+            const auto first = std::lower_bound(
+                sorted_overlays_.begin(), sorted_overlays_.end(), bounds.left,
+                [](const IndexedOverlayBounds& overlay, float left) {
+                    return overlay.prefix_max_right < left;
+                });
+            for (auto it = first; it != sorted_overlays_.end()
+                 && it->bounds.left <= bounds.right; ++it) {
+                ++overlay_candidate_checks_;
+                if (it->bounds.right < bounds.left
+                    || it->bounds.top > bounds.bottom
+                    || it->bounds.bottom < bounds.top) {
+                    continue;
+                }
+                auto& bucket = partitions_[it->overlay_index];
+                bucket.primitive_indices.push_back(i);
+            }
+        }
+        return partitions_;
+    }
+
+    std::size_t primitive_partition_visits_for_tests() const {
+        return primitive_partition_visits_;
+    }
+    std::size_t overlay_candidate_checks_for_tests() const {
+        return overlay_candidate_checks_;
+    }
+    int content_refresh_rate_hz() const {
+        int max_hz = 0;
+        for (const auto& partition : partitions_) {
+            if (partition.intersects() && partition.refresh_rate_hz > max_hz) {
+                max_hz = partition.refresh_rate_hz;
+            }
+        }
+        return max_hz;
     }
 
     // Appends in canonical order. Public so a test can construct a frame
@@ -181,9 +310,6 @@ public:
         p.kind = FramePrimitiveKind::TrailSegment;
         p.x1 = x1; p.y1 = y1; p.x2 = x2; p.y2 = y2;
         p.alpha = alpha; p.thickness = thickness_px; p.color = color;
-        const float margin = trail_margin_px(thickness_px);
-        expand(x1, y1, margin);
-        expand(x2, y2, margin);
         primitives_.push_back(p);
     }
 
@@ -194,7 +320,6 @@ public:
         p.kind = FramePrimitiveKind::TrailSparkle;
         p.x1 = x; p.y1 = y; p.alpha = alpha; p.color = color;
         p.size_px = size_px; p.rotation_rad = rotation_rad; p.shape = shape;
-        expand(x, y, size_px);
         primitives_.push_back(p);
     }
 
@@ -210,7 +335,6 @@ public:
         p.outline_px = outline_thickness_px;
         p.r = r; p.g = g; p.b = b;
         p.ring_alpha = ring_alpha; p.fill_alpha = fill_alpha;
-        expand(cx, cy, radius_px + outline_thickness_px);
         primitives_.push_back(p);
     }
 
@@ -221,42 +345,10 @@ public:
         p.kind = FramePrimitiveKind::Particle;
         p.x1 = cx; p.y1 = cy; p.radius_px = radius_px;
         p.r = r; p.g = g; p.b = b; p.alpha = alpha;
-        expand(cx, cy, radius_px);
         primitives_.push_back(p);
     }
 
 private:
-    // The exact conservative margin OverlayWindow::draw_trail_segment() uses
-    // for culling, so the frame bounding box is never narrower than the
-    // per-primitive culling test.
-    float trail_margin_px(float thickness_px) const {
-        float draw_thickness_max = thickness_px;
-        if (trail_config_
-            && (trail_config_->style == TrailStyle::SoftGlow
-                || trail_config_->style == TrailStyle::Neon)) {
-            const bool neon = trail_config_->style == TrailStyle::Neon;
-            const float glow = trail_config_->glow_strength;
-            draw_thickness_max = thickness_px
-                * (neon ? 3.0f + 3.0f * glow : 2.0f + 2.0f * glow);
-        }
-        const float core = thickness_px * 2.0f;
-        const float wide = draw_thickness_max * 0.5f + 1.0f;
-        return core > wide ? core : wide;
-    }
-
-    void expand(float x, float y, float margin) {
-        if (!has_bounds_) {
-            min_x_ = x - margin; max_x_ = x + margin;
-            min_y_ = y - margin; max_y_ = y + margin;
-            has_bounds_ = true;
-            return;
-        }
-        if (x - margin < min_x_) min_x_ = x - margin;
-        if (x + margin > max_x_) max_x_ = x + margin;
-        if (y - margin < min_y_) min_y_ = y - margin;
-        if (y + margin > max_y_) max_y_ = y + margin;
-    }
-
     // T-019 cap policy + T-016 glow pass, resolved ONCE per frame for the
     // whole primitive stream: continuous styles stroke every internal joint
     // flat-flat and the frame's final/head segment flat-round (round-round
@@ -334,13 +426,12 @@ private:
     };
 
     std::vector<FramePrimitive> primitives_;
+    std::vector<OverlayPartition> partitions_;
+    std::vector<IndexedOverlayBounds> sorted_overlays_;
+    std::size_t primitive_partition_visits_ = 0;
+    std::size_t overlay_candidate_checks_ = 0;
     const TrailConfig* trail_config_ = nullptr;
     TrailStyle trail_style_ = TrailStyle::Classic;
-    bool has_bounds_ = false;
-    float min_x_ = 0.0f;
-    float min_y_ = 0.0f;
-    float max_x_ = 0.0f;
-    float max_y_ = 0.0f;
 };
 
 } // namespace ptd

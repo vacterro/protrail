@@ -1,16 +1,20 @@
 # Changelog
 
-## 0.1.7 - Official Windows x64 portable release recovery
+## 0.1.8 - Official Windows x64 portable release closure
 
-- Committed the remaining `src/ui/branding.h` and `src/ui/branding.cpp` sources required by the clean CMake target list.
-- Preserved immutable `v0.1.3` through `v0.1.6` tags; this release closes the full source closure with approved branding.
+- Committed the complete product source closure required by the canonical CMake target list: unified-window application sources, retired `MainWindow` removal, T-59 runtime repairs, corrected test include paths, and smoke/deploy hardening.
+- Preserved immutable `v0.1.3` through `v0.1.7` tags; each intermediate tag remains an incomplete package-build record and none was moved or deleted.
 - Prepared the unsigned portable package pipeline; package smoke, checksum, and publication gates remain authoritative.
 
-## 0.1.6 - Incomplete package build record (superseded by v0.1.7)
+## 0.1.7 - Incomplete package build record (superseded by v0.1.8)
 
-- Committed the required `src/app/topology_retry.h` source so clean release builds no longer fail during CMake generation.
-- Preserved immutable `v0.1.3`, `v0.1.4`, and `v0.1.5` tags; this release carries the approved icon and the complete source closure.
-- Prepared the unsigned portable package pipeline; package smoke, checksum, and publication gates remain authoritative.
+- Added the remaining `src/ui/branding.h` and `src/ui/branding.cpp` sources, but the committed `Application` still referenced the retired `MainWindow` implementation, so a clean link failed.
+- Preserved immutable `v0.1.3` through `v0.1.6` tags; no tag was moved or deleted.
+
+## 0.1.6 - Incomplete package build record (superseded by v0.1.8)
+
+- Added the required `src/app/topology_retry.h` source, but the clean target list still referenced uncommitted branding sources and retired `MainWindow` code.
+- Preserved immutable `v0.1.3` through `v0.1.5` tags; no tag was moved or deleted.
 
 ## 0.1.5 - Incomplete package build record (superseded by v0.1.6)
 

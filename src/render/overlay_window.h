@@ -136,18 +136,21 @@ public:
     // queue work; WndProc never calls OverlayManager::refresh_topology().
     static void set_display_change_callback(std::function<void()> cb);
     static void clear_display_change_callback();
+    // W2-001 integration seam: fire the currently installed display-change
+    // notification exactly as a real WM_DISPLAYCHANGE WndProc would, so an
+    // Application-level test can model the ONE external topology event without
+    // a live HWND. No-op when no callback is installed. Production never calls
+    // this; the real WndProc path is unchanged.
+    static void fire_display_change_for_tests();
 
     // Diagnostic: redraw the test primitive. Called on demand.
     void draw_diagnostic_frame();
 
-    // Real frame path (B7). PERF-001: the world-space frame geometry is built
-    // ONCE per scheduler frame by FrameGeometry::build() in OverlayManager and
-    // handed to every overlay. `intersects` is the conservative world-space
-    // bounding-box overlap of that frame with this overlay (computed by the
-    // manager); this method commits the dirty-state transition ONLY when it
-    // actually presents, so a device-recovery attempt is never suppressed by
-    // an overlay that merely LOOKED clean. It never runs the effects.
-    void render_frame(const FrameGeometry& frame, bool intersects, int64_t now_ns);
+    // Frame-exact rendering consumes only the indices assigned by the single
+    // FrameGeometry partition pass. There is no global-frame replay path.
+    void render_frame(const FrameGeometry& frame,
+                      const std::vector<std::size_t>& primitive_indices,
+                      int64_t now_ns);
 
     OverlayDirtyState& dirty_state() { return dirty_; }
     const OverlayDirtyState& dirty_state() const { return dirty_; }

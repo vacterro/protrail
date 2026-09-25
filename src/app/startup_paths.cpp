@@ -77,4 +77,14 @@ StartupPaths resolve_startup_paths() {
     return resolve_startup_paths(exit_ptr, dir_ptr);
 }
 
+StartupLogBootstrapStatus initialize_startup_logging(
+    const StartupPaths& paths) {
+    if (!paths.valid || paths.log_path.empty()) {
+        return StartupLogBootstrapStatus::Failed;
+    }
+    return log_init(paths.log_path)
+        ? StartupLogBootstrapStatus::Ready
+        : StartupLogBootstrapStatus::Failed;
+}
+
 } // namespace ptd

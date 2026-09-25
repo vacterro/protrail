@@ -128,30 +128,45 @@ void TestInputDispatch::wmInputArrivesViaQtDispatcher() {
 
     QTimer activity_timer;
     int ticks = 0;
+    constexpr int kMaxBurstTicks = 12;
     QObject::connect(&activity_timer, &QTimer::timeout, [&] {
         ++ticks;
-        if (ticks <= 6) {
-            requested += 1;
-            injected += send_relative_move(30 * ticks, 10 * ticks, &send_error);
-            if (ticks == 3) {
+        if (ticks > kMaxBurstTicks) {
+            activity_timer.stop();
+            quit_timer.start(50);
+            return;
+        }
+
+        requested += 1;
+        injected += send_relative_move(30 * ticks, 10 * ticks, &send_error);
+        if (ticks >= 3) {
+            // Synthetic button transitions can be dropped while the desktop is
+            // busy. Retry the L/R/M burst within one bounded event loop instead
+            // of making delivery depend on a single timing window; a session
+            // that never delivers any button event still fails below.
+            switch ((ticks - 3) % 3) {
+            case 0:
                 requested += 2;
                 injected += send_click(MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, &send_error);
-            }
-            if (ticks == 4) {
+                break;
+            case 1:
                 requested += 2;
                 injected += send_click(MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP, &send_error);
-            }
-            if (ticks == 5) {
+                break;
+            default:
                 requested += 2;
                 injected += send_click(MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP, &send_error);
+                break;
             }
-        } else {
+        }
+
+        if (input_.movement_count() > before_moves && input_.button_count() >= 3) {
             activity_timer.stop();
             quit_timer.start(50);
         }
     });
     activity_timer.start(20);
-    quit_timer.start(400);
+    quit_timer.start(1500);
     loop.exec();
 
     const bool activity = input_.movement_count() != before_moves;
