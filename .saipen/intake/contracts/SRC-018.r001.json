@@ -1,0 +1,14 @@
+{
+  "clauses": {
+    "SRC-018:R001": {
+      "actionable": true,
+      "class": "requirement",
+      "text": "\"Execute external audit inbox SRC-017 repairs for T-57\" 2>&1 | Out-String"
+    }
+  },
+  "derived_at": "2026-09-23T22:56:12Z",
+  "derived_from": "SRC-018",
+  "interpretation_revision": 1,
+  "schema_version": 1,
+  "source_sha256": "0881d0691a3cb2c44f421f268e7784db30282e14254fa3c6c3f428ade458e535"
+}

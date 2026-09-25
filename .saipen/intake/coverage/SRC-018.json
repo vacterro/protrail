@@ -1,0 +1,14 @@
+{
+  "requirements": {
+    "SRC-018:R001": {
+      "actionable": true,
+      "class": "requirement",
+      "disposition": "VERIFIED",
+      "evidence": "T-59 closed with verification evidence in LOG: verify -> PASS [target: T-59] conf: high -- ctest --test-dir build -C Release: 22/22 PASS 121s; clean build /W4 /WX 0 err 0 warn",
+      "text": "\"Execute external audit inbox SRC-017 repairs for T-57\" 2>&1 | Out-String",
+      "verification": "the Work this request created reached its own verification gate; see the T-59 VERIFY cycle in .saipen/LOG.md",
+      "work": "T-59"
+    }
+  },
+  "schema_version": 1
+}

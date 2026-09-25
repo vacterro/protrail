@@ -1,6 +1,15 @@
 {
-  "next_id": 2,
+  "next_id": 3,
   "operations": {
+    "audapack 4fb23a5c-7953-510c-bab0-56ce39c4580c": {
+      "created_at": "2026-09-21T19:29:37Z",
+      "layer": 2,
+      "producer": "audapack",
+      "producer_item_id": "4fb23a5c-7953-510c-bab0-56ce39c4580c",
+      "producer_operation_id": "4fb23a5c-7953-510c-bab0-56ce39c4580c",
+      "sha256": "8505fde547644e7a746c0742b7f2c50d0c13b81a72ba2c857dd2a74f19903d72",
+      "state": "COMMITTED"
+    },
     "audapack 8b52805e-594a-5abd-816e-a52c0fe0ce02": {
       "created_at": "2026-09-17T22:38:00Z",
       "layer": 1,

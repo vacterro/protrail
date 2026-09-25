@@ -1,6 +1,6 @@
 # ProTrail
 
-**v0.1.0**
+**v0.1.1**
 
 ProTrail is a native Windows desktop utility that renders configurable cursor
 trails, click and press-and-hold effects, and motion wake geometry without ever
@@ -13,14 +13,14 @@ click-through overlays.
 Windows 10/11 only. MSVC (Visual Studio 2022) with Qt 6.8 is the supported
 toolchain.
 
-- **ProTrail home window** — a compact Essentials surface for the settings that
-  get changed often: Master FX, Trail FX and style, Sparkle Mode, Click FX and
-  style, Hold FX, Motion Wake, Wake Density, Hold Intensity and Start with
-  Windows. It also carries `Advanced Settings...` and `Restore Defaults`.
-- **Advanced Settings editor** — the complete Trail, Sparkle, Click, Hold,
-  Motion Wake, color, trigger, animation, preset and persistence configuration.
-  The home window is a focused frequent-use view over the same state; it is not
-  a second copy of the editor.
+- **One ProTrail window** — the product surface has General, Trail, and Click
+  tabs, plus Developer in developer builds. Every setting has one visible editor
+  location; Trail and Click use visible checkable selector grids rather than
+  drop-down style controls. General is the default launch tab and contains
+  enable toggles, startup, quick color presets, and Restore All Defaults.
+- **Trail and Click tabs** — the complete Trail/Sparkle and Click/Hold/Motion
+  Wake editors live in scrollable tabs, each with its own domain restore action.
+  There is no second settings window and no duplicate editor surface.
 
 ## Effects
 
@@ -55,13 +55,13 @@ toolchain.
   is the fully quoted current executable path plus an explicit startup
   argument. Only the owned value is ever written or removed, and the
   registration is reconciled against the real executable path at startup.
-- **Startup modes** — a manual launch opens the ProTrail home window. An
-  autostart launch is tray-only: no home window, no advanced window, no taskbar
-  button, no focus steal. A second manual launch hands an activation request to
-  the running instance, which restores its existing home window.
-- **Tray and lifecycle** — `Open ProTrail`, `Settings...`, `Enable`/`Disable`
-  and `Exit`. Closing either window hides it to the tray and keeps ProTrail
-  running; exit is an explicit tray action.
+- **Startup modes** — a manual launch opens the single ProTrail window on
+  General. An autostart launch is tray-only: no product window, taskbar button,
+  or focus steal. A second manual launch hands an activation request to the
+  running instance, which restores that same window.
+- **Tray and lifecycle** — `Open ProTrail`, `Enable`/`Disable`, and `Exit`.
+  Closing the window hides it to the tray and keeps ProTrail running; exit is
+  an explicit tray action. Tray double-click uses the same Open action.
 
 ## Configuration
 
@@ -109,11 +109,11 @@ ctest --test-dir build -C Release --output-on-failure
 ctest --test-dir build -C Debug --output-on-failure
 ```
 
-The suite registers 23 CTest tests — 21 test executables (trail, sparkles,
-click, hold/wake, multi-monitor, scheduler, config, release defaults,
-autostart, single instance, tray lifecycle, GUI, ProTrail home) plus two
-release-defaults gate script tests, one of which deliberately proves the gate
-can fail. GUI tests run headless through Qt's `offscreen` platform.
+The suite registers the full CTest matrix for trail, sparkles, click,
+hold/wake, multi-monitor, scheduler, config, release defaults, autostart,
+single instance, tray lifecycle, and the unified GUI, plus two release-defaults
+gate script tests; one deliberately proves the gate can fail. GUI tests run
+headless through Qt's `offscreen` platform.
 
 ## Repository layout
 
@@ -122,22 +122,44 @@ can fail. GUI tests run headless through Qt's `offscreen` platform.
 | `src/` | Application source (app, config, core, effects, platform, render, ui) |
 | `tests/` | Test executables registered with CTest |
 | `resources/` | Canonical defaults source and its Qt resource |
-| `cmake/` | Configure-time release-defaults validator |
+| `resources/windows/` | Windows VERSIONINFO / icon resource template |
+| `resources/branding/` | Approved product icon (`protrail.ico`) and its approval record |
+| `cmake/` | Configure-time release-defaults validator and release-identity gate |
+| `tools/release/` | Windows x64 portable packaging and verification pipeline |
 | `ROADMAP/` | Planning, references and historical design notes |
 | `ROADMAP/evidence/` | Retained per-ticket design/measurement write-ups |
 
 ## Release status
 
-**Source-only release.** The source is available for anyone who wants to build it
-themselves. No official Windows EXE, installer, portable archive,
-package-manager binary or signed binary is published, and CI deliberately does
-not publish binaries.
+**v0.1.0 is a published source-only release. v0.1.1, the first Windows x64
+binary release, is prepared but not yet published.** No official Windows EXE,
+installer, portable archive, package-manager binary or signed binary has been
+published yet, and CI deliberately does not publish binaries.
 
-Official Windows binary distribution is intentionally deferred until the final
-ProTrail product icon is supplied and accepted
+Official Windows binary distribution is gated on the final ProTrail product
+icon being supplied and accepted
 (`FINAL_BINARY_RELEASE_BLOCKED: USER_PRODUCT_ICON_PENDING`, see
 [RELEASE_BLOCKERS.md](RELEASE_BLOCKERS.md)). The generated tray cursor icon is a
 development fallback, not approved final branding.
+
+### Packaging
+
+The planned binary release is a portable archive,
+`ProTrail-v<VERSION>-win-x64-portable.zip`, plus `SHA256SUMS.txt`. One command
+from a clean checkout builds, tests, stages, verifies and packages it:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\release\package.ps1
+```
+
+The pipeline runs a fresh `/W4 /WX` Release build and the complete CTest suite,
+deploys the Qt runtime with `windeployqt` and the MSVC runtime app-locally, and
+proves the package's dependency closure. It then smokes the staged package
+under a system-only `PATH` from plain, spaced, nested and Unicode directories,
+writes a deterministic ZIP and its SHA-256, and smokes a fresh extraction of
+that ZIP. Official mode refuses a dirty tree and a missing or unapproved icon;
+`-Rehearsal` runs the same gates without those two and names every output
+`...-REHEARSAL` so it cannot be mistaken for a release artifact.
 
 ## Contributing and security
 

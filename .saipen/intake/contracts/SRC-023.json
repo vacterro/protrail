@@ -1,0 +1,14 @@
+{
+  "clauses": {
+    "SRC-023:R001": {
+      "actionable": true,
+      "class": "requirement",
+      "text": "Translate kitchen docs into uk and ded; only target locale dirs; replace stale README files; preserve structure commands paths code tokens links; add 33-locale switcher; validate."
+    }
+  },
+  "derived_at": "2026-09-25T02:58:51Z",
+  "derived_from": "SRC-023",
+  "interpretation_revision": 1,
+  "schema_version": 1,
+  "source_sha256": "ec0ed21ba2e5a47fedb0831f58d8be48b49bb01a343c3367583f2b740400ad02"
+}

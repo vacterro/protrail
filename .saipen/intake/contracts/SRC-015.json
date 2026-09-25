@@ -1,0 +1,14 @@
+{
+  "clauses": {
+    "SRC-015:R001": {
+      "actionable": true,
+      "class": "requirement",
+      "text": "Ship source-only v0.1.0: run saipen ship with VERSION 0.1.0 (source-only, binary blocked on product icon)"
+    }
+  },
+  "derived_at": "2026-09-21T20:55:45Z",
+  "derived_from": "SRC-015",
+  "interpretation_revision": 1,
+  "schema_version": 1,
+  "source_sha256": "4ed2bfa5b1c4d3ec8a7ebb6a93c49081a495c8ff4e5b61f5fd2ba8216ef27084"
+}

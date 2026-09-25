@@ -1,0 +1,14 @@
+{
+  "clauses": {
+    "SRC-012:R001": {
+      "actionable": true,
+      "class": "requirement",
+      "text": "Repair canonical conformance drift, then complete source-only v0.1.0 release per accepted handoff"
+    }
+  },
+  "derived_at": "2026-09-21T20:27:32Z",
+  "derived_from": "SRC-012",
+  "interpretation_revision": 1,
+  "schema_version": 1,
+  "source_sha256": "2fd043256ab7b1e107781b7a2b4e288e0366a84dbbc7d759ebabfc3a90d86517"
+}

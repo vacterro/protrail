@@ -1,0 +1,14 @@
+{
+  "requirements": {
+    "SRC-012:R001": {
+      "actionable": true,
+      "class": "requirement",
+      "disposition": "VERIFIED",
+      "evidence": "T-52 closed with verification evidence in LOG: verify -> PASS [target: T-52] conf: high -- conformance repair verified in source tree",
+      "text": "Repair canonical conformance drift, then complete source-only v0.1.0 release per accepted handoff",
+      "verification": "the Work this request created reached its own verification gate; see the T-52 VERIFY cycle in .saipen/LOG.md",
+      "work": "T-52"
+    }
+  },
+  "schema_version": 1
+}

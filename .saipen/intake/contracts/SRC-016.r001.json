@@ -1,0 +1,14 @@
+{
+  "clauses": {
+    "SRC-016:R001": {
+      "actionable": true,
+      "class": "requirement",
+      "text": "Canonicalize the completed unified ProTrail UI and repair protocol drift, then finish source-only v0.1.0 ship."
+    }
+  },
+  "derived_at": "2026-09-22T00:16:30Z",
+  "derived_from": "SRC-016",
+  "interpretation_revision": 1,
+  "schema_version": 1,
+  "source_sha256": "e33b8bdfcb3b82cba938c3c2200f619093ee64fa1afb465e966d1a395e46a922"
+}

@@ -1,0 +1,14 @@
+{
+  "requirements": {
+    "SRC-022:R001": {
+      "actionable": true,
+      "class": "requirement",
+      "disposition": "VERIFIED",
+      "evidence": "T-66 closed with verification evidence in LOG: transition to REVIEW -- T-66 independent review confirms all seven Japanese translations meet requested scope and current source parity; validator PASS, no dependency regression. conf: high",
+      "text": "Translate current top-level documentation sources into Japanese only under .saipen/saitranslate/kitchen/locales/ja/; replace stale ja/README.md and create seven unsuffixed docs; validate structure, inline code, 33 locale links",
+      "verification": "the Work this request created reached its own verification gate; see the T-66 VERIFY cycle in .saipen/LOG.md",
+      "work": "T-66"
+    }
+  },
+  "schema_version": 1
+}

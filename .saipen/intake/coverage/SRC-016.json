@@ -1,0 +1,14 @@
+{
+  "requirements": {
+    "SRC-016:R001": {
+      "actionable": true,
+      "class": "requirement",
+      "disposition": "IMPLEMENTED",
+      "evidence": "T-56 live against SRC-016; unified one-window UI already present in source (settings_window.cpp, application.cpp); verification evidence pending in LOG",
+      "text": "Canonicalize the completed unified ProTrail UI and repair protocol drift, then finish source-only v0.1.0 ship.",
+      "verification": "pending -- T-56 VERIFY cycle has not closed yet",
+      "work": "T-56"
+    }
+  },
+  "schema_version": 1
+}

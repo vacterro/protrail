@@ -1,0 +1,14 @@
+{
+  "requirements": {
+    "SRC-023:R001": {
+      "actionable": true,
+      "class": "requirement",
+      "disposition": "VERIFIED",
+      "evidence": "T-67 closed with verification evidence in LOG: review -> PASS -- independently inspected all 14 target locale documents and compared source structure, fences, paths, commands, inline code, links and release status; no target-boundary violations, no incorrect product/release claims; full translation validator rerun and remained green: 231/231, 33 locales, zero failures. conf: high",
+      "text": "Translate kitchen docs into uk and ded; only target locale dirs; replace stale README files; preserve structure commands paths code tokens links; add 33-locale switcher; validate.",
+      "verification": "the Work this request created reached its own verification gate; see the T-67 VERIFY cycle in .saipen/LOG.md",
+      "work": "T-67"
+    }
+  },
+  "schema_version": 1
+}

@@ -1,0 +1,14 @@
+{
+  "clauses": {
+    "SRC-014:R001": {
+      "actionable": true,
+      "class": "requirement",
+      "text": "Re-verify legacy DONE tickets T-008 T-009 T-021 for current-tree evidence to clear reverify gate"
+    }
+  },
+  "derived_at": "2026-09-21T20:52:38Z",
+  "derived_from": "SRC-014",
+  "interpretation_revision": 1,
+  "schema_version": 1,
+  "source_sha256": "c6f6cfbdf1a10b0fb31790d8297ec95ad445297ffdd6ff46756e4d4636abefcc"
+}

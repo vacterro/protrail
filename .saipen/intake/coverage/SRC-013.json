@@ -1,0 +1,14 @@
+{
+  "requirements": {
+    "SRC-013:R001": {
+      "actionable": true,
+      "class": "requirement",
+      "disposition": "VERIFIED",
+      "evidence": "T-53 closed with verification evidence in LOG: verify -> PASS [target: T-53] conf: high -- VERSION 0.1.0 present and tracked (CMake 0.1.0), runtime cache/locks de-tracked, core PASS",
+      "text": "Fix remaining conformance blockers for source-only v0.1.0: repair sub-write-boundary false positive and tracked runtime artifacts, then create VERSION 0.1.0 and ship",
+      "verification": "the Work this request created reached its own verification gate; see the T-53 VERIFY cycle in .saipen/LOG.md",
+      "work": "T-53"
+    }
+  },
+  "schema_version": 1
+}

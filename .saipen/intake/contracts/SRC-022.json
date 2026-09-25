@@ -1,0 +1,14 @@
+{
+  "clauses": {
+    "SRC-022:R001": {
+      "actionable": true,
+      "class": "requirement",
+      "text": "Translate current top-level documentation sources into Japanese only under .saipen/saitranslate/kitchen/locales/ja/; replace stale ja/README.md and create seven unsuffixed docs; validate structure, inline code, 33 locale links"
+    }
+  },
+  "derived_at": "2026-09-25T03:00:26Z",
+  "derived_from": "SRC-022",
+  "interpretation_revision": 1,
+  "schema_version": 1,
+  "source_sha256": "4c5b99e9a90129b9db045820c491dfd4f0c750f75c1c6733c6a4951420538a3e"
+}

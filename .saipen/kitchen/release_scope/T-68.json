@@ -1,0 +1,20 @@
+{
+  "op_id": "scope-8ac4227afbb04a55b94c8515d9e40812",
+  "paths": {
+    ".saipen/saitranslate/kitchen/evidence/README_EVIDENCE.md": "6ff66d94d4d3a9056849db267b7b9337764acf1a3375ba94d322ff5471ab4460",
+    ".saipen/saitranslate/kitchen/locales/README_LOCALES.md": "c1f50be47abc06ac552fc9cfa40cf1bee9f1d02ad8ce1b380c2cd3680a12ba14",
+    ".saipen/saitranslate/kitchen/mirrors/README_MIRRORS.md": "4f460d34e2964c1df1bf222a06c8ca30a5dc1a04965ad60552179b2641c12e77",
+    ".saipen/saitranslate/kitchen/tools/README_TOOLS.md": "648b2c90ed6178f139d03f423ebc838f3d532f3502afac4b6de60604d880f0da",
+    "README.ded.md": "cb3fe524c6c123827914f1cc5a0416a49b8a5712219e3a81236ecfdfb7b1fa66",
+    "README.ee.md": "58896a4a64ec5217ad251e5ad31b1bac9445f719462fca901f3810382be24a89",
+    "README.ja.md": "94ff2cdb298fb131e165fa8bdf69f00346e8bf8a351bb368f2334e9336b7a160",
+    "tools/validate.py": "49b34db31b4348f494cbf8592a2c0c951911df9a9e896ee56cf940fcfe0a6230"
+  },
+  "project_identity": "v:\\___vac\\__k\\__code\\__main__\\protrail",
+  "project_lineage": "lineage-6a51dcf887de4de492b000b2cad0e980",
+  "recorded_at": "2026-09-25T14:32:04Z",
+  "schema_version": 2,
+  "source_head": "b0bba53aabb15cbe89e6623d98515e364a38d77f",
+  "source_tree_fingerprint": "git-delta-v1:64d52418352d570959820904f9f4a76da714ec5a0330056b9376f0e6d85b11c7",
+  "ticket": "T-68"
+}

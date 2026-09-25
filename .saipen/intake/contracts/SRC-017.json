@@ -1,0 +1,14 @@
+{
+  "clauses": {
+    "SRC-017:R001": {
+      "actionable": true,
+      "class": "requirement",
+      "text": "Execute external audit inbox layer audit/2.md (SRC-017)"
+    }
+  },
+  "derived_at": "2026-09-23T23:00:08Z",
+  "derived_from": "SRC-017",
+  "interpretation_revision": 1,
+  "schema_version": 1,
+  "source_sha256": "8505fde547644e7a746c0742b7f2c50d0c13b81a72ba2c857dd2a74f19903d72"
+}

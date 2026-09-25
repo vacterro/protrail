@@ -1,0 +1,14 @@
+{
+  "requirements": {
+    "SRC-014:R001": {
+      "actionable": true,
+      "class": "requirement",
+      "disposition": "VERIFIED",
+      "evidence": "T-54 closed with verification evidence in LOG: verify -> PASS [target: T-54] conf: high -- reverify receipts prove current-tree closure; core PASS",
+      "text": "Re-verify legacy DONE tickets T-008 T-009 T-021 for current-tree evidence to clear reverify gate",
+      "verification": "the Work this request created reached its own verification gate; see the T-54 VERIFY cycle in .saipen/LOG.md",
+      "work": "T-54"
+    }
+  },
+  "schema_version": 1
+}

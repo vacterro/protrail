@@ -1,0 +1,14 @@
+{
+  "requirements": {
+    "SRC-015:R001": {
+      "actionable": true,
+      "class": "requirement",
+      "disposition": "VERIFIED",
+      "evidence": "T-55 closed with verification evidence in LOG: verify -> PASS [target: T-55] conf: high -- reverify receipts prove current-tree closure; core PASS",
+      "text": "Ship source-only v0.1.0: run saipen ship with VERSION 0.1.0 (source-only, binary blocked on product icon)",
+      "verification": "the Work this request created reached its own verification gate; see the T-55 VERIFY cycle in .saipen/LOG.md",
+      "work": "T-55"
+    }
+  },
+  "schema_version": 1
+}

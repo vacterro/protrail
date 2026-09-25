@@ -1,0 +1,14 @@
+{
+  "clauses": {
+    "SRC-013:R001": {
+      "actionable": true,
+      "class": "requirement",
+      "text": "Fix remaining conformance blockers for source-only v0.1.0: repair sub-write-boundary false positive and tracked runtime artifacts, then create VERSION 0.1.0 and ship"
+    }
+  },
+  "derived_at": "2026-09-21T20:50:04Z",
+  "derived_from": "SRC-013",
+  "interpretation_revision": 1,
+  "schema_version": 1,
+  "source_sha256": "0d4125a05a7635bb3d6c9e81a5f102b0f11a9d596abf14a135803815dc05aa25"
+}

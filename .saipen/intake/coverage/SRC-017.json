@@ -1,0 +1,14 @@
+{
+  "requirements": {
+    "SRC-017:R001": {
+      "actionable": true,
+      "class": "requirement",
+      "disposition": "IMPLEMENTED",
+      "evidence": "E-615",
+      "text": "Execute external audit inbox layer audit/2.md (SRC-017)",
+      "verification": "ctest -> PASS 22/22",
+      "work": "T-59"
+    }
+  },
+  "schema_version": 1
+}
