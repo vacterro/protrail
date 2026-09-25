@@ -6,7 +6,7 @@
     One command from a clean checkout produces the staged package, the
     portable ZIP and SHA256SUMS.txt, and proves them:
 
-      1. provenance   RELEASE_VERSION, clean tree, HEAD / existing tag agreement
+      1. provenance   VERSION, clean tree, HEAD / existing tag agreement
       2. branding     approved icon + APPROVAL.md hash (official mode only)
       3. build        fresh Release configure/build, /W4 /WX, zero warnings
       4. tests        complete CTest suite, 100% pass
@@ -72,8 +72,8 @@ function Get-PeFiles([string]$dir) {
 
 # ---------------------------------------------------------------- provenance
 Step "Provenance ($mode)"
-$version = (Get-Content -LiteralPath (Join-Path $repo "RELEASE_VERSION") -TotalCount 1).Trim()
-if ($version -notmatch '^\d+\.\d+\.\d+$') { Fail "VERSION_INVALID" "RELEASE_VERSION holds '$version'" }
+$version = (Get-Content -LiteralPath (Join-Path $repo "VERSION") -TotalCount 1).Trim()
+if ($version -notmatch '^\d+\.\d+\.\d+$') { Fail "VERSION_INVALID" "VERSION holds '$version'" }
 $tag = "v$version"
 
 Push-Location $repo

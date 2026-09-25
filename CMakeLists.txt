@@ -1,16 +1,16 @@
 cmake_minimum_required(VERSION 3.24)
 
-# The root RELEASE_VERSION file is the ONE release-version authority. project(), the
+# The root VERSION file is the ONE release-version authority. project(), the
 # Windows VERSIONINFO resource and the packaging pipeline all derive from it,
 # so a release can never ship binary metadata that disagrees with its tag.
-file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/RELEASE_VERSION" PROTRAIL_VERSION LIMIT_COUNT 1)
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" PROTRAIL_VERSION LIMIT_COUNT 1)
 string(STRIP "${PROTRAIL_VERSION}" PROTRAIL_VERSION)
 if(NOT PROTRAIL_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
     message(FATAL_ERROR
-        "RELEASE_VERSION_INVALID: RELEASE_VERSION must hold MAJOR.MINOR.PATCH, got '${PROTRAIL_VERSION}'")
+        "VERSION_INVALID: VERSION must hold MAJOR.MINOR.PATCH, got '${PROTRAIL_VERSION}'")
 endif()
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/RELEASE_VERSION")
+    "${CMAKE_CURRENT_SOURCE_DIR}/VERSION")
 
 project(ProTrail
     VERSION ${PROTRAIL_VERSION}
@@ -569,7 +569,7 @@ add_test(NAME protrail_release_defaults_gate_accepts_canonical
             -D DEFAULTS_FILE=${PROTRAIL_RELEASE_DEFAULTS}
             -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/validate_release_defaults.cmake")
 
-# Release identity: RELEASE_VERSION, README badge, newest CHANGELOG entry and the
+# Release identity: VERSION, README badge, newest CHANGELOG entry and the
 # release notes must name one version (see cmake/check_release_identity.cmake).
 add_test(NAME protrail_release_identity
     COMMAND "${CMAKE_COMMAND}"

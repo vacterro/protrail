@@ -1,19 +1,19 @@
 # Release identity gate: every public release surface names the SAME version.
 # Run as: cmake -D SOURCE_DIR=<repo> -P check_release_identity.cmake
 #
-# The root RELEASE_VERSION file is the authority (project(), VERSIONINFO and the
+# The root VERSION file is the authority (project(), VERSIONINFO and the
 # packaging pipeline read it directly). This script fails when a document
-# surface drifts from it, so a split identity such as RELEASE_VERSION=0.1.1 with a
+# surface drifts from it, so a split identity such as VERSION=0.1.1 with a
 # README or CHANGELOG still announcing 0.1.0 cannot pass CTest.
 
 if(NOT DEFINED SOURCE_DIR)
     message(FATAL_ERROR "RELEASE_IDENTITY: SOURCE_DIR not set")
 endif()
 
-file(STRINGS "${SOURCE_DIR}/RELEASE_VERSION" _version LIMIT_COUNT 1)
+file(STRINGS "${SOURCE_DIR}/VERSION" _version LIMIT_COUNT 1)
 string(STRIP "${_version}" _version)
 if(NOT _version MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
-    message(FATAL_ERROR "RELEASE_IDENTITY: RELEASE_VERSION holds '${_version}'")
+    message(FATAL_ERROR "RELEASE_IDENTITY: VERSION holds '${_version}'")
 endif()
 
 set(_failures "")
