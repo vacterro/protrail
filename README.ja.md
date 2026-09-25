@@ -1,6 +1,6 @@
 # ProTrail
 
-**v0.1.1**
+**v0.1.2**
 
 [English](README.md) | [Eesti](README.ee.md) | [Дед](README.ded.md) | [日本語](README.ja.md) | [Русский](README.ru.md) | [Українська](README.uk.md)
 

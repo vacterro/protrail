@@ -1,0 +1,30 @@
+{
+  "op_id": "scope-51620872320c4a4f82235e82b18959f7",
+  "paths": {
+    ".saipen/saitranslate/kitchen/evidence/README_EVIDENCE.md": "7a1c32ca5309310175792752bd47a726db5926573547f108a15d30a1d7449985",
+    ".saipen/saitranslate/kitchen/locales/README_LOCALES.md": "bf756cc0452a07c07d4cdbcfd67f1e02a0e816416e78e9291becc57767a68515",
+    ".saipen/saitranslate/kitchen/locales/hr/CHANGELOG.md": "8bfbf7a4b28c241d6483d65e1a34c305387facf1cbc3a28d25d4872796e2dacd",
+    ".saipen/saitranslate/kitchen/locales/hr/CONTRIBUTING.md": "0f677249f501455d129a128f3bc929bcea8d0c7eec916855f3736131db1791c0",
+    ".saipen/saitranslate/kitchen/locales/hr/README.md": "a763276d9dd880d56294e9bccb3849daeaabc504e1b7a175f8ef76197e4c922f",
+    ".saipen/saitranslate/kitchen/locales/hr/RELEASE_BLOCKERS.md": "baf1e68e1fc04fd3993cec2f782e2b4ded18d3842b49d79e19e09000eddbfa8e",
+    ".saipen/saitranslate/kitchen/locales/hr/RELEASE_NOTES_v0.1.0.md": "bf880069438e9f51299b672f95d8bb777a65c41512e4174346b1e7df80ca79aa",
+    ".saipen/saitranslate/kitchen/locales/hr/RELEASE_NOTES_v0.1.1.md": "117294e5d7d050e96ac74a0eeead042fecd548f20a7977622d53f0e9ca366ace",
+    ".saipen/saitranslate/kitchen/locales/hr/SECURITY.md": "bad32090f13f47cbc835a6350051dd6a8ff032030ad2d07e7c901384f0876cd4",
+    ".saipen/saitranslate/kitchen/mirrors/README_MIRRORS.md": "60a9efbe5de75aaf372272ebed133d559d378d76ed7d65b7dfdf6b7789402d6c",
+    ".saipen/saitranslate/kitchen/tools/README_TOOLS.md": "6dfb345819cafdd746c7196a65393013501f7441ebfb44f526408d2df950367e",
+    "CHANGELOG.md": "dd5a9e9d8055e8df630149dafbde5aa89bba6323493e203db10851f8cc0f9a07",
+    "README.ded.md": "73cc1313da23e1732ac50d098b9759eaed79527df849ad1259b4837956812f54",
+    "README.ee.md": "ef3be1029e70ee87a5eb375d7622a886a3c081c2e4edea6eb6244de4dc678b4d",
+    "README.ja.md": "d799f147f14242da918570ddf2871a8274ef9f5518955eb6578fbccc2c1380f9",
+    "README.md": "619adf87abc75ba53c4486df717ba4c91ec73a90bf6c01ff70309b5bbf6e642a",
+    "RELEASE_NOTES_v0.1.2.md": "962e079c5221a25a01251a0c8e697b19934504ee510e92a70d9d74fbf6e05628",
+    "VERSION": "297b50f08386d3521f8fdaf2f78eb8d9d0acdf452d2e61596905fba37208c792"
+  },
+  "project_identity": "v:\\___vac\\__k\\__code\\__main__\\protrail",
+  "project_lineage": "lineage-6a51dcf887de4de492b000b2cad0e980",
+  "recorded_at": "2026-09-25T14:50:23Z",
+  "schema_version": 2,
+  "source_head": "4efeed4629a2cae2c39c91dc80f531c9410c0aea",
+  "source_tree_fingerprint": "git-delta-v1:60bca16b89b95bff1753d454003ca1b354fb34918ef7b140652e33256bb5376f",
+  "ticket": "T-65"
+}

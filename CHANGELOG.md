@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.2 - Croatian documentation patch (source-only)
+
+- Added the complete Croatian translation set for the seven maintained documentation surfaces under the `hr` locale.
+- Updated release-facing mirrors and translation kitchen metadata to the `v0.1.2` source-only release identity.
+- No official Windows binary, installer, portable archive, or signed executable is included; the final product-icon gate remains open.
+
 ## 0.1.1 - Windows x64 portable release preparation (unreleased)
 
 - Made the root `VERSION` file the single release-version authority: CMake

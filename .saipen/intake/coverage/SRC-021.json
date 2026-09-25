@@ -1,4 +1,14 @@
 {
-  "requirements": {},
+  "requirements": {
+    "SRC-021:R001": {
+      "actionable": true,
+      "class": "requirement",
+      "disposition": "VERIFIED",
+      "evidence": "E-900",
+      "text": "Finish all seven Croatian locale documents under .saipen/saitranslate/kitchen/locales/hr/ from current top-level sources; write only hr locale dir; preserve Markdown, commands, paths, code tokens, links; replace stale partial files; self-check required invariants; do not append digest.",
+      "verification": "E-900",
+      "work": "T-65"
+    }
+  },
   "schema_version": 1
 }

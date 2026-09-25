@@ -1,0 +1,13 @@
+# ProTrail v0.1.0
+
+🇷🇺 [Русский](../ru/RELEASE_NOTES_v0.1.0.md) · 🇺🇸 [English](../en/RELEASE_NOTES_v0.1.0.md) · 🇪🇪 [Eesti](../et/RELEASE_NOTES_v0.1.0.md) · 🇯🇵 [日本語](../ja/RELEASE_NOTES_v0.1.0.md) · 🇷🇺 [👴 Дед](../ded/RELEASE_NOTES_v0.1.0.md) · 🇺🇦 [Українська](../uk/RELEASE_NOTES_v0.1.0.md) · 🇩🇪 [Deutsch](../de/RELEASE_NOTES_v0.1.0.md) · 🇫🇷 [Français](../fr/RELEASE_NOTES_v0.1.0.md) · 🇪🇸 [Español](../es/RELEASE_NOTES_v0.1.0.md) · 🇮🇹 [Italiano](../it/RELEASE_NOTES_v0.1.0.md) · 🇵🇹 [Português](../pt/RELEASE_NOTES_v0.1.0.md) · 🇳🇱 [Nederlands](../nl/RELEASE_NOTES_v0.1.0.md) · 🇵🇱 [Polski](../pl/RELEASE_NOTES_v0.1.0.md) · 🇸🇪 [Svenska](../sv/RELEASE_NOTES_v0.1.0.md) · 🇩🇰 [Dansk](../da/RELEASE_NOTES_v0.1.0.md) · 🇫🇮 [Suomi](../fi/RELEASE_NOTES_v0.1.0.md) · 🇳🇴 [Norsk](../no/RELEASE_NOTES_v0.1.0.md) · 🇨🇳 [中文](../zh/RELEASE_NOTES_v0.1.0.md) · 🇰🇷 [한국어](../ko/RELEASE_NOTES_v0.1.0.md) · 🇹🇭 [ไทย](../th/RELEASE_NOTES_v0.1.0.md) · 🇻🇳 [Tiếng Việt](../vi/RELEASE_NOTES_v0.1.0.md) · 🇸🇦 [العربية](../ar/RELEASE_NOTES_v0.1.0.md) · 🇮🇱 [עברית](../he/RELEASE_NOTES_v0.1.0.md) · 🇹🇷 [Türkçe](../tr/RELEASE_NOTES_v0.1.0.md) · 🇮🇳 [हिन्दी](../hi/RELEASE_NOTES_v0.1.0.md) · 🇮🇩 [Bahasa Indonesia](../id/RELEASE_NOTES_v0.1.0.md) · 🇬🇷 [Ελληνικά](../el/RELEASE_NOTES_v0.1.0.md) · 🇨🇿 [Čeština](../cs/RELEASE_NOTES_v0.1.0.md) · 🇷🇴 [Română](../ro/RELEASE_NOTES_v0.1.0.md) · 🇭🇺 [Magyar](../hu/RELEASE_NOTES_v0.1.0.md) · 🇧🇬 [Български](../bg/RELEASE_NOTES_v0.1.0.md) · 🇸🇰 [Slovenčina](../sk/RELEASE_NOTES_v0.1.0.md) · 🇭🇷 [Hrvatski](RELEASE_NOTES_v0.1.0.md)
+
+ProTrail v0.1.0 pripremljen je kao Windows izdanje **samo s izvornim kodom**. Sadrži jedan ProTrail prozor s karticama i prilagodljivim učincima Trail/Sparkle/Click/Hold/Motion Wake, životnim ciklusom sistemske trake, crtanjem osjetljivim na DPI svakog monitora, atomskom konfiguracijom s provjerom sheme te mogućnošću postavljanja kanonskih zadanih vrijednosti izdanja samo u razvojnim izdanjima.
+
+Izgradite ga iz izvornog koda dokumentiranim skupom alata Qt 6.8/MSVC. Potrebni su verifikacijski testovi, ali ovo izdanje namjerno ne sadrži `protrail.exe`, skup DLL biblioteka, instalacijski program, prijenosni binarni ZIP, MSI, MSIX, binarnu datoteku za upravitelj paketa ni drugi izvršni artefakt.
+
+Službena binarna distribucija za Windows i dalje je blokirana:
+
+`FINAL_BINARY_RELEASE_BLOCKED: USER_PRODUCT_ICON_PENDING`
+
+Stvorena ikona kursora QPainter u sistemskoj traci razvojna je zamjena, a ne konačno brendiranje proizvoda. Nakon dostave konačne ikone binarna kontrola mora obuhvatiti resurse izvršne datoteke, ikonu trake zadataka i prozora, pravila stanja sistemske trake, ICO resurse više razlučivosti i metapodatke pakiranja prije svakog službenog binarnog izdanja.
