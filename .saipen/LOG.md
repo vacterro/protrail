@@ -838,3 +838,78 @@
 - 25.09.26 14:32 [E-831] [parent: E-830] [T-68] [agent: antigravity] [op: scope-8ac4227afbb04a55b94c8515d9e40812] DEC: release scope recorded -- 8 path(s) bound to b0bba53aabb1
 - 25.09.26 14:33 [E-832] [parent: E-831] [T-68] [agent: antigravity] [op: finish-426dc5323fc744f4b98910a9784bd140] RUN: ship v0.1.1 -> content commit 30c3eb1ac8d9 pushed
 - 25.09.26 14:33 [E-833] [parent: E-832] [T-68] [agent: antigravity] [op: finish-426dc5323fc744f4b98910a9784bd140] DEC: ticket finished via SAIOPS -- completion (from SHIP)
+- 25.09.26 14:36 [E-834] [parent: E-833] [T-65] [agent: antigravity] [op: ticket-336ad3efc8ad4f46956ee897af934909] DEC: ticket unblock via SAIOPS -- T-68 parity release landed; resume Croatian delivery ship; no digest marker reintroduction
+- 25.09.26 14:36 [E-835] [parent: E-834] [T-65] [agent: antigravity] [op: claim-63e74e1000954b21b9b74c092ab3a021] DEC: claimed via SAIOPS -- owner antigravity
+- 25.09.26 14:36 [E-836] [parent: E-835] [T-65] [agent: antigravity] [op: checkpoint-33d647ee40114f439d95d1f255bf36b9] RUN: SCOUT -- seven Croatian files remain exact; T-68 parity release landed; no digest markers per SRC-021
+- 25.09.26 14:36 [E-837] [parent: E-836] [T-65] [agent: antigravity] [op: transition-f24866025e594715a57f07d6fcc9a61c] RUN: transition to BUILD -- No content delta; stage reviewed Croatian scope
+- 25.09.26 14:36 [E-838] [parent: E-837] [T-65] [agent: antigravity] [op: checkpoint-2bd39447bfb04b95b0f63f204a56cda3] RUN: build -> no delta; seven Croatian files ready
+- 25.09.26 14:37 [E-839] [parent: E-838] [T-65] [agent: antigravity] [op: transition-bdbaa55090eb441290516d2c3e0dd031] RUN: transition to VERIFY -- Run Croatian contract verification
+- 25.09.26 14:37 [E-840] [parent: E-839] [T-65] [agent: antigravity] [op: checkpoint-70159d156ccb49a38a1a30b002114617] RUN: verify -> PASS [target: T-65] conf: high -- Croatian contract oracle green
+- 25.09.26 14:37 [E-841] [parent: E-840] [T-65] [agent: antigravity] [op: transition-3f0d65d68f0b4db4afd5ce47e4e0cbcc] RUN: transition to REVIEW -- Croatian content green; review and ship
+- 25.09.26 14:37 [E-842] [parent: E-841] [agent: antigravity] [op: transition-3f0d65d68f0b4db4afd5ce47e4e0cbcc] DEC: goal_tickets 10->11
+- 25.09.26 14:37 [E-843] [parent: E-842] [T-65] [agent: antigravity] [op: checkpoint-c3e0c1e251134a84b0d1d111ae7ec25c] RUN: review -> PASS [target: T-65] conf: high -- independent scope check; no findings
+- 25.09.26 14:37 [E-844] [parent: E-843] [T-65] [agent: antigravity] [op: transition-3e0648fc972f4c72aac7d6d3ee51fd8d] RUN: transition to SHIP -- Review passed; refresh Croatian scope and ship
+- 25.09.26 14:37 [E-845] [parent: E-844] [T-65] [agent: antigravity] [op: scope-2e44283f07494954a87e937364c2d165] DEC: release scope recorded -- 7 path(s) bound to 4efeed4629a2
+- 25.09.26 14:41 [E-846] [parent: E-845] [T-65] [agent: antigravity] [op: ticket-a49c1bdd8e894283a1b2aa034d475898] DEC: ticket block via SAIOPS (active) -- RELEASE_TAG_ALREADY_PUBLISHED: v0.1.1 exists locally and remotely; standard fail-closed choice preserves immutable tag. Croatian files need a separately scoped future patch release, not a retag.
+- 25.09.26 14:43 [E-847] [parent: E-846] [T-65] [agent: antigravity] [op: ticket-f680df24be864580bce9f2a096c9f1f1] DEC: ticket unblock via SAIOPS -- Standard engineering choice: create next patch release v0.1.2 for Croatian documentation; preserve immutable v0.1.1
+- 25.09.26 14:43 [E-848] [parent: E-847] [T-65] [agent: antigravity] [op: claim-b747e7e1caca4656a5ef46ed613e26ca] DEC: claimed via SAIOPS -- owner antigravity
+- 25.09.26 14:44 [E-849] [parent: E-848] [T-65] [agent: antigravity] [op: checkpoint-889afa88bcc94b838de89c5f41309a29] DEC: standard release decision: immutable v0.1.1 preserved; v0.1.2 source-only patch adds Croatian docs and required release-identity metadata
+- 25.09.26 14:44 [E-850] [parent: E-849] [T-65] [agent: antigravity] [op: checkpoint-3fce3a523fa84fa2b8b858105f0a16c6] RUN: SCOUT/BUILD -- version bumped to 0.1.2; README/CHANGELOG/release notes/parity mirrors and hr package updated; binary icon gate unchanged
+- 25.09.26 14:44 [E-851] [parent: E-850] [T-65] [agent: antigravity] [op: transition-67171cf4d9e6455f8ad52f0b48757c98] RUN: transition to BUILD -- Release identity and Croatian package edits complete; verify next
+- 25.09.26 14:44 [E-852] [parent: E-851] [T-65] [agent: antigravity] [op: checkpoint-a67d6a3fd0ee463fbb69938af7d30359] RUN: build -> v0.1.2 source-only patch files implemented; no binary artifacts
+- 25.09.26 14:44 [E-853] [parent: E-852] [T-65] [agent: antigravity] [op: transition-f921181503d14a23b7dbbf7b1811a181] RUN: transition to VERIFY -- Run release identity and Croatian package verification
+- 25.09.26 14:45 [E-854] [parent: E-853] [T-65] [agent: antigravity] [op: checkpoint-60e2cb3e4ff74db68ff24e4ec060af45] RUN: verify -> PASS [target: T-65] conf: high -- RELEASE_IDENTITY_OK 0.1.2; CMake Release build PASS; protrail_release_identity 1/1 PASS; Croatian oracle green
+- 25.09.26 14:45 [E-855] [parent: E-854] [T-65] [agent: antigravity] [op: transition-22900a9f3d7447e3bf40adac0d9f7807] RUN: transition to REVIEW -- Release identity and content verified; review patch scope
+- 25.09.26 14:45 [E-856] [parent: E-855] [agent: antigravity] [op: transition-22900a9f3d7447e3bf40adac0d9f7807] DEC: goal_tickets 11->12
+- 25.09.26 14:45 [E-857] [parent: E-856] [T-65] [agent: antigravity] [op: checkpoint-bb1e4749692c48bdb654e7959f14bcfd] RUN: review -> PASS [target: T-65] conf: high -- independent v0.1.2 identity and seven-file hr scope; no findings
+- 25.09.26 14:45 [E-858] [parent: E-857] [T-65] [agent: antigravity] [op: ticket-faf0b77b402649d394c4f8b30b05abb0] DEC: ticket block via SAIOPS (active) -- SOURCE_SCOPE_REFRESH: T-63 release scope includes changed release metadata; park T-65 for metadata-only T-63 scope refresh
+- 25.09.26 14:45 [E-859] [parent: E-858] [T-63] [agent: antigravity] [op: ticket-2d3c9d7820fb4ad68b507ccf3d63a85d] DEC: ticket unblock via SAIOPS -- Metadata-only scope refresh after v0.1.2 release identity; icon gate remains open
+- 25.09.26 14:45 [E-860] [parent: E-859] [T-63] [agent: antigravity] [op: claim-40f4ccf7dc634dca9309205408841cc0] DEC: claimed via SAIOPS -- owner antigravity
+- 25.09.26 14:45 [E-861] [parent: E-860] [T-63] [agent: antigravity] [op: checkpoint-d90ba9bb9a264d27a0730a30d84cd4e1] RUN: SCOUT -- metadata-only scope refresh for changed v0.1.2 release surfaces; icon gate untouched
+- 25.09.26 14:45 [E-862] [parent: E-861] [T-63] [agent: antigravity] [op: transition-2632b362559b43d68d35130552f6cdf7] RUN: transition to BUILD -- No product delta; refresh release scope
+- 25.09.26 14:45 [E-863] [parent: E-862] [T-63] [agent: antigravity] [op: checkpoint-7ea291ecd65f4ea981704137cdda42ae] RUN: build -> no product delta
+- 25.09.26 14:45 [E-864] [parent: E-863] [T-63] [agent: antigravity] [op: transition-8bf6d79a709448b1a83a1bc8d40d87ad] RUN: transition to VERIFY -- Verify release-facing paths
+- 25.09.26 14:45 [E-865] [parent: E-864] [T-63] [agent: antigravity] [op: checkpoint-8e554f4a600d421db6fecb80642cb1ee] RUN: verify -> PASS [target: T-63] conf: high -- release scope paths verified; metadata-only
+- 25.09.26 14:45 [E-866] [parent: E-865] [T-63] [agent: antigravity] [op: transition-90df7d8d1bf642638d05b79dc973ee6a] RUN: transition to REVIEW -- Scope paths verified; record current metadata scope
+- 25.09.26 14:45 [E-867] [parent: E-866] [agent: antigravity] [op: transition-90df7d8d1bf642638d05b79dc973ee6a] DEC: goal_tickets 12->13
+- 25.09.26 14:45 [E-868] [parent: E-867] [T-63] [agent: antigravity] [op: scope-db6cb93ea1be4c44804220958d744008] DEC: release scope recorded -- 7 path(s) bound to 4efeed4629a2
+- 25.09.26 14:45 [E-869] [parent: E-868] [T-63] [agent: antigravity] [op: ticket-22fffbc1df0641108c61ddb7798da7e9] DEC: ticket block via SAIOPS (active) -- USER_PRODUCT_ICON_PENDING -- metadata scope refreshed; final icon and explicit visual acceptance remain required
+- 25.09.26 14:46 [E-870] [parent: E-869] [T-65] [agent: antigravity] [op: ticket-9764babeccc64a7bac8f6437acd270b2] DEC: ticket unblock via SAIOPS -- T-63 scope refreshed for v0.1.2; resume patch release
+- 25.09.26 14:46 [E-871] [parent: E-870] [T-65] [agent: antigravity] [op: claim-7a0c4bfa167f47a29b4d2b554cb4c7c5] DEC: claimed via SAIOPS -- owner antigravity
+- 25.09.26 14:46 [E-872] [parent: E-871] [T-65] [agent: antigravity] [op: checkpoint-f5b204e6ff2d4405b6cdeb15e1b2ddde] RUN: SCOUT -- v0.1.2 patch content complete; T-63 metadata scope refreshed
+- 25.09.26 14:46 [E-873] [parent: E-872] [T-65] [agent: antigravity] [op: transition-d5c67c8226d045279220b619c9dee97b] RUN: transition to BUILD -- No content delta; final patch scope
+- 25.09.26 14:46 [E-874] [parent: E-873] [T-65] [agent: antigravity] [op: checkpoint-cf1a75c2dd7f47e08e243873458c3d89] RUN: build -> no delta; v0.1.2 source-only patch ready
+- 25.09.26 14:46 [E-875] [parent: E-874] [T-65] [agent: antigravity] [op: transition-dbfb666b26f842a682fbe57b3d060a4e] RUN: transition to VERIFY -- Run final v0.1.2 release verification
+- 25.09.26 14:46 [E-876] [parent: E-875] [T-65] [agent: antigravity] [op: checkpoint-03dad963b4314e05a6b2e559733e6898] RUN: verify -> PASS [target: T-65] conf: high -- v0.1.2 identity, CTest release identity, Croatian oracle green
+- 25.09.26 14:46 [E-877] [parent: E-876] [T-65] [agent: antigravity] [op: transition-0d8067273d9c4eb0971c4b15df62cb14] RUN: transition to REVIEW -- Final v0.1.2 verification green; review complete patch scope
+- 25.09.26 14:46 [E-878] [parent: E-877] [agent: antigravity] [op: transition-0d8067273d9c4eb0971c4b15df62cb14] DEC: goal_tickets 13->14
+- 25.09.26 14:46 [E-879] [parent: E-878] [T-65] [agent: antigravity] [op: checkpoint-d08ba744da434fae8fbb270a724add24] RUN: review -> PASS [target: T-65] conf: high -- independent scope check; no findings
+- 25.09.26 14:46 [E-880] [parent: E-879] [T-65] [agent: antigravity] [op: transition-42aecb9efe4c45c58fd3a5faad9bd44d] RUN: transition to SHIP -- Review passed; record complete v0.1.2 scope and ship
+- 25.09.26 14:46 [E-881] [parent: E-880] [T-65] [agent: antigravity] [op: scope-622b4a37b6344c978a4f41b6c430d974] DEC: release scope recorded -- 18 path(s) bound to 4efeed4629a2
+- 25.09.26 14:47 [E-882] [parent: E-881] [T-65] [agent: antigravity] [op: ticket-883de0208e8f4dbd94463eb087c012ff] DEC: ticket block via SAIOPS (active) -- SOURCE_UNRESOLVED: SRC-019 has no derived requirements and T-63 scope overlaps release metadata; narrow T-63 scope to its actual resource/tooling paths
+- 25.09.26 14:47 [E-883] [parent: E-882] [T-63] [agent: antigravity] [op: ticket-1616fd43315f4110b872ac351745a865] DEC: ticket unblock via SAIOPS -- Narrow metadata scope to actual binary-release resource/tooling paths; icon gate remains open
+- 25.09.26 14:47 [E-884] [parent: E-883] [T-63] [agent: antigravity] [op: claim-85d41f24decc423f9260fc026f9a43d7] DEC: claimed via SAIOPS -- owner antigravity
+- 25.09.26 14:47 [E-885] [parent: E-884] [T-63] [agent: antigravity] [op: checkpoint-bb05f95230ea495196094366c583098e] RUN: SCOUT -- narrow scope avoids unrelated T-65 release metadata
+- 25.09.26 14:47 [E-886] [parent: E-885] [T-63] [agent: antigravity] [op: transition-9c790d9f95df44e59d343cec9c96c2ba] RUN: transition to BUILD -- Metadata-only scope narrowing
+- 25.09.26 14:47 [E-887] [parent: E-886] [T-63] [agent: antigravity] [op: checkpoint-4593d0fd9d3a4513ac5ffaf878425b90] RUN: build -> no product delta
+- 25.09.26 14:47 [E-888] [parent: E-887] [T-63] [agent: antigravity] [op: transition-6d90b1c464fc44779a7b83f007c77576] RUN: transition to VERIFY -- Verify narrowed paths
+- 25.09.26 14:47 [E-889] [parent: E-888] [T-63] [agent: antigravity] [op: checkpoint-a8eda22447634d5e92e21fc2eb0a4580] RUN: verify -> PASS [target: T-63] conf: high -- resource/tooling scope paths exist; icon gate open
+- 25.09.26 14:47 [E-890] [parent: E-889] [T-63] [agent: antigravity] [op: transition-52bb608c7413412fbf1786b3b24b790e] RUN: transition to REVIEW -- Record narrowed scope and restore icon blocker
+- 25.09.26 14:47 [E-891] [parent: E-890] [agent: antigravity] [op: transition-52bb608c7413412fbf1786b3b24b790e] DEC: goal_tickets 14->15
+- 25.09.26 14:47 [E-892] [parent: E-891] [T-63] [agent: antigravity] [op: scope-de5ad9de14f8416bb9f4e42e36dbf6f9] DEC: release scope recorded -- 2 path(s) bound to 4efeed4629a2
+- 25.09.26 14:48 [E-893] [parent: E-892] [T-63] [agent: antigravity] [op: ticket-454a66f89971437fa16aee40bc0d25f1] DEC: ticket block via SAIOPS (active) -- USER_PRODUCT_ICON_PENDING -- narrowed metadata scope recorded; final icon and visual acceptance remain required
+- 25.09.26 14:48 [E-894] [parent: E-893] [T-65] [agent: antigravity] [op: ticket-95560e306239481f95afbd16b64920d3] DEC: ticket unblock via SAIOPS -- T-63 scope narrowed to non-overlapping resource/tooling paths; retry v0.1.2 ship
+- 25.09.26 14:48 [E-895] [parent: E-894] [T-65] [agent: antigravity] [op: claim-6c5fa28a073b4a8b9ae21e91a78b741e] DEC: claimed via SAIOPS -- owner antigravity
+- 25.09.26 14:48 [E-896] [parent: E-895] [T-65] [agent: antigravity] [op: checkpoint-c744b5738d38470d9ce58434eccc8282] RUN: SCOUT -- v0.1.2 content unchanged; T-63 scope no longer overlaps release
+- 25.09.26 14:48 [E-897] [parent: E-896] [T-65] [agent: antigravity] [op: transition-5f429d8d92654f689d2a604071df9fa8] RUN: transition to BUILD -- No content delta; final ship
+- 25.09.26 14:48 [E-898] [parent: E-897] [T-65] [agent: antigravity] [op: checkpoint-a580f6ab1d474a31a94a72ed5ec75a0e] RUN: build -> no delta
+- 25.09.26 14:48 [E-899] [parent: E-898] [T-65] [agent: antigravity] [op: transition-77dd53d3f9c346b7a79b4efc2ca46971] RUN: transition to VERIFY -- Reconfirm release identity and Croatian package
+- 25.09.26 14:48 [E-900] [parent: E-899] [T-65] [agent: antigravity] [op: checkpoint-192d61c866b7449a97f1e054bd2a5e04] RUN: verify -> PASS [target: T-65] conf: high -- v0.1.2 identity and release CTest green
+- 25.09.26 14:48 [E-901] [parent: E-900] [T-65] [agent: antigravity] [op: transition-52da9c41866f41cdb21b0c1cb21140ec] RUN: transition to REVIEW -- Final verification green; review v0.1.2 scope
+- 25.09.26 14:48 [E-902] [parent: E-901] [agent: antigravity] [op: transition-52da9c41866f41cdb21b0c1cb21140ec] DEC: goal_tickets 15->16
+- 25.09.26 14:48 [E-903] [parent: E-902] [T-65] [agent: antigravity] [op: checkpoint-f09d1e2782e34374b3ddaf989bd2bce9] RUN: review -> PASS [target: T-65] conf: high -- final scope check
+- 25.09.26 14:48 [E-904] [parent: E-903] [T-65] [agent: antigravity] [op: transition-aeaab8ae76db4f4e8967ecdf7d8ee23c] RUN: transition to SHIP -- Review passed; record final scope and ship v0.1.2
+- 25.09.26 14:48 [E-905] [parent: E-904] [T-65] [agent: antigravity] [op: scope-5c77835f657248b388ef69d192534daf] DEC: release scope recorded -- 18 path(s) bound to 4efeed4629a2
+- 25.09.26 14:50 [E-906] [parent: E-905] [T-65] [agent: antigravity] [op: scope-51620872320c4a4f82235e82b18959f7] DEC: release scope recorded -- 18 path(s) bound to 4efeed4629a2
+- 25.09.26 14:51 [E-907] [parent: E-906] [T-65] [agent: antigravity] [op: finish-491d2fb595564e0487ce1262ab2fe880] RUN: ship v0.1.2 -> content commit c686d547c2a6 pushed
+- 25.09.26 14:51 [E-908] [parent: E-907] [T-65] [agent: antigravity] [op: finish-491d2fb595564e0487ce1262ab2fe880] DEC: ticket finished via SAIOPS -- completion (from SHIP)
