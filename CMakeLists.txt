@@ -1,9 +1,21 @@
 cmake_minimum_required(VERSION 3.24)
 
+# The root RELEASE_VERSION file is the ONE release-version authority. project(), the
+# Windows VERSIONINFO resource and the packaging pipeline all derive from it,
+# so a release can never ship binary metadata that disagrees with its tag.
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/RELEASE_VERSION" PROTRAIL_VERSION LIMIT_COUNT 1)
+string(STRIP "${PROTRAIL_VERSION}" PROTRAIL_VERSION)
+if(NOT PROTRAIL_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
+    message(FATAL_ERROR
+        "RELEASE_VERSION_INVALID: RELEASE_VERSION must hold MAJOR.MINOR.PATCH, got '${PROTRAIL_VERSION}'")
+endif()
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/RELEASE_VERSION")
+
 project(ProTrail
-    VERSION 0.1.0
+    VERSION ${PROTRAIL_VERSION}
     DESCRIPTION "Native Windows cursor effects application"
-    LANGUAGES CXX)
+    LANGUAGES CXX RC)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -19,6 +31,10 @@ endif()
 if(MSVC)
     # Warnings as errors, UTF-8 source, conformant preprocessor.
     add_compile_options(/W4 /WX /EHsc /utf-8 /Zc:preprocessor /permissive- /FS)
+    # Reproducible PE output: no link timestamp or other per-build noise, so
+    # a rebuild from the release tag yields byte-identical binaries.
+    add_compile_options(/Brepro)
+    add_link_options(/Brepro)
 endif()
 
 # T-34: Developer Release Defaults panel in dev builds only
@@ -28,7 +44,46 @@ if(PROTRAIL_DEV_BUILD)
 else()
     add_compile_definitions($<$<CONFIG:Debug>:PROTRAIL_DEV_BUILD=1>)
 endif()
-add_compile_definitions(PROTRAIL_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+# The checkout path is only meaningful to the developer defaults panel. It is
+# defined for developer builds alone, so a production Release binary never
+# embeds the machine-specific source path.
+if(PROTRAIL_DEV_BUILD)
+    add_compile_definitions(PROTRAIL_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+else()
+    add_compile_definitions(
+        $<$<CONFIG:Debug>:PROTRAIL_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}">)
+endif()
+
+# ---- Windows product resource (VERSIONINFO + application icon) ----
+# The approved product icon has exactly one home. Its presence is a build
+# input; its absence keeps developer builds working with the generated
+# fallback, while the official release pipeline configures with
+# PROTRAIL_REQUIRE_FINAL_ICON=ON so a binary without final branding cannot
+# be produced by accident.
+option(PROTRAIL_REQUIRE_FINAL_ICON
+    "Fail configure unless the approved product icon is present" OFF)
+set(PROTRAIL_ICON_FILE "${CMAKE_CURRENT_SOURCE_DIR}/resources/branding/protrail.ico")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/resources/windows/protrail.rc.in")
+if(EXISTS "${PROTRAIL_ICON_FILE}")
+    set(PROTRAIL_HAS_FINAL_ICON 1)
+    file(TO_CMAKE_PATH "${PROTRAIL_ICON_FILE}" _protrail_icon_rc_path)
+    set(PROTRAIL_RC_ICON_LINE "IDI_ICON1 ICON \"${_protrail_icon_rc_path}\"")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+        "${PROTRAIL_ICON_FILE}")
+else()
+    set(PROTRAIL_HAS_FINAL_ICON 0)
+    set(PROTRAIL_RC_ICON_LINE "// USER_PRODUCT_ICON_PENDING: resources/branding/protrail.ico absent")
+    if(PROTRAIL_REQUIRE_FINAL_ICON)
+        message(FATAL_ERROR
+            "USER_PRODUCT_ICON_PENDING: ${PROTRAIL_ICON_FILE} is required for an official binary release")
+    endif()
+endif()
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/resources/windows/protrail.rc.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/protrail.rc"
+    @ONLY)
+set(PROTRAIL_WINDOWS_RC "${CMAKE_CURRENT_BINARY_DIR}/protrail.rc")
 
 # ---- Qt ----
 # Developer convenience only: a local Qt install is a valid prefix when it
@@ -79,6 +134,7 @@ add_executable(protrail
     src/app/main.cpp
     src/app/application.cpp
     src/app/application.h
+    src/app/topology_retry.h
     src/app/single_instance.h
     src/app/single_instance.cpp
     src/app/startup_paths.h
@@ -113,10 +169,11 @@ add_executable(protrail
     src/ui/theme.qrc
     src/ui/settings_window.h
     src/ui/settings_window.cpp
-    src/ui/main_window.h
-    src/ui/main_window.cpp
     src/ui/tray_icon.h
     src/ui/tray_icon.cpp
+    src/ui/branding.h
+    src/ui/branding.cpp
+    "${PROTRAIL_WINDOWS_RC}"
     src/config/app_config.h
     src/config/app_config.cpp
     src/config/config_storage.h
@@ -178,7 +235,6 @@ qt_add_executable(protrail_history_tests
     src/core/cursor_history.cpp
 )
 target_link_libraries(protrail_history_tests PRIVATE Qt6::Test)
-target_include_directories(protrail_history_tests PRIVATE .)
 set_target_properties(protrail_history_tests PROPERTIES
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
 )
@@ -188,7 +244,6 @@ add_test(NAME protrail_history_tests COMMAND protrail_history_tests)
 qt_add_executable(protrail_timestamp_tests
     tests/test_timestamp.cpp
 )
-target_include_directories(protrail_timestamp_tests PRIVATE .)
 set_target_properties(protrail_timestamp_tests PROPERTIES
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
 )
@@ -199,7 +254,6 @@ add_test(NAME protrail_timestamp_tests COMMAND protrail_timestamp_tests)
 qt_add_executable(protrail_button_flags_tests
     tests/test_button_flags.cpp
 )
-target_include_directories(protrail_button_flags_tests PRIVATE .)
 set_target_properties(protrail_button_flags_tests PROPERTIES
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
 )
@@ -215,7 +269,6 @@ qt_add_executable(protrail_input_dispatch
     src/core/log.cpp
 )
 target_link_libraries(protrail_input_dispatch PRIVATE Qt6::Test user32)
-target_include_directories(protrail_input_dispatch PRIVATE .)
 set_target_properties(protrail_input_dispatch PROPERTIES
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
 )
@@ -228,7 +281,6 @@ qt_add_executable(protrail_trail_tests
     src/core/cursor_history.cpp
 )
 target_link_libraries(protrail_trail_tests PRIVATE d2d1)
-target_include_directories(protrail_trail_tests PRIVATE .)
 set_target_properties(protrail_trail_tests PROPERTIES
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
 )
@@ -243,7 +295,6 @@ qt_add_executable(protrail_stroke_policy_tests
     src/core/cursor_history.cpp
 )
 target_link_libraries(protrail_stroke_policy_tests PRIVATE d2d1)
-target_include_directories(protrail_stroke_policy_tests PRIVATE .)
 set_target_properties(protrail_stroke_policy_tests PROPERTIES
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
 )
@@ -255,7 +306,6 @@ qt_add_executable(protrail_click_tests
     tests/test_click_bubble_effect.cpp
     src/effects/click_bubble_effect.cpp
 )
-target_include_directories(protrail_click_tests PRIVATE .)
 set_target_properties(protrail_click_tests PROPERTIES
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
 )
@@ -268,7 +318,6 @@ qt_add_executable(protrail_hold_wake_tests
     tests/test_hold_wake.cpp
     src/effects/click_bubble_effect.cpp
 )
-target_include_directories(protrail_hold_wake_tests PRIVATE .)
 set_target_properties(protrail_hold_wake_tests PROPERTIES
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
 )
@@ -282,7 +331,6 @@ qt_add_executable(protrail_gui_tests
     src/ui/check.xpm
     src/ui/theme.qrc
     src/ui/settings_window.cpp
-    src/ui/main_window.cpp
     src/config/app_config.cpp
     src/config/config_storage.cpp
     src/config/release_defaults.cpp
@@ -294,7 +342,6 @@ qt_add_executable(protrail_gui_tests
     src/core/cursor_history.cpp
 )
 target_link_libraries(protrail_gui_tests PRIVATE Qt6::Widgets Qt6::Test d2d1)
-target_include_directories(protrail_gui_tests PRIVATE .)
 set_target_properties(protrail_gui_tests PROPERTIES
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
 )
@@ -306,33 +353,7 @@ set_tests_properties(protrail_gui_tests PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
 )
 
-# T-037: direct deterministic coverage for the compact product-home surface.
-# The developer-only "Set Defaults" action is gated by the same runtime
-# is_dev_build() authority the Settings developer panel uses, so this target
-# links the dev-defaults owner (and its storage/defaults dependencies) instead
-# of duplicating that decision as a second compile-time rule.
-qt_add_executable(protrail_main_window_tests
-    tests/test_main_window.cpp
-    src/ui/main_window.cpp
-    src/ui/theme.cpp
-    src/ui/check.xpm
-    src/ui/theme.qrc
-    src/config/app_config.cpp
-    src/config/config_storage.cpp
-    src/config/release_defaults.cpp
-    src/config/dev_defaults.cpp
-    "${PROTRAIL_RELEASE_DEFAULTS_QRC}"
-    src/core/log.cpp
-)
-target_link_libraries(protrail_main_window_tests PRIVATE Qt6::Widgets Qt6::Test)
-target_include_directories(protrail_main_window_tests PRIVATE .)
-set_target_properties(protrail_main_window_tests PROPERTIES
-    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
-)
-add_test(NAME protrail_main_window_tests COMMAND protrail_main_window_tests)
-set_tests_properties(protrail_main_window_tests PROPERTIES
-    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
-)
+# Unified-window coverage lives in protrail_gui_tests and protrail_tray_tests.
 
 # T-011 MVP 06: configuration & persistence tests.
 qt_add_executable(protrail_config_tests
@@ -341,11 +362,11 @@ qt_add_executable(protrail_config_tests
     src/config/config_storage.cpp
     src/config/release_defaults.cpp
     src/config/dev_defaults.cpp
+    src/app/startup_paths.cpp
     "${PROTRAIL_RELEASE_DEFAULTS_QRC}"
     src/core/log.cpp
 )
 target_link_libraries(protrail_config_tests PRIVATE Qt6::Core Qt6::Test)
-target_include_directories(protrail_config_tests PRIVATE .)
 set_target_properties(protrail_config_tests PROPERTIES
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
 )
@@ -360,7 +381,6 @@ qt_add_executable(protrail_scheduler_tests
     src/core/log.cpp
 )
 target_link_libraries(protrail_scheduler_tests PRIVATE Qt6::Core Qt6::Test user32 psapi)
-target_include_directories(protrail_scheduler_tests PRIVATE .)
 set_target_properties(protrail_scheduler_tests PROPERTIES
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
 )
@@ -378,7 +398,6 @@ qt_add_executable(protrail_multimonitor_tests
     src/core/log.cpp
 )
 target_link_libraries(protrail_multimonitor_tests PRIVATE Qt6::Core Qt6::Test user32 d2d1 dcomp d3d11 dxgi)
-target_include_directories(protrail_multimonitor_tests PRIVATE .)
 set_target_properties(protrail_multimonitor_tests PROPERTIES
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
 )
@@ -391,6 +410,7 @@ add_test(NAME protrail_multimonitor_tests COMMAND protrail_multimonitor_tests)
 set(PROTRAIL_APP_SOURCES
     src/app/application.h
     src/app/application.cpp
+    src/app/topology_retry.h
     src/app/single_instance.h
     src/app/single_instance.cpp
     src/app/startup_paths.h
@@ -414,10 +434,11 @@ set(PROTRAIL_APP_SOURCES
     src/platform/mouse_input.cpp
     src/ui/tray_icon.h
     src/ui/tray_icon.cpp
+    src/ui/branding.h
+    src/ui/branding.cpp
+    "${PROTRAIL_WINDOWS_RC}"
     src/ui/settings_window.h
     src/ui/settings_window.cpp
-    src/ui/main_window.h
-    src/ui/main_window.cpp
     src/ui/theme.h
     src/ui/theme.cpp
     src/ui/check.xpm
@@ -456,10 +477,12 @@ target_link_libraries(protrail_tray_tests PRIVATE
     psapi
     advapi32
 )
-target_include_directories(protrail_tray_tests PRIVATE .)
 set_target_properties(protrail_tray_tests PROPERTIES
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
 )
+# Branding regressions assert the linked icon resource agrees with configure.
+target_compile_definitions(protrail_tray_tests PRIVATE
+    PROTRAIL_EXPECT_FINAL_ICON=${PROTRAIL_HAS_FINAL_ICON})
 add_test(NAME protrail_tray_tests COMMAND protrail_tray_tests)
 set_tests_properties(protrail_tray_tests PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
@@ -484,7 +507,6 @@ target_link_libraries(protrail_trail_lifecycle_tests PRIVATE
     psapi
     advapi32
 )
-target_include_directories(protrail_trail_lifecycle_tests PRIVATE .)
 set_target_properties(protrail_trail_lifecycle_tests PROPERTIES
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
 )
@@ -505,7 +527,6 @@ target_link_libraries(protrail_sparkle_tests PRIVATE
     Qt6::Test
     d2d1
 )
-target_include_directories(protrail_sparkle_tests PRIVATE .)
 set_target_properties(protrail_sparkle_tests PROPERTIES
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
 )
@@ -524,7 +545,6 @@ qt_add_executable(protrail_release_defaults_tests
     src/core/log.cpp
 )
 target_link_libraries(protrail_release_defaults_tests PRIVATE Qt6::Core Qt6::Test)
-target_include_directories(protrail_release_defaults_tests PRIVATE .)
 set_target_properties(protrail_release_defaults_tests PROPERTIES
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
 )
@@ -549,6 +569,13 @@ add_test(NAME protrail_release_defaults_gate_accepts_canonical
             -D DEFAULTS_FILE=${PROTRAIL_RELEASE_DEFAULTS}
             -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/validate_release_defaults.cmake")
 
+# Release identity: RELEASE_VERSION, README badge, newest CHANGELOG entry and the
+# release notes must name one version (see cmake/check_release_identity.cmake).
+add_test(NAME protrail_release_identity
+    COMMAND "${CMAKE_COMMAND}"
+            -D SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/check_release_identity.cmake")
+
 # T-48: the two script-driven gate tests above are registered OUTSIDE the
 # executables loop below, so they would otherwise carry CTest's default
 # infinite timeout -- a validator that never returns would hang the suite
@@ -556,6 +583,7 @@ add_test(NAME protrail_release_defaults_gate_accepts_canonical
 set_tests_properties(
     protrail_release_defaults_gate
     protrail_release_defaults_gate_accepts_canonical
+    protrail_release_identity
     PROPERTIES TIMEOUT 300)
 
 
@@ -573,7 +601,6 @@ target_link_libraries(protrail_autostart_tests PRIVATE
     Qt6::Test
     advapi32
 )
-target_include_directories(protrail_autostart_tests PRIVATE .)
 set_target_properties(protrail_autostart_tests PROPERTIES
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
 )
@@ -584,7 +611,6 @@ qt_add_executable(protrail_request_dedup_tests
     tests/test_request_dedup.cpp
 )
 target_link_libraries(protrail_request_dedup_tests PRIVATE Qt6::Core Qt6::Test)
-target_include_directories(protrail_request_dedup_tests PRIVATE .)
 set_target_properties(protrail_request_dedup_tests PROPERTIES
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
 )
@@ -598,7 +624,6 @@ qt_add_executable(protrail_single_instance_tests
     src/core/log.cpp
 )
 target_link_libraries(protrail_single_instance_tests PRIVATE Qt6::Core Qt6::Test user32)
-target_include_directories(protrail_single_instance_tests PRIVATE .)
 set_target_properties(protrail_single_instance_tests PROPERTIES
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
 )
@@ -614,7 +639,7 @@ foreach(_test protrail_tests protrail_history_tests protrail_timestamp_tests
              protrail_button_flags_tests protrail_input_dispatch
              protrail_trail_tests protrail_stroke_policy_tests
              protrail_click_tests protrail_hold_wake_tests
-             protrail_gui_tests protrail_main_window_tests protrail_config_tests
+             protrail_gui_tests protrail_config_tests
              protrail_scheduler_tests protrail_multimonitor_tests
              protrail_tray_tests protrail_single_instance_tests
              protrail_trail_lifecycle_tests protrail_sparkle_tests
@@ -625,5 +650,3 @@ foreach(_test protrail_tests protrail_history_tests protrail_timestamp_tests
         TIMEOUT 300
         ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_qt_bin_dir}")
 endforeach()
-
-

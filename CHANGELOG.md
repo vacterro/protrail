@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.5 - Official Windows x64 portable release recovery
+
+- Renamed the root version authority from `VERSION` to `RELEASE_VERSION`, removing the Windows C++ `<version>` header shadowing failure.
+- Preserved immutable `v0.1.3` and `v0.1.4` tags; this release carries the approved icon and corrected version-file layout.
+- Prepared the unsigned portable package pipeline; package smoke, checksum, and publication gates remain authoritative.
+
 ## 0.1.4 - Official Windows x64 portable release recovery
 
 - Corrected the incomplete `v0.1.3` publication record without moving or deleting its immutable tag; the actual icon release is cut as `v0.1.4`.
