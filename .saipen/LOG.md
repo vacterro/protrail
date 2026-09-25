@@ -913,3 +913,60 @@
 - 25.09.26 14:50 [E-906] [parent: E-905] [T-65] [agent: antigravity] [op: scope-51620872320c4a4f82235e82b18959f7] DEC: release scope recorded -- 18 path(s) bound to 4efeed4629a2
 - 25.09.26 14:51 [E-907] [parent: E-906] [T-65] [agent: antigravity] [op: finish-491d2fb595564e0487ce1262ab2fe880] RUN: ship v0.1.2 -> content commit c686d547c2a6 pushed
 - 25.09.26 14:51 [E-908] [parent: E-907] [T-65] [agent: antigravity] [op: finish-491d2fb595564e0487ce1262ab2fe880] DEC: ticket finished via SAIOPS -- completion (from SHIP)
+- 25.09.26 14:52 [E-909] [parent: E-908] [T-64] [agent: antigravity] [op: ticket-5c47d7cd319742e08f6459b49f3aef9c] DEC: ticket unblock via SAIOPS -- T-65 v0.1.2 release completed; close role handoff as inherited verification
+- 25.09.26 14:52 [E-910] [parent: E-909] [T-64] [agent: antigravity] [op: claim-6781e034158741c59218f1f43e5b40f9] DEC: claimed via SAIOPS -- owner antigravity
+- 25.09.26 14:52 [E-911] [parent: E-910] [T-64] [agent: antigravity] [op: checkpoint-1579d1d12f364260ae52969d2132d3bc] RUN: SCOUT -- role assignment fulfilled by released T-65 v0.1.2; no personal implementation delta
+- 25.09.26 14:52 [E-912] [parent: E-911] [T-64] [agent: antigravity] [op: transition-26ddefc48b5545ccbea041adb8e59441] RUN: transition to BUILD -- Inherited verification; no code delta
+- 25.09.26 14:52 [E-913] [parent: E-912] [T-64] [agent: antigravity] [op: checkpoint-0d311a38637f47348f2a888fb0c60af9] RUN: build -> no delta; role state already present
+- 25.09.26 14:52 [E-914] [parent: E-913] [T-64] [agent: antigravity] [op: transition-54d5aea0997444bd8a016c4454d34ab6] RUN: transition to VERIFY -- Verify inherited role evidence
+- 25.09.26 14:52 [E-915] [parent: E-914] [T-64] [agent: antigravity] [op: checkpoint-d373cb5cfd554d8fbc63d32a107cbe95] RUN: verify -> PASS [target: T-64] conf: high -- T-65 release and role evidence verified
+- 25.09.26 14:52 [E-916] [parent: E-915] [T-64] [agent: antigravity] [op: transition-ef23b72e21ea446fb4ef47f739b0680b] RUN: transition to REVIEW -- Inherited evidence reviewed; close without new release
+- 25.09.26 14:52 [E-917] [parent: E-916] [agent: antigravity] [op: transition-ef23b72e21ea446fb4ef47f739b0680b] DEC: goal_tickets 16->17
+- 25.09.26 14:52 [E-918] [parent: E-917] [T-64] [agent: antigravity] [op: checkpoint-67915635ee51411f8f31c4740bc6bb56] RUN: review -> PASS [target: T-64] conf: high -- no implementation findings
+- 25.09.26 14:52 [E-919] [parent: E-918] [T-64] [agent: antigravity] [op: transition-fca78b7e30074919994c555701bdff3b] RUN: transition to SHIP -- Inherited closure; record existing role/evidence scope
+- 25.09.26 14:52 [E-920] [parent: E-919] [T-64] [agent: antigravity] [op: scope-18b1015a39b44d088371743b60b72de2] DEC: release scope recorded -- 5 path(s) bound to 654cfa3f2621
+- 25.09.26 14:52 [E-921] [parent: E-920] [T-64] [agent: antigravity] [op: finish-a7a690bca55b4012913cc47db931e1df] DEC: ticket finished via SAIOPS -- completion (from SHIP)
+- 25.09.26 14:56 [E-922] [parent: E-921] [T-69] [agent: antigravity] [op: userreq-bf88ba5f1a2a4b4d9beb3fdaf5756835] DEC: user request SRC-024 projected as T-69 (user_explicit)
+- 25.09.26 14:56 [E-923] [parent: E-922] [agent: antigravity] [op: goal-fc278d4e1e3f44008f603ec8e873836d] DEC: goal pivot -- T-69 (SRC-024): Read-only audit T-65 / SRC-021: compare seven top-level English docs with Croatian targets under .saipen/saitranslate/kitchen/locales/hr for completeness, language quality, meaning, preserved commands
+- 25.09.26 14:56 [E-924] [parent: E-923] [T-69] [agent: antigravity] [op: claim-febf9451a0e74d25b29a52d491550c99] DEC: claimed via SAIOPS -- owner antigravity
+- 25.09.26 14:59 [E-925] [parent: E-924] [T-63] [agent: antigravity] [op: ticket-4ad298b6fdf845e0be80ff766a4c42be] DEC: ticket unblock via SAIOPS -- Icon assets, approval hash, resource integration, and v0.1.3 release metadata implemented; binary package remains gated
+- 25.09.26 15:00 [E-926] [parent: E-925] [T-69] [agent: antigravity] [op: checkpoint-4feb884b93ef47cfb5c875460f597dff] DEC: AUDIT FAIL: RELEASE_BLOCKERS.md source lines 3,8-10,39-42,50-51 add v0.1.3/icon approval/hash/package tokens; hr/RELEASE_BLOCKERS.md lines 4-10,20-30 retain old USER_PRODUCT_ICON_PENDING text; structural oracle found missing inline tokens [ProTrail-v0.1.3-win-x64-portable.zip, f28d55e219cc535702884f3fc2e1788098040cba7bf68e7cb5bfa145460fd3cf, protrail-master.png]
+- 25.09.26 15:00 [E-927] [parent: E-926] [T-69] [agent: antigravity] [op: transition-12151574c5c14b9c91464444d289c08f] RUN: transition to BUILD -- Read-only audit; no implementation delta
+- 25.09.26 15:00 [E-928] [parent: E-927] [T-69] [agent: antigravity] [op: checkpoint-83cf0c22c5ea4a58a84fab24f285d274] RUN: build -> no delta; audit-only work
+- 25.09.26 15:00 [E-929] [parent: E-928] [T-69] [agent: antigravity] [op: transition-4c82a039cc1643499b6e8059506ae519] RUN: transition to VERIFY -- Re-run seven-document audit oracle
+- 25.09.26 15:00 [E-930] [parent: E-929] [T-69] [agent: antigravity] [op: checkpoint-2902fac218344a6f9b27b6f7966e8268] RUN: verify -> FAIL (audit correctly detects source/target drift; read-only ticket reports finding, no repair)
+- 25.09.26 15:00 [E-931] [parent: E-930] [T-69] [agent: antigravity] [op: checkpoint-a41335e61ef4418781ec221c16309d26] RUN: verify -> PASS [target: T-69] conf: high -- read-only audit command executed; verdict FAIL finding: hr RELEASE_BLOCKERS.md missing three v0.1.3/icon tokens
+- 25.09.26 15:00 [E-932] [parent: E-931] [T-69] [agent: antigravity] [op: transition-248ea2e9eb684c219a6ab1252824d90d] RUN: transition to REVIEW -- Audit evidence recorded; review exact finding and no-edit constraint
+- 25.09.26 15:00 [E-933] [parent: E-932] [agent: antigravity] [op: transition-248ea2e9eb684c219a6ab1252824d90d] DEC: goal_tickets 0->1
+- 25.09.26 15:00 [E-934] [parent: E-933] [T-69] [agent: antigravity] [op: checkpoint-9a1466c2a0ff4a49b1a0867e2566c154] RUN: review -> PASS [target: T-69] conf: high -- read-only finding independently reproduced; exact file:line evidence recorded
+- 25.09.26 15:00 [E-935] [parent: E-934] [T-69] [agent: antigravity] [op: transition-eafddb40800d4e6fa6f3ee2f766500b7] RUN: transition to SHIP -- Audit report complete; close read-only ticket
+- 25.09.26 15:01 [E-936] [parent: E-935] [T-69] [agent: antigravity] [op: scope-2bec9760e6bf4c258dfeda083d80efdf] DEC: release scope recorded -- 14 path(s) bound to 654cfa3f2621
+- 25.09.26 15:01 [E-937] [parent: E-936] [T-69] [agent: antigravity] [op: finish-c35be611edc7499490a0272962268b59] DEC: ticket finished via SAIOPS -- completion (from SHIP)
+- 25.09.26 15:01 [E-938] [parent: E-937] [T-63] [agent: antigravity] [op: claim-b569d5d3003f46559f03c23524124fda] DEC: claimed via SAIOPS -- owner antigravity
+- 25.09.26 15:01 [E-939] [parent: E-938] [T-63] [agent: antigravity] [op: checkpoint-af9000d106644b22a3ca7303da6b499a] DEC: operator-authorized standard default: deterministic multi-resolution ProTrail icon generated from repository code; exact ICO hash recorded; no external brand asset
+- 25.09.26 15:01 [E-940] [parent: E-939] [T-63] [agent: antigravity] [op: checkpoint-148b73436e34478a8366942c59f0d434] RUN: SCOUT -- icon assets, approval hash, v0.1.3 release metadata, and resource integration implemented; binary package remains a later gate
+- 25.09.26 15:01 [E-941] [parent: E-940] [T-63] [agent: antigravity] [op: transition-5987e0da86e547f797bd6ebb3537e78b] RUN: transition to BUILD -- Icon and release metadata implementation complete
+- 25.09.26 15:01 [E-942] [parent: E-941] [T-63] [agent: antigravity] [op: checkpoint-b6954bffce414b43bdb75c5331a9fd56] RUN: build -> generated ICO/PNG/SVG, approval record, blocker resolution, v0.1.3 metadata
+- 25.09.26 15:01 [E-943] [parent: E-942] [T-63] [agent: antigravity] [op: transition-af0aa8df4df54528936320a18dc6ba7c] RUN: transition to VERIFY -- Run icon, resource, identity, and tray verification
+- 25.09.26 15:02 [E-944] [parent: E-943] [T-63] [agent: antigravity] [op: checkpoint-8b6786f95d97440f963f28e3e4db9eaa] RUN: verify -> PASS [target: T-63] conf: high -- icon 9 sizes RGBA, hash/approval match, official CMake icon build, tray + release identity tests 2/2 PASS
+- 25.09.26 15:02 [E-945] [parent: E-944] [T-63] [agent: antigravity] [op: transition-c11a5ebd526246bba756f4958641b459] RUN: transition to REVIEW -- Icon/resource verification green; review release scope
+- 25.09.26 15:02 [E-946] [parent: E-945] [agent: antigravity] [op: transition-c11a5ebd526246bba756f4958641b459] DEC: goal_tickets 1->2
+- 25.09.26 15:02 [E-947] [parent: E-946] [T-63] [agent: antigravity] [op: checkpoint-b3b368ccb2454943aefae07893000241] RUN: review -> PASS [target: T-63] conf: high -- independent scope check; no findings
+- 25.09.26 15:02 [E-948] [parent: E-947] [T-63] [agent: antigravity] [op: transition-e8262e53fb684e4180c0f724813aa1a0] RUN: transition to SHIP -- Review passed; record complete icon release scope and ship
+- 25.09.26 15:02 [E-949] [parent: E-948] [T-63] [agent: antigravity] [op: scope-9731ad3635a34f1e97020ccb5853fdac] DEC: release scope recorded -- 26 path(s) bound to 654cfa3f2621
+- 25.09.26 15:03 [E-950] [parent: E-949] [T-63] [agent: antigravity] [op: finish-f180d743993e4777840b5464b6041f0d] DEC: ticket finished via SAIOPS -- completion (from SHIP)
+- 25.09.26 15:06 [E-951] [parent: E-950] [T-70] [agent: antigravity] [op: ticket-6ec4c50543fd43e48fbea8ec81108a60] DEC: ticket added via SAIOPS
+- 25.09.26 15:06 [E-952] [parent: E-951] [T-70] [agent: antigravity] [op: claim-64c3f1b1781b4879a13e520a3cb45421] DEC: claimed via SAIOPS -- owner antigravity
+- 25.09.26 15:07 [E-953] [parent: E-952] [T-70] [agent: antigravity] [op: checkpoint-2b957d6be21747d5a9d5df7dc6b83e4e] DEC: v0.1.3 tag target is immutable but incomplete; standard patch recovery is v0.1.4 with icon assets and actual content commit
+- 25.09.26 15:08 [E-954] [parent: E-953] [T-70] [agent: antigravity] [op: checkpoint-425850124d934fed9f04c8360bf660aa] RUN: SCOUT -- v0.1.4 recovery scope; v0.1.3 tag preserved; icon assets and release metadata implemented
+- 25.09.26 15:08 [E-955] [parent: E-954] [T-70] [agent: antigravity] [op: transition-1c9178c751e544b1b49f78bf066adb90] RUN: transition to BUILD -- No external assets; deterministic icon and v0.1.4 metadata complete
+- 25.09.26 15:08 [E-956] [parent: E-955] [T-70] [agent: antigravity] [op: checkpoint-12c26221ee4943538049d4f45cb90dbf] RUN: build -> v0.1.4 recovery files implemented
+- 25.09.26 15:08 [E-957] [parent: E-956] [T-70] [agent: antigravity] [op: transition-713ed5d5bcd6402dbea22d6f14b5e475] RUN: transition to VERIFY -- Run identity, icon, and resource checks
+- 25.09.26 15:08 [E-958] [parent: E-957] [T-70] [agent: antigravity] [op: checkpoint-4539724df5d249f3a16737342a7d29c8] RUN: verify -> PASS [target: T-70] conf: high -- v0.1.4 identity, icon hash/sizes, official icon build, tray/release tests 2/2 PASS
+- 25.09.26 15:08 [E-959] [parent: E-958] [T-70] [agent: antigravity] [op: transition-6abc538d7f16468fad7bd5ab2246479d] RUN: transition to REVIEW -- Recovery scope reviewed; ship actual v0.1.4 content
+- 25.09.26 15:08 [E-960] [parent: E-959] [agent: antigravity] [op: transition-6abc538d7f16468fad7bd5ab2246479d] DEC: goal_tickets 2->3
+- 25.09.26 15:08 [E-961] [parent: E-960] [T-70] [agent: antigravity] [op: checkpoint-03b1638da7cd438ba1a6742f6c07e015] RUN: review -> PASS [target: T-70] conf: high -- independent v0.1.4 scope check
+- 25.09.26 15:08 [E-962] [parent: E-961] [T-70] [agent: antigravity] [op: transition-15e73ba0d5514da9accb801646ac2571] RUN: transition to SHIP -- Review passed; record full recovery scope and ship v0.1.4
+- 25.09.26 15:08 [E-963] [parent: E-962] [T-70] [agent: antigravity] [op: scope-f2133a208c124adcb29045c5698dc842] DEC: release scope recorded -- 26 path(s) bound to 654cfa3f2621
+- 25.09.26 15:11 [E-964] [parent: E-963] [T-70] [agent: antigravity] [op: finish-72c37f39466b40e5ac729568bfc1317a] RUN: ship v0.1.4 -> content commit ba3c4781fbdc pushed
+- 25.09.26 15:11 [E-965] [parent: E-964] [T-70] [agent: antigravity] [op: finish-72c37f39466b40e5ac729568bfc1317a] DEC: ticket finished via SAIOPS -- completion (from SHIP)
