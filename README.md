@@ -1,12 +1,19 @@
+<div align="center">
+
 # ProTrail
 
-**v0.1.9**
+**Native Windows cursor trails, click effects, hold effects, and motion wake rendered in click-through overlays.**
 
-ProTrail is a native Windows desktop utility that renders configurable cursor
-trails, click and press-and-hold effects, and motion wake geometry without ever
-intercepting, delaying or swallowing a mouse click. It is a Qt 6 / C++20
-application rendering through Direct2D and DirectComposition into per-monitor
-click-through overlays.
+[![Version](https://img.shields.io/badge/version-0.1.9-D4B86A?style=flat-square)](VERSION)
+![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D4?style=flat-square)
+![C++](https://img.shields.io/badge/C%2B%2B-20-00599C?style=flat-square&logo=cplusplus&logoColor=white)
+![Qt](https://img.shields.io/badge/Qt-6.8-41CD52?style=flat-square&logo=qt&logoColor=white)
+
+[Release notes](RELEASE_NOTES_v0.1.9.md) · [UI contract](UI.md) · [Security](SECURITY.md) · [Contributing](CONTRIBUTING.md)
+
+</div>
+
+ProTrail renders through Direct2D and DirectComposition into per-monitor, non-activating overlays. The design goal is visual feedback without intercepting, delaying, or swallowing the click that caused it.
 
 ## Current scope
 
