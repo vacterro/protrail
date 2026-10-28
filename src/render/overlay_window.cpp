@@ -21,6 +21,11 @@ namespace {
 
 constexpr wchar_t kClassName[] = L"ProTrailOverlay";
 
+// How often the overlay checks whether something got above it. One probe
+// per second is far below visible-latency for a z-order slip and costs a
+// single GetWindow call.
+constexpr int64_t kTopmostProbeIntervalMs = 1000;
+
 void overlay_log(ptd::LogLevel level, const std::string_view& msg) {
     ptd::log_write(level, msg);
 }
@@ -531,10 +536,30 @@ void OverlayWindow::draw_diagnostic_frame() {
     // every frame begins with a full Clear (see init_render rationale).
 }
 
+void OverlayWindow::ensure_topmost(int64_t now_ns) {
+    if (!hwnd_) return;
+    if (now_ns < next_topmost_probe_ns_) return;
+    next_topmost_probe_ns_ = now_ns + kTopmostProbeIntervalMs * 1'000'000;
+
+    // GW_HWNDPREV == nullptr means nothing sits above us: we are already the
+    // top of the band and the one SetWindowPos below would be pure waste.
+    const HWND above = GetWindow(hwnd_, GW_HWNDPREV);
+    if (!above) return;
+
+    if (SetWindowPos(hwnd_, HWND_TOPMOST, 0, 0, 0, 0,
+                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)) {
+        overlay_log(ptd::LogLevel::Info,
+                    "overlay: re-asserted topmost; window was covered");
+    }
+}
+
 void OverlayWindow::render_frame(const FrameGeometry& frame,
                                  const std::vector<std::size_t>& primitive_indices,
                                  int64_t now_ns) {
-    (void)now_ns;
+    // Z-order runs BEFORE every early return: an overlay that lost the
+    // topmost band must be restored even on a dirty-Skip or recovery frame,
+    // which is exactly when nothing is being drawn and the slip is visible.
+    ensure_topmost(now_ns);
     if (recovery_.pending || !has_render_resources()) {
         try_recovery();
         return;
@@ -815,7 +840,12 @@ void OverlayWindow::emit_bubble(const FramePrimitive& bubble) {
 void OverlayWindow::show() {
     if (hwnd_) {
         ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
-        overlay_log(ptd::LogLevel::Info, "overlay: shown (no activate)");
+        // Re-showing does not restore the topmost band by itself, and a
+        // pause/resume can span any number of other topmost windows.
+        SetWindowPos(hwnd_, HWND_TOPMOST, 0, 0, 0, 0,
+                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        next_topmost_probe_ns_ = 0;
+        overlay_log(ptd::LogLevel::Info, "overlay: shown (no activate, topmost)");
     }
 }
 

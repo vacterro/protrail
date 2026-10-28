@@ -9,12 +9,14 @@
 // cross-process production case).
 
 #include "../src/app/single_instance.h"
+#include "../src/core/log.h"
 
 #include <QtTest/QtTest>
 #include <QElapsedTimer>
 
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace {
 
@@ -119,6 +121,64 @@ bool wait_for_request_id(ptd::SingleInstance& si) {
     return si.last_request_id() != 0;
 }
 
+// T-100: captures every log_write line so a reported failure is observed
+// through the file's OWN reporting channel, exactly like test_config.cpp
+// observes its fallback log lines.
+std::vector<std::string> g_captured_logs;
+
+std::string captured_joined() {
+    std::string all;
+    for (const std::string& l : g_captured_logs) all += l;
+    return all;
+}
+
+bool captured_contains(const char* needle) {
+    return captured_joined().find(needle) != std::string::npos;
+}
+
+// T-100 seam state. arm() fails CloseHandle with the injected error and counts
+// the calls, proving the file routes its closes through the seam. AllCloses
+// fails every close; FirstCloseOnly fails just the first close of the sequence,
+// which in release() is a transport event -- so the protocol mutex still closes
+// for real and a later claim is not poisoned by a leaked ownership token.
+enum class CloseFailMode { AllCloses, FirstCloseOnly };
+
+int g_close_failure_calls = 0;
+DWORD g_close_failure_error = ERROR_INVALID_HANDLE;
+CloseFailMode g_close_fail_mode = CloseFailMode::AllCloses;
+
+void arm_close_failure(DWORD err, CloseFailMode mode = CloseFailMode::AllCloses) {
+    g_close_failure_error = err;
+    g_close_failure_calls = 0;
+    g_close_fail_mode = mode;
+    ptd::set_close_handle_seam_for_tests([](HANDLE h) -> BOOL {
+        const int call = ++g_close_failure_calls;
+        const bool fail = g_close_fail_mode == CloseFailMode::AllCloses || call == 1;
+        if (fail) {
+            SetLastError(g_close_failure_error);
+            return FALSE;
+        }
+        return CloseHandle(h);
+    });
+}
+
+void disarm_close_failure() {
+    ptd::set_close_handle_seam_for_tests(nullptr);
+    g_close_fail_mode = CloseFailMode::AllCloses;
+}
+
+void start_log_capture() {
+    g_captured_logs.clear();
+    ptd::set_log_sink([](ptd::LogLevel, const std::string_view& message) {
+        g_captured_logs.emplace_back(message);
+    });
+}
+
+void stop_log_capture() {
+    ptd::clear_log_sink();
+    g_captured_logs.clear();
+}
+
 } // namespace
 
 class TestSingleInstance : public QObject {
@@ -158,6 +218,19 @@ private slots:
     void reset_event_failure_in_claim_fails_closed();
     void reset_event_failure_in_complete_takeover_fails_closed();
     void reset_event_failure_in_begin_shutdown_and_release_is_observable();
+
+    // T-91: SetEvent shutdown-beacon failure is observable, never trusted.
+    void set_event_failure_in_begin_shutdown_is_observable();
+
+    // T-95: ReleaseMutex ownership-relinquishment failure is observable too.
+    void release_mutex_failure_in_release_is_observable();
+
+    // T-100: a failed CloseHandle is reported with the exact Win32 error and
+    // the failing site, on the same channel the file already uses for
+    // SetEvent/ResetEvent/ReleaseMutex.
+    void close_failure_in_release_is_reported_with_site_and_error();
+    void close_failure_in_claim_failure_path_is_reported();
+    void close_failure_does_not_break_successful_claim_and_teardown();
 };
 
 void TestSingleInstance::first_claimant_becomes_owner() {
@@ -885,6 +958,165 @@ void TestSingleInstance::reset_event_failure_in_begin_shutdown_and_release_is_ob
     ptd::set_reset_event_seam_for_tests(nullptr);
 
     // Mutex was relinquished by release: a new instance can claim FirstOwner.
+    ptd::SingleInstance next(cfg);
+    QCOMPARE(next.claim(), ptd::ClaimStatus::FirstOwner);
+    QVERIFY(next.is_owner());
+}
+
+void TestSingleInstance::release_mutex_failure_in_release_is_observable() {
+    const auto cfg = unique_config(L"release_mutex_fail");
+    ptd::SingleInstance owner(cfg);
+    QCOMPARE(owner.claim(), ptd::ClaimStatus::FirstOwner);
+    QVERIFY(owner.is_owner());
+
+    ptd::set_release_mutex_seam_for_tests([](HANDLE) -> BOOL {
+        SetLastError(ERROR_NOT_OWNER);
+        return FALSE;
+    });
+
+    owner.release();
+    // A failed relinquishment must be reported with the exact Win32 error, not
+    // trusted silently: the mutex is the last protocol handle to go, so an
+    // unreported failure here leaves every later claimant to block on a mutex
+    // this owner still holds.
+    QCOMPARE(owner.last_error(), static_cast<DWORD>(ERROR_NOT_OWNER));
+    QVERIFY(!owner.is_owner());
+
+    ptd::set_release_mutex_seam_for_tests(nullptr);
+}
+
+void TestSingleInstance::set_event_failure_in_begin_shutdown_is_observable() {
+    const auto cfg = unique_config(L"set_shutdown_fail");
+    ptd::SingleInstance owner(cfg);
+    QCOMPARE(owner.claim(), ptd::ClaimStatus::FirstOwner);
+    QVERIFY(owner.mark_ready());
+
+    ptd::set_set_event_seam_for_tests([](HANDLE) -> BOOL {
+        SetLastError(ERROR_INVALID_HANDLE);
+        return FALSE;
+    });
+
+    owner.begin_shutdown();
+    // The former bare SetEvent trusted this failure silently. Now it is
+    // reported with the exact Win32 error, and the beacon is NOT raised, so
+    // no claimant can read a stale "owner is shutting down" signal.
+    QCOMPARE(owner.last_error(), static_cast<DWORD>(ERROR_INVALID_HANDLE));
+    QVERIFY(!event_signaled(cfg.ready_event_name));    // readiness still revoked (I2)
+    QVERIFY(!event_signaled(cfg.shutdown_event_name)); // failed beacon stays unraised
+
+    ptd::set_set_event_seam_for_tests(nullptr);
+
+    // Fail-closed: the deterministic mutex-handoff gate remains the authority.
+    // Release relinquishes the protocol, so a fresh instance claims cleanly
+    // even though the beacon never fired.
+    owner.release();
+    QVERIFY(!owner.is_owner());
+    ptd::SingleInstance next(cfg);
+    QCOMPARE(next.claim(), ptd::ClaimStatus::FirstOwner);
+    QVERIFY(next.is_owner());
+}
+
+// T-100: the CloseHandle counterpart of release_mutex_failure_in_release_is_
+// observable. A failed close in release() used to vanish; now it is reported
+// with the exact Win32 error (6 = ERROR_INVALID_HANDLE) and the failing site
+// ("release: <handle>"). Only the FIRST close fails, so the mutex -- the last
+// close in release() -- still closes for real and ownership is genuinely
+// relinquished, which is what the later clean claim asserts.
+void TestSingleInstance::close_failure_in_release_is_reported_with_site_and_error() {
+    const auto cfg = unique_config(L"close_release_fail");
+    ptd::SingleInstance owner(cfg);
+    QCOMPARE(owner.claim(), ptd::ClaimStatus::FirstOwner);
+    QVERIFY(owner.is_owner());
+
+    start_log_capture();
+    arm_close_failure(ERROR_INVALID_HANDLE, CloseFailMode::FirstCloseOnly);
+    owner.release();
+    disarm_close_failure();
+
+    // The seam proves release() routes its closes through the owner.
+    QVERIFY2(g_close_failure_calls > 0,
+             "release() must route its closes through the CloseHandle seam");
+
+    // Reported on the file's own channel, with the site and the exact error.
+    QVERIFY2(captured_contains("single_instance: CloseHandle failed"),
+             "a failed CloseHandle must be reported on the file's own log channel");
+    QVERIFY2(captured_contains("release:"),
+             "the report must name the failing function, not just the call");
+    QVERIFY2(captured_contains("with error 6"),
+             "the report must carry the exact Win32 error (6 = ERROR_INVALID_HANDLE)");
+    stop_log_capture();
+
+    QVERIFY(!owner.is_owner());
+
+    // Ownership was relinquished: a fresh claimant still becomes FirstOwner.
+    ptd::SingleInstance next(cfg);
+    QCOMPARE(next.claim(), ptd::ClaimStatus::FirstOwner);
+    QVERIFY(next.is_owner());
+}
+
+// T-100: the claim() error paths close several handles while unwinding; a
+// failed close there must be reported with its site too, not swallowed. All
+// closes fail here, which is the honest worst case of the old defect: the
+// unwind then really does leak the mutex handle, so a later claimant correctly
+// observes AlreadyRunning. That leak is precisely what the report now exposes.
+void TestSingleInstance::close_failure_in_claim_failure_path_is_reported() {
+    const auto cfg = unique_config(L"close_claim_fail");
+    start_log_capture();
+
+    // ResetEvent failure drives claim() into its unwind path while every
+    // CloseHandle in that path is failing too: both must be reported.
+    ptd::set_reset_event_seam_for_tests([](HANDLE) -> BOOL { return FALSE; });
+    arm_close_failure(ERROR_INVALID_HANDLE);
+    {
+        ptd::SingleInstance si(cfg);
+        QCOMPARE(si.claim(), ptd::ClaimStatus::Error);
+        QVERIFY(!si.is_owner());
+    }
+    disarm_close_failure();
+    ptd::set_reset_event_seam_for_tests(nullptr);
+
+    QVERIFY2(captured_contains("single_instance: ResetEvent ready_event failed in claim"),
+             "the seam-driven ResetEvent failure must still be reported");
+    QVERIFY2(captured_contains("single_instance: CloseHandle failed"),
+             "a failed CloseHandle in the claim unwind path must be reported");
+    QVERIFY2(captured_contains("claim:"),
+             "the claim-path report must name claim as the failing site");
+    QVERIFY2(captured_contains("with error 6"),
+             "the claim-path report must carry the exact Win32 error");
+    QVERIFY2(g_close_failure_calls > 0,
+             "the claim unwind must close real handles through the seam");
+    stop_log_capture();
+}
+
+// T-100: injecting a CloseHandle failure must not perturb the happy path, must
+// be reported through the file's own channel, and must not leave the seam
+// armed for later tests (every suite test runs in this one process).
+void TestSingleInstance::close_failure_does_not_break_successful_claim_and_teardown() {
+    const auto cfg = unique_config(L"close_happy");
+    {
+        ptd::SingleInstance si(cfg);
+        QCOMPARE(si.claim(), ptd::ClaimStatus::FirstOwner);
+        QVERIFY(si.is_owner());
+        QVERIFY(si.mark_ready());
+        QCOMPARE(si.owner_state(), ptd::OwnerState::Ready);
+
+        start_log_capture();
+        arm_close_failure(ERROR_INVALID_HANDLE, CloseFailMode::FirstCloseOnly);
+        si.release();
+        disarm_close_failure();
+
+        QVERIFY2(g_close_failure_calls > 0,
+                 "release() must route its closes through the CloseHandle seam");
+        QVERIFY2(captured_contains("single_instance: CloseHandle failed"),
+                 "the failed close must be reported on the file's own log channel");
+        QVERIFY2(captured_contains("release:"),
+                 "the report must name the failing site");
+        stop_log_capture();
+
+        QVERIFY(!si.is_owner());
+    }
+
+    // Seam restored: the next object closes for real and claims cleanly.
     ptd::SingleInstance next(cfg);
     QCOMPARE(next.claim(), ptd::ClaimStatus::FirstOwner);
     QVERIFY(next.is_owner());

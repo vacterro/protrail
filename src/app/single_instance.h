@@ -168,6 +168,16 @@ private:
     bool complete_takeover(bool abandoned);
     // True if the named shutdown beacon is observable signaled.
     bool shutdown_signaled();
+    // T-96: relinquishing ownership is the LAST step of the protocol, so a
+    // failed ReleaseMutex is reported with the exact Win32 error and the
+    // failing site instead of being trusted silently like every other
+    // unchecked mutex result this file used to discard.
+    void note_release_mutex_failure(const char* where);
+    // T-100: mirror of note_release_mutex_failure for CloseHandle, which every
+    // site in this file used to discard. The reported site names which
+    // protocol token failed to close (function + handle), so the log
+    // distinguishes "handle released" from "handle leaked".
+    void note_close_failure(const char* where);
 
     SingleInstanceConfig config_;
     HANDLE ready_event_ = nullptr;
@@ -185,5 +195,28 @@ private:
 // Test seam for ResetEvent failure injection.
 using ResetEventFn = BOOL (*)(HANDLE);
 void set_reset_event_seam_for_tests(ResetEventFn seam);
+
+// Test seam for SetEvent failure injection. Mirrors the ResetEvent seam so
+// the single remaining unchecked Win32 signaling result in this file (the
+// shutdown beacon in begin_shutdown) is exercised, not asserted.
+using SetEventFn = BOOL (*)(HANDLE);
+void set_set_event_seam_for_tests(SetEventFn seam);
+
+// T-95: test seam for ReleaseMutex failure injection. Ownership
+// relinquishment is the last step of the protocol, so a silent failure there
+// is exactly as invisible as the ResetEvent/SetEvent cases above.
+using ReleaseMutexFn = BOOL (*)(HANDLE);
+void set_release_mutex_seam_for_tests(ReleaseMutexFn seam);
+
+// T-100: test seam for CloseHandle failure injection. Every other Win32
+// result in single_instance.cpp was already inspected and reported (SetEvent
+// at T-91, ResetEvent at T-42, ReleaseMutex at T-95) while all 44 CloseHandle
+// results were discarded, so a failed close leaked a kernel handle with
+// nothing in the log to say it happened -- in the file where the named
+// handles ARE the single-instance ownership tokens. This seam routes every
+// CloseHandle in the file through one owner, so the discipline is proven by
+// injection instead of asserted.
+using CloseHandleFn = BOOL (*)(HANDLE);
+void set_close_handle_seam_for_tests(CloseHandleFn seam);
 
 } // namespace ptd

@@ -52,10 +52,55 @@ BOOL call_reset_event(HANDLE h) {
     return ResetEvent(h);
 }
 
+// T-91: same seam discipline as call_reset_event, for the shutdown beacon.
+SetEventFn g_set_event_seam = nullptr;
+
+BOOL call_set_event(HANDLE h) {
+    if (g_set_event_seam) {
+        return g_set_event_seam(h);
+    }
+    return SetEvent(h);
+}
+
+// T-95/T-96: same seam discipline for the ownership relinquishment, which is
+// the last step of the whole protocol.
+ReleaseMutexFn g_release_mutex_seam = nullptr;
+
+BOOL call_release_mutex(HANDLE h) {
+    if (g_release_mutex_seam) {
+        return g_release_mutex_seam(h);
+    }
+    return ReleaseMutex(h);
+}
+
+// T-100: same seam discipline for every CloseHandle in this file, so a failed
+// close is injected in tests exactly like a failed SetEvent/ResetEvent/
+// ReleaseMutex, and reported exactly like them too.
+CloseHandleFn g_close_handle_seam = nullptr;
+
+BOOL call_close_handle(HANDLE h) {
+    if (g_close_handle_seam) {
+        return g_close_handle_seam(h);
+    }
+    return CloseHandle(h);
+}
+
 } // namespace
 
 void set_reset_event_seam_for_tests(ResetEventFn seam) {
     g_reset_event_seam = seam;
+}
+
+void set_set_event_seam_for_tests(SetEventFn seam) {
+    g_set_event_seam = seam;
+}
+
+void set_release_mutex_seam_for_tests(ReleaseMutexFn seam) {
+    g_release_mutex_seam = seam;
+}
+
+void set_close_handle_seam_for_tests(CloseHandleFn seam) {
+    g_close_handle_seam = seam;
 }
 
 SingleInstance::SingleInstance(SingleInstanceConfig config)
@@ -75,7 +120,28 @@ std::uint64_t SingleInstance::make_request_id() {
     // High 32 bits: claimant PID (per-process uniqueness).
     // Low 32 bits: QPC nonce (per-request uniqueness inside a process).
     return (static_cast<std::uint64_t>(GetCurrentProcessId()) << 32)
-         | static_cast<std::uint32_t>(tick.LowPart);
+         | static_cast<uint32_t>(tick.LowPart);
+}
+
+// T-96: relinquishing ownership is the LAST step of the protocol, so a failed
+// ReleaseMutex is reported with the exact Win32 error and the failing site
+// instead of being trusted silently.
+void SingleInstance::note_release_mutex_failure(const char* where) {
+    last_error_ = GetLastError();
+    ptd::log_write(ptd::LogLevel::Error,
+                   std::string("single_instance: ReleaseMutex failed in ") + where
+                       + " with error " + std::to_string(last_error_));
+}
+
+// T-100: mirror of note_release_mutex_failure for CloseHandle, which every
+// site in this file used to discard. The reported site names which protocol
+// token failed to close, so the log distinguishes "handle released" from
+// "handle leaked" instead of leaking silently.
+void SingleInstance::note_close_failure(const char* where) {
+    last_error_ = GetLastError();
+    ptd::log_write(ptd::LogLevel::Error,
+                   std::string("single_instance: CloseHandle failed in ") + where
+                       + " with error " + std::to_string(last_error_));
 }
 
 bool SingleInstance::acknowledge_request(std::uint64_t request_id) {
@@ -93,7 +159,14 @@ bool SingleInstance::acknowledge_request(std::uint64_t request_id) {
     }
     const BOOL ok = SetEvent(ack);
     const DWORD err = GetLastError();
-    CloseHandle(ack);
+    // T-100: this static ACK path has no owning instance, so the report is
+    // inlined with the same wording the member reporter uses. A failed close
+    // here would leave the claimant waiting for an ACK that was signalled.
+    if (!call_close_handle(ack)) {
+        ptd::log_write(ptd::LogLevel::Error,
+                       std::string("single_instance: CloseHandle failed in acknowledge_request: activation ACK event with error ")
+                           + std::to_string(GetLastError()));
+    }
     if (!ok) {
         ptd::log_write(ptd::LogLevel::Error, "single_instance: ACK SetEvent failed for request " + std::to_string(request_id) + " with error " + std::to_string(err));
         return false;
@@ -143,7 +216,7 @@ ClaimStatus SingleInstance::claim() {
     if (!activate_event_) {
         last_error_ = GetLastError();
         ptd::log_write(ptd::LogLevel::Error, "single_instance: CreateEventW activate_event failed with error " + std::to_string(last_error_));
-        CloseHandle(ready_event_);
+        if (!call_close_handle(ready_event_)) note_close_failure("claim: ready_event");
         ready_event_ = nullptr;
         return ClaimStatus::Error;
     }
@@ -153,9 +226,9 @@ ClaimStatus SingleInstance::claim() {
     if (!shutdown_event_) {
         last_error_ = GetLastError();
         ptd::log_write(ptd::LogLevel::Error, "single_instance: CreateEventW shutdown_event failed with error " + std::to_string(last_error_));
-        CloseHandle(activate_event_);
+        if (!call_close_handle(activate_event_)) note_close_failure("claim: activate_event");
         activate_event_ = nullptr;
-        CloseHandle(ready_event_);
+        if (!call_close_handle(ready_event_)) note_close_failure("claim: ready_event");
         ready_event_ = nullptr;
         return ClaimStatus::Error;
     }
@@ -169,11 +242,11 @@ ClaimStatus SingleInstance::claim() {
     if (mutex_ == nullptr) {
         last_error_ = GetLastError();
         ptd::log_write(ptd::LogLevel::Error, "single_instance: CreateMutexW failed with error " + std::to_string(last_error_));
-        CloseHandle(shutdown_event_);
+        if (!call_close_handle(shutdown_event_)) note_close_failure("claim: shutdown_event");
         shutdown_event_ = nullptr;
-        CloseHandle(activate_event_);
+        if (!call_close_handle(activate_event_)) note_close_failure("claim: activate_event");
         activate_event_ = nullptr;
-        CloseHandle(ready_event_);
+        if (!call_close_handle(ready_event_)) note_close_failure("claim: ready_event");
         ready_event_ = nullptr;
         return ClaimStatus::Error;
     }
@@ -182,11 +255,11 @@ ClaimStatus SingleInstance::claim() {
         // Claimant: drop the transport handles (the live owner keeps the
         // objects alive), keep the unowned mutex handle for the bounded
         // handoff, and never become owner.
-        CloseHandle(shutdown_event_);
+        if (!call_close_handle(shutdown_event_)) note_close_failure("claim: shutdown_event");
         shutdown_event_ = nullptr;
-        CloseHandle(activate_event_);
+        if (!call_close_handle(activate_event_)) note_close_failure("claim: activate_event");
         activate_event_ = nullptr;
-        CloseHandle(ready_event_);
+        if (!call_close_handle(ready_event_)) note_close_failure("claim: ready_event");
         ready_event_ = nullptr;
         is_owner_ = false;
         return ClaimStatus::AlreadyRunning;
@@ -199,14 +272,14 @@ ClaimStatus SingleInstance::claim() {
     if (!call_reset_event(ready_event_)) {
         last_error_ = GetLastError();
         ptd::log_write(ptd::LogLevel::Error, "single_instance: ResetEvent ready_event failed in claim with error " + std::to_string(last_error_));
-        CloseHandle(shutdown_event_);
+        if (!call_close_handle(shutdown_event_)) note_close_failure("claim: shutdown_event");
         shutdown_event_ = nullptr;
-        CloseHandle(activate_event_);
+        if (!call_close_handle(activate_event_)) note_close_failure("claim: activate_event");
         activate_event_ = nullptr;
-        CloseHandle(ready_event_);
+        if (!call_close_handle(ready_event_)) note_close_failure("claim: ready_event");
         ready_event_ = nullptr;
-        ReleaseMutex(mutex_);
-        CloseHandle(mutex_);
+        if (!call_release_mutex(mutex_)) note_release_mutex_failure("claim");
+        if (!call_close_handle(mutex_)) note_close_failure("claim: protocol mutex");
         mutex_ = nullptr;
         is_owner_ = false;
         return ClaimStatus::Error;
@@ -214,14 +287,14 @@ ClaimStatus SingleInstance::claim() {
     if (!call_reset_event(shutdown_event_)) {
         last_error_ = GetLastError();
         ptd::log_write(ptd::LogLevel::Error, "single_instance: ResetEvent shutdown_event failed in claim with error " + std::to_string(last_error_));
-        CloseHandle(shutdown_event_);
+        if (!call_close_handle(shutdown_event_)) note_close_failure("claim: shutdown_event");
         shutdown_event_ = nullptr;
-        CloseHandle(activate_event_);
+        if (!call_close_handle(activate_event_)) note_close_failure("claim: activate_event");
         activate_event_ = nullptr;
-        CloseHandle(ready_event_);
+        if (!call_close_handle(ready_event_)) note_close_failure("claim: ready_event");
         ready_event_ = nullptr;
-        ReleaseMutex(mutex_);
-        CloseHandle(mutex_);
+        if (!call_release_mutex(mutex_)) note_release_mutex_failure("claim");
+        if (!call_close_handle(mutex_)) note_close_failure("claim: protocol mutex");
         mutex_ = nullptr;
         is_owner_ = false;
         return ClaimStatus::Error;
@@ -235,10 +308,7 @@ bool SingleInstance::shutdown_signaled() {
     HANDLE sd = OpenEventW(SYNCHRONIZE, FALSE, config_.shutdown_event_name.c_str());
     if (!sd) return false; // no beacon observable: not a shutdown signal
     const DWORD w = WaitForSingleObject(sd, 0);
-    const BOOL ok = CloseHandle(sd);
-    if (!ok) {
-        last_error_ = GetLastError();
-    }
+    if (!call_close_handle(sd)) note_close_failure("shutdown_signaled: shutdown beacon (opened)");
     return w == WAIT_OBJECT_0;
 }
 
@@ -252,11 +322,11 @@ bool SingleInstance::complete_takeover(bool abandoned) {
     if (!ready_event_ || !activate_event_ || !shutdown_event_) {
         last_error_ = GetLastError();
         ptd::log_write(ptd::LogLevel::Error, "single_instance: transport rebuild after handoff failed with error " + std::to_string(last_error_));
-        if (ready_event_) { CloseHandle(ready_event_); ready_event_ = nullptr; }
-        if (activate_event_) { CloseHandle(activate_event_); activate_event_ = nullptr; }
-        if (shutdown_event_) { CloseHandle(shutdown_event_); shutdown_event_ = nullptr; }
-        ReleaseMutex(mutex_);
-        CloseHandle(mutex_);
+        if (ready_event_) { if (!call_close_handle(ready_event_)) note_close_failure("complete_takeover: ready_event"); ready_event_ = nullptr; }
+        if (activate_event_) { if (!call_close_handle(activate_event_)) note_close_failure("complete_takeover: activate_event"); activate_event_ = nullptr; }
+        if (shutdown_event_) { if (!call_close_handle(shutdown_event_)) note_close_failure("complete_takeover: shutdown_event"); shutdown_event_ = nullptr; }
+        if (!call_release_mutex(mutex_)) note_release_mutex_failure("complete_takeover after transport rebuild failure");
+        if (!call_close_handle(mutex_)) note_close_failure("complete_takeover: protocol mutex");
         mutex_ = nullptr;
         is_owner_ = false;
         return false;
@@ -264,11 +334,11 @@ bool SingleInstance::complete_takeover(bool abandoned) {
     if (!call_reset_event(ready_event_)) {
         last_error_ = GetLastError();
         ptd::log_write(ptd::LogLevel::Error, "single_instance: ResetEvent ready_event failed in complete_takeover with error " + std::to_string(last_error_));
-        CloseHandle(ready_event_); ready_event_ = nullptr;
-        CloseHandle(activate_event_); activate_event_ = nullptr;
-        CloseHandle(shutdown_event_); shutdown_event_ = nullptr;
-        ReleaseMutex(mutex_);
-        CloseHandle(mutex_);
+        if (!call_close_handle(ready_event_)) note_close_failure("complete_takeover: ready_event"); ready_event_ = nullptr;
+        if (!call_close_handle(activate_event_)) note_close_failure("complete_takeover: activate_event"); activate_event_ = nullptr;
+        if (!call_close_handle(shutdown_event_)) note_close_failure("complete_takeover: shutdown_event"); shutdown_event_ = nullptr;
+        if (!call_release_mutex(mutex_)) note_release_mutex_failure("complete_takeover after ResetEvent ready_event failure");
+        if (!call_close_handle(mutex_)) note_close_failure("complete_takeover: protocol mutex");
         mutex_ = nullptr;
         is_owner_ = false;
         return false;
@@ -276,11 +346,11 @@ bool SingleInstance::complete_takeover(bool abandoned) {
     if (!call_reset_event(shutdown_event_)) {
         last_error_ = GetLastError();
         ptd::log_write(ptd::LogLevel::Error, "single_instance: ResetEvent shutdown_event failed in complete_takeover with error " + std::to_string(last_error_));
-        CloseHandle(ready_event_); ready_event_ = nullptr;
-        CloseHandle(activate_event_); activate_event_ = nullptr;
-        CloseHandle(shutdown_event_); shutdown_event_ = nullptr;
-        ReleaseMutex(mutex_);
-        CloseHandle(mutex_);
+        if (!call_close_handle(ready_event_)) note_close_failure("complete_takeover: ready_event"); ready_event_ = nullptr;
+        if (!call_close_handle(activate_event_)) note_close_failure("complete_takeover: activate_event"); activate_event_ = nullptr;
+        if (!call_close_handle(shutdown_event_)) note_close_failure("complete_takeover: shutdown_event"); shutdown_event_ = nullptr;
+        if (!call_release_mutex(mutex_)) note_release_mutex_failure("complete_takeover after ResetEvent shutdown_event failure");
+        if (!call_close_handle(mutex_)) note_close_failure("complete_takeover: protocol mutex");
         mutex_ = nullptr;
         is_owner_ = false;
         return false;
@@ -332,7 +402,7 @@ NotifyStatus SingleInstance::notify_existing_owner(DWORD wait_ready_ms,
         }
         const BOOL set_ok = SetEvent(act_evt);
         const DWORD set_err = GetLastError();
-        CloseHandle(act_evt);
+        if (!call_close_handle(act_evt)) note_close_failure("notify_existing_owner: activate_event (opened)");
         if (!set_ok) {
             last_error_ = set_err;
             ptd::log_write(ptd::LogLevel::Error, "single_instance: SetEvent(activate) failed with error " + std::to_string(set_err));
@@ -361,8 +431,8 @@ NotifyStatus SingleInstance::notify_existing_owner(DWORD wait_ready_ms,
     const int shutdown_index = wait.shutdown_index;
     const DWORD readiness_wait = WaitForMultipleObjects(
         handle_count, wait.handles, FALSE, wait_ready_ms);
-    CloseHandle(rdy_evt);
-    if (sd_evt) CloseHandle(sd_evt);
+    if (!call_close_handle(rdy_evt)) note_close_failure("notify_existing_owner: ready_event (opened)");
+    if (sd_evt) { if (!call_close_handle(sd_evt)) note_close_failure("notify_existing_owner: shutdown beacon (opened)"); }
 
     // Terminal outcomes for the readiness phase (I6): Ready, shutdown
     // beacon, or the owner releasing/abandoning the protocol mutex.
@@ -419,7 +489,7 @@ NotifyStatus SingleInstance::notify_existing_owner(DWORD wait_ready_ms,
     last_request_id_.store(request_id, std::memory_order_release);
 
     if (shutdown_signaled()) {
-        CloseHandle(ack_evt);
+        if (!call_close_handle(ack_evt)) note_close_failure("notify_existing_owner: activation ACK event");
         return NotifyStatus::OwnerShuttingDown;
     }
 
@@ -433,14 +503,14 @@ NotifyStatus SingleInstance::notify_existing_owner(DWORD wait_ready_ms,
     if (channel == 0) {
         last_error_ = ERROR_INVALID_PARAMETER;
         ptd::log_write(ptd::LogLevel::Error, "single_instance: requested notify channel is not registered");
-        CloseHandle(ack_evt);
+        if (!call_close_handle(ack_evt)) note_close_failure("notify_existing_owner: activation ACK event");
         return NotifyStatus::Error;
     }
     SetLastError(ERROR_SUCCESS);
     if (!PostMessageW(HWND_BROADCAST, channel, wparam, lparam)) {
         last_error_ = GetLastError();
         ptd::log_write(ptd::LogLevel::Error, "single_instance: PostMessageW(HWND_BROADCAST) failed with error " + std::to_string(last_error_));
-        CloseHandle(ack_evt);
+        if (!call_close_handle(ack_evt)) note_close_failure("notify_existing_owner: activation ACK event");
         return NotifyStatus::Error;
     }
 
@@ -457,8 +527,12 @@ NotifyStatus SingleInstance::notify_existing_owner(DWORD wait_ready_ms,
     const int ack_shutdown_index = ack_set.shutdown_index;
     const DWORD ack_wait = WaitForMultipleObjects(
         ack_count, ack_set.handles, FALSE, ack_timeout_ms);
-    CloseHandle(ack_evt);
-    if (sd_evt2) CloseHandle(sd_evt2);
+    if (!call_close_handle(ack_evt)) note_close_failure("notify_existing_owner: activation ACK event");
+    if (sd_evt2) {
+        if (!call_close_handle(sd_evt2)) {
+            note_close_failure("notify_existing_owner: shutdown beacon (opened, ack wait)");
+        }
+    }
 
     if (ack_wait == WAIT_OBJECT_0) {
         // The owner executed the activation callback and acknowledged THIS
@@ -544,11 +618,19 @@ void SingleInstance::begin_shutdown() {
         if (!call_reset_event(ready_event_)) {
             last_error_ = GetLastError();
             ptd::log_write(ptd::LogLevel::Error, "single_instance: ResetEvent ready_event failed in begin_shutdown with error " + std::to_string(last_error_));
-            CloseHandle(ready_event_);
+            if (!call_close_handle(ready_event_)) note_close_failure("begin_shutdown: ready_event");
             ready_event_ = nullptr;
         }
     }
-    if (shutdown_event_) SetEvent(shutdown_event_);
+    if (shutdown_event_) {
+        // T-91: inspect the shutdown-beacon raise; a failed SetEvent is
+        // reported with the exact Win32 error, and the beacon stays unraised.
+        if (!call_set_event(shutdown_event_)) {
+            last_error_ = GetLastError();
+            ptd::log_write(ptd::LogLevel::Error,
+                           "single_instance: SetEvent shutdown_event failed in begin_shutdown with error " + std::to_string(last_error_));
+        }
+    }
     ptd::log_write(ptd::LogLevel::Info, "single_instance: owner shutdown began; readiness revoked");
 }
 
@@ -564,22 +646,22 @@ void SingleInstance::release() {
     if (is_owner_) owner_state_ = OwnerState::ShuttingDown;
 
     if (activate_event_) {
-        CloseHandle(activate_event_);
+        if (!call_close_handle(activate_event_)) note_close_failure("release: activate_event");
         activate_event_ = nullptr;
     }
     if (ready_event_) {
-        CloseHandle(ready_event_);
+        if (!call_close_handle(ready_event_)) note_close_failure("release: ready_event");
         ready_event_ = nullptr;
     }
     if (shutdown_event_) {
-        CloseHandle(shutdown_event_);
+        if (!call_close_handle(shutdown_event_)) note_close_failure("release: shutdown_event");
         shutdown_event_ = nullptr;
     }
     // Ownership relinquished LAST: no claimant can acquire the mutex while
     // any transport handle of this owner still exists.
     if (mutex_) {
-        if (is_owner_) ReleaseMutex(mutex_);
-        CloseHandle(mutex_);
+        if (is_owner_ && !call_release_mutex(mutex_)) note_release_mutex_failure("release");
+        if (!call_close_handle(mutex_)) note_close_failure("release: protocol mutex");
         mutex_ = nullptr;
     }
     is_owner_ = false;

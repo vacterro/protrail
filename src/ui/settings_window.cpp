@@ -2,6 +2,9 @@
 #include "theme.h"
 #include "../config/release_defaults.h"
 #include "../config/dev_defaults.h"
+#include "../config/config_storage.h"
+#include "../audio/sound_engine.h"
+#include "../platform/keyboard_input.h"
 #include "../effects/effect_palette.h"
 
 #include <QVBoxLayout>
@@ -24,6 +27,14 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QPlainTextEdit>
+#include <QComboBox>
+#include <QMenu>
+#include <QAction>
+#include <QTimer>
+#include <QFileDialog>
+#include <QFile>
+#include <QScrollBar>
+#include <QApplication>
 
 #include <algorithm>
 #include <cstddef>
@@ -580,6 +591,107 @@ struct SettingsWindow::Impl {
     QButtonGroup* click_easing_group = nullptr;  // Linear/Smooth/Ease Out
     QPushButton* btn_restore_click = nullptr;
 
+    // T-80 / T-120: Sound tab.
+    QWidget* sound_tab = nullptr;
+    QCheckBox* chk_sound_enabled = nullptr;
+    QCheckBox* chk_sound_muted = nullptr;
+    SliderSpin* sound_volume = nullptr;
+    QLineEdit* sound_search = nullptr;
+    QListWidget* sound_catalog = nullptr;
+    QPushButton* btn_sound_replay = nullptr;
+    QPushButton* btn_sound_stop = nullptr;
+    QPushButton* btn_sound_stop_all = nullptr;  // T-107: silence every voice
+    QListWidget* sound_favorites = nullptr;
+    QListWidget* sound_recent = nullptr;
+    QCheckBox* chk_preview_on_select = nullptr;
+    QComboBox* sound_assign[ptd::kAudioEventCount] = {};
+
+    // T-120: Keyboard, Scroll, Presets, Event Editor & Random Pool widgets
+    QCheckBox* chk_keyboard_enabled = nullptr;
+    QComboBox* combo_keyboard_scope = nullptr;
+    QCheckBox* chk_typing_sounds = nullptr;
+    QCheckBox* chk_modifier_tap_sounds = nullptr;
+    QCheckBox* chk_suppress_repeat_typing = nullptr;
+    QCheckBox* chk_suppress_sensitive = nullptr;
+    QLabel* lbl_keyboard_scope_info = nullptr;
+    QLabel* lbl_keyboard_scope_hint = nullptr;
+
+    QLineEdit* edit_excluded_proc = nullptr;
+    QPushButton* btn_add_excluded_proc = nullptr;
+    QPushButton* btn_remove_excluded_proc = nullptr;
+    QListWidget* list_excluded_procs = nullptr;
+
+    QCheckBox* chk_horizontal_scroll = nullptr;
+    SliderSpin* scroll_sensitivity = nullptr;
+    SliderSpin* scroll_cooldown = nullptr;
+    SliderSpin* scroll_max_rate = nullptr;
+    SliderSpin* scroll_pitch_var = nullptr;
+
+    QComboBox* combo_sound_profile = nullptr;
+    QPushButton* btn_apply_sound_profile = nullptr;
+    QPushButton* btn_export_audio_profile = nullptr;
+    QPushButton* btn_import_audio_profile = nullptr;
+
+    QComboBox* combo_event_category = nullptr;
+    QLineEdit* edit_event_search = nullptr;
+    QPushButton* btn_reset_category = nullptr;
+    QListWidget* list_sound_events = nullptr;
+
+    // Selected event editor
+    std::string selected_event_id = "typing.generic";
+    QLabel* lbl_selected_event_title = nullptr;
+    QLabel* lbl_selected_event_note = nullptr;
+    QCheckBox* chk_event_enabled = nullptr;
+    QComboBox* combo_event_sound = nullptr;
+    QPushButton* btn_event_fav_toggle = nullptr;
+    QComboBox* combo_event_policy = nullptr;
+    QComboBox* combo_event_scope = nullptr;
+    SliderSpin* event_gain_db = nullptr;
+    SliderSpin* event_cooldown_ms = nullptr;
+    SliderSpin* event_priority = nullptr;
+    QPushButton* btn_event_preview = nullptr;
+    QPushButton* btn_event_reset = nullptr;
+
+    // Collapsible advanced event controls
+    QCheckBox* chk_show_advanced_event = nullptr;
+    QWidget* advanced_event_panel = nullptr;
+    SliderSpin* event_fade_in_ms = nullptr;
+    SliderSpin* event_fade_out_ms = nullptr;
+    SliderSpin* event_min_retrigger_ms = nullptr;
+    SliderSpin* event_polyphony = nullptr;
+    SliderSpin* event_pitch_var = nullptr;
+    QCheckBox* chk_event_no_repeat = nullptr;
+    QCheckBox* chk_event_norm_override = nullptr;
+    QCheckBox* chk_event_norm_enabled = nullptr;
+
+    // Random Pool editor
+    QCheckBox* chk_event_use_pool = nullptr;
+    QWidget* pool_editor_panel = nullptr;
+    QListWidget* list_pool_entries = nullptr;
+    QComboBox* combo_pool_add_sound = nullptr;
+    QPushButton* btn_pool_add = nullptr;
+    QPushButton* btn_pool_remove = nullptr;
+    QPushButton* btn_pool_up = nullptr;
+    QPushButton* btn_pool_down = nullptr;
+    QCheckBox* chk_pool_entry_enabled = nullptr;
+    SliderSpin* pool_entry_weight = nullptr;
+    SliderSpin* pool_entry_gain_db = nullptr;
+    QPushButton* btn_pool_preview_entry = nullptr;
+    QPushButton* btn_pool_preview_random = nullptr;
+
+    // Custom shortcuts editor
+    QLineEdit* edit_custom_sc_name = nullptr;
+    QLineEdit* edit_custom_sc_chord = nullptr;
+    QCheckBox* chk_custom_sc_app = nullptr;
+    QPushButton* btn_custom_sc_add = nullptr;
+    QPushButton* btn_custom_sc_remove = nullptr;
+    QListWidget* list_custom_shortcuts = nullptr;
+
+    // Debounce timer for rapid wheel/scroll audition
+    QTimer* preview_debounce_timer = nullptr;
+    std::string pending_preview_sound_id;
+    QStringList cached_catalog_ids;
+
     // T-34: Developer Tab (dev builds only)
     QWidget* dev_tab = nullptr;
     QPushButton* btn_dev_capture = nullptr;
@@ -624,6 +736,7 @@ SettingsWindow::SettingsWindow(const ptd::TrailConfig& trail,
     build_general_tab();
     build_trail_tab();
     build_click_tab();
+    build_sound_tab();
     if (ptd::is_dev_build()) {
         build_dev_tab();
     }
@@ -632,6 +745,7 @@ SettingsWindow::SettingsWindow(const ptd::TrailConfig& trail,
     d_->tabs->addTab(d_->general_tab, "General");
     d_->tabs->addTab(d_->trail_tab, "Trail");
     d_->tabs->addTab(d_->click_tab, "Click");
+    d_->tabs->addTab(d_->sound_tab, "Sound");
     if (d_->dev_tab != nullptr) {
         d_->tabs->addTab(d_->dev_tab, "Developer");
     }
@@ -644,6 +758,10 @@ SettingsWindow::SettingsWindow(const ptd::TrailConfig& trail,
 
     setup_connections();
     set_object_names();
+
+    if (qApp != nullptr) {
+        qApp->installEventFilter(this);
+    }
 
     // Single explicit initialization: copy validated config -> widgets
     // with all signals blocked; no publications during construction.
@@ -659,15 +777,48 @@ SettingsWindow::SettingsWindow(const ptd::AppConfig& config, QWidget* parent)
     start_with_windows_ = validated.start_with_windows;
     trail_cfg_ = validated.trail;
     click_cfg_ = validated.click;
+    audio_cfg_ = validated.audio;
     render_baseline_ = validated.render;
     populate_from_config();
     apply_enable_states();
 }
 
-SettingsWindow::~SettingsWindow() = default;
+SettingsWindow::~SettingsWindow() {
+    if (qApp != nullptr) {
+        qApp->removeEventFilter(this);
+    }
+}
+
+// T-120 / T-121: the AppOnly keyboard scope listens across all child widgets
+// (including focused QLineEdit, QComboBox, QListWidget), so typing or navigating
+// in ProTrail's own window feeds the passive router without double-dispatch.
+bool SettingsWindow::eventFilter(QObject* watched, QEvent* event) {
+    if (event != nullptr && (event->type() == QEvent::KeyPress || event->type() == QEvent::KeyRelease)) {
+        QWidget* w = qobject_cast<QWidget*>(watched);
+        if (w != nullptr && (w == this || this->isAncestorOf(w))) {
+            QWidget* fw = QApplication::focusWidget();
+            if (fw == nullptr || w == fw || (w == this && !this->isAncestorOf(fw))) {
+                auto* key_event = static_cast<QKeyEvent*>(event);
+                const int scan = key_event->nativeScanCode();
+                emit app_key_event(key_event->nativeVirtualKey(), scan, (scan >> 8) == 0xE0,
+                                   event->type() == QEvent::KeyPress);
+            }
+        }
+    }
+    return QWidget::eventFilter(watched, event);
+}
+
+void SettingsWindow::keyPressEvent(QKeyEvent* event) {
+    QWidget::keyPressEvent(event);
+}
+
+void SettingsWindow::keyReleaseEvent(QKeyEvent* event) {
+    QWidget::keyReleaseEvent(event);
+}
 
 void SettingsWindow::build_general_tab() {
     d_->general_tab = new QWidget();
+    d_->general_tab->setObjectName(QStringLiteral("tab_general"));
     auto* lay = new QVBoxLayout(d_->general_tab);
     lay->setContentsMargins(theme::groupPadPx(), theme::groupPadPx(),
                             theme::groupPadPx(), theme::groupPadPx());
@@ -727,6 +878,7 @@ void SettingsWindow::build_general_tab() {
 
 void SettingsWindow::build_trail_tab() {
     d_->trail_tab = new QWidget();
+    d_->trail_tab->setObjectName(QStringLiteral("tab_trail"));
     auto* root = new QVBoxLayout(d_->trail_tab);
     root->setContentsMargins(theme::groupPadPx(), theme::groupPadPx(),
                              theme::groupPadPx(), theme::groupPadPx());
@@ -928,8 +1080,1074 @@ void SettingsWindow::build_trail_tab() {
     root->addWidget(scroll);
 }
 
+void SettingsWindow::build_sound_tab() {
+    d_->sound_tab = new QWidget();
+    auto* root = new QVBoxLayout(d_->sound_tab);
+    root->setContentsMargins(theme::groupPadPx(), theme::groupPadPx(),
+                             theme::groupPadPx(), theme::groupPadPx());
+    root->setSpacing(theme::sectionGapPx());
+
+    auto scroll = new QScrollArea();
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    auto* content = new QWidget();
+    auto* lay = new QVBoxLayout(content);
+    lay->setContentsMargins(0, 0, 0, 0);
+    lay->setSpacing(theme::sectionGapPx());
+    scroll->setWidget(content);
+    root->addWidget(scroll);
+
+    // Debounce timer for rapid scrolling / wheel audition in the sound catalog
+    d_->preview_debounce_timer = new QTimer(this);
+    d_->preview_debounce_timer->setSingleShot(true);
+    connect(d_->preview_debounce_timer, &QTimer::timeout, this, [this] {
+        if (!d_->pending_preview_sound_id.empty()) {
+            const std::string id = d_->pending_preview_sound_id;
+            d_->pending_preview_sound_id.clear();
+            emit sound_preview_requested(id);
+        }
+    });
+
+    // 1. ENABLE & MASTER VOLUME
+    QVBoxLayout* en = nullptr;
+    lay->addWidget(begin_section(QStringLiteral("ENABLE"), en));
+    auto* en_top = new QHBoxLayout();
+    en_top->setSpacing(theme::sectionGapPx());
+    d_->chk_sound_enabled = new QCheckBox("Enable Sound");
+    d_->chk_sound_muted = new QCheckBox("Mute");
+    d_->chk_preview_on_select = new QCheckBox("Audition on Select");
+    d_->chk_preview_on_select->setChecked(true);
+    d_->chk_preview_on_select->setToolTip(
+        QStringLiteral("Automatically preview WAV sounds when navigating the catalog."));
+    en_top->addWidget(d_->chk_sound_enabled);
+    en_top->addWidget(d_->chk_sound_muted);
+    en_top->addWidget(d_->chk_preview_on_select);
+    en_top->addStretch(1);
+    en->addLayout(en_top);
+    d_->sound_volume = new SliderSpin(
+        "Volume", ptd::AudioConfig::kMinVolume * 100.0,
+        ptd::AudioConfig::kMaxVolume * 100.0, 1.0, 0, "%");
+    en->addWidget(d_->sound_volume);
+
+    // 2. PRESETS & PROFILES (Section 12)
+    QVBoxLayout* pr = nullptr;
+    lay->addWidget(begin_section(QStringLiteral("PRESETS & PROFILES"), pr));
+    auto* prof_row = new QHBoxLayout();
+    prof_row->setSpacing(theme::controlPadPx());
+    prof_row->addWidget(make_row_label(QStringLiteral("Sound Profile")));
+    d_->combo_sound_profile = new QComboBox();
+    d_->combo_sound_profile->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    d_->combo_sound_profile->addItem(QStringLiteral("Default (Silent)"), static_cast<int>(ptd::SoundProfilePreset::Default));
+    d_->combo_sound_profile->addItem(QStringLiteral("Minimal"), static_cast<int>(ptd::SoundProfilePreset::Minimal));
+    d_->combo_sound_profile->addItem(QStringLiteral("Keyboard Focused"), static_cast<int>(ptd::SoundProfilePreset::KeyboardFocused));
+    d_->combo_sound_profile->addItem(QStringLiteral("Mouse Focused"), static_cast<int>(ptd::SoundProfilePreset::MouseFocused));
+    d_->combo_sound_profile->addItem(QStringLiteral("Quiet"), static_cast<int>(ptd::SoundProfilePreset::Quiet));
+    d_->combo_sound_profile->addItem(QStringLiteral("Custom"), static_cast<int>(ptd::SoundProfilePreset::Custom));
+    d_->btn_apply_sound_profile = new QPushButton(QStringLiteral("Apply Profile"));
+    prof_row->addWidget(d_->combo_sound_profile, 1);
+    prof_row->addWidget(d_->btn_apply_sound_profile);
+    pr->addLayout(prof_row);
+
+    auto* io_row = new QHBoxLayout();
+    io_row->setSpacing(theme::controlPadPx());
+    d_->btn_export_audio_profile = new QPushButton(QStringLiteral("Export Sound Assignments..."));
+    d_->btn_import_audio_profile = new QPushButton(QStringLiteral("Import Sound Assignments..."));
+    io_row->addWidget(d_->btn_export_audio_profile);
+    io_row->addWidget(d_->btn_import_audio_profile);
+    io_row->addStretch(1);
+    pr->addLayout(io_row);
+
+    // 3. SOUNDS BROWSER & LIVE PREVIEW (Section 10)
+    QVBoxLayout* so = nullptr;
+    lay->addWidget(begin_section(QStringLiteral("SOUNDS"), so));
+    d_->sound_search = new QLineEdit();
+    d_->sound_search->setPlaceholderText("Search sounds (380+ WAV catalog)");
+    d_->sound_search->setClearButtonEnabled(true);
+    so->addWidget(d_->sound_search);
+    auto* columns = new QHBoxLayout();
+    columns->setSpacing(theme::controlPadPx());
+    d_->sound_catalog = new QListWidget();
+    d_->sound_catalog->setUniformItemSizes(true);
+    d_->sound_catalog->setMinimumHeight(180);
+    d_->sound_catalog->setContextMenuPolicy(Qt::CustomContextMenu);
+    auto* catalog_col = new QVBoxLayout();
+    catalog_col->setSpacing(theme::controlPadPx());
+    catalog_col->addWidget(make_row_label(QStringLiteral("All Sounds")));
+    catalog_col->addWidget(d_->sound_catalog);
+    d_->sound_favorites = new QListWidget();
+    d_->sound_favorites->setUniformItemSizes(true);
+    d_->sound_favorites->setMinimumHeight(100);
+    d_->sound_favorites->setContextMenuPolicy(Qt::CustomContextMenu);
+    d_->sound_recent = new QListWidget();
+    d_->sound_recent->setUniformItemSizes(true);
+    d_->sound_recent->setMaximumHeight(76);
+    auto* favorites_col = new QVBoxLayout();
+    favorites_col->setSpacing(theme::controlPadPx());
+    favorites_col->addWidget(make_row_label(QStringLiteral("Favorites")));
+    favorites_col->addWidget(d_->sound_favorites, 2);
+    favorites_col->addWidget(make_row_label(QStringLiteral("Recent")));
+    favorites_col->addWidget(d_->sound_recent, 1);
+    columns->addLayout(catalog_col, 2);
+    columns->addLayout(favorites_col, 1);
+    so->addLayout(columns);
+    auto* preview_row = new QHBoxLayout();
+    d_->btn_sound_replay = new QPushButton("Replay");
+    d_->btn_sound_stop = new QPushButton("Stop");
+    d_->btn_sound_stop_all = new QPushButton("Stop All");
+    preview_row->addWidget(d_->btn_sound_replay);
+    preview_row->addWidget(d_->btn_sound_stop);
+    preview_row->addWidget(d_->btn_sound_stop_all);
+    preview_row->addStretch(1);
+    so->addLayout(preview_row);
+
+    // 4. KEYBOARD INPUT & PRIVACY SCOPE (Sections 3, 4, 6)
+    QVBoxLayout* kb = nullptr;
+    lay->addWidget(begin_section(QStringLiteral("KEYBOARD SOUND SYSTEM"), kb));
+    auto* kb_top = new QHBoxLayout();
+    kb_top->setSpacing(theme::sectionGapPx());
+    d_->chk_keyboard_enabled = new QCheckBox(QStringLiteral("Enable Keyboard Sounds"));
+    d_->chk_typing_sounds = new QCheckBox(QStringLiteral("Typing Sounds"));
+    d_->chk_modifier_tap_sounds = new QCheckBox(QStringLiteral("Modifier Tap Sounds"));
+    kb_top->addWidget(d_->chk_keyboard_enabled);
+    kb_top->addWidget(d_->chk_typing_sounds);
+    kb_top->addWidget(d_->chk_modifier_tap_sounds);
+    kb_top->addStretch(1);
+    kb->addLayout(kb_top);
+
+    auto* kb_opts = new QHBoxLayout();
+    kb_opts->setSpacing(theme::sectionGapPx());
+    d_->chk_suppress_repeat_typing = new QCheckBox(QStringLiteral("Suppress Key Auto-Repeat"));
+    d_->chk_suppress_sensitive = new QCheckBox(QStringLiteral("Suppress Sensitive Dialogs"));
+    d_->chk_suppress_sensitive->setToolTip(
+        QStringLiteral("Conservatively suppresses keyboard sounds in known credential/password processes. "
+                       "OS-level password field detection is not guaranteed across all apps."));
+    kb_opts->addWidget(d_->chk_suppress_repeat_typing);
+    // T-120: the AppOnly scope hears ONLY keys typed into ProTrail's own
+    // window. Saying so is the difference between a working default and a
+    // feature the user believes is broken.
+    d_->lbl_keyboard_scope_hint = new QLabel();
+    kb_opts->addWidget(d_->lbl_keyboard_scope_hint);
+    d_->lbl_keyboard_scope_hint->setWordWrap(true);
+    d_->lbl_keyboard_scope_hint->setObjectName(QStringLiteral("hintLabel"));
+    d_->lbl_keyboard_scope_hint->setText(
+        QStringLiteral("App-Only listens to keys typed in ProTrail's own window while it has focus; "
+                       "System-Wide listens everywhere except the excluded processes."));
+    kb_opts->addWidget(d_->chk_suppress_sensitive);
+    kb_opts->addStretch(1);
+    kb->addLayout(kb_opts);
+
+    auto* scope_row = new QHBoxLayout();
+    scope_row->setSpacing(theme::controlPadPx());
+    scope_row->addWidget(make_row_label(QStringLiteral("Capture Scope")));
+    d_->combo_keyboard_scope = new QComboBox();
+    d_->combo_keyboard_scope->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    d_->combo_keyboard_scope->addItem(QStringLiteral("App-Only (ProTrail windows only - Default)"),
+                                      static_cast<int>(ptd::KeyboardScope::AppOnly));
+    d_->combo_keyboard_scope->addItem(QStringLiteral("System-Wide (Passive background Raw Input - Opt-In)"),
+                                      static_cast<int>(ptd::KeyboardScope::SystemWide));
+    scope_row->addWidget(d_->combo_keyboard_scope, 1);
+    kb->addLayout(scope_row);
+
+    d_->lbl_keyboard_scope_info = new QLabel(
+        QStringLiteral("System-wide mode is OFF by default. When enabled, ProTrail uses passive Windows "
+                       "Raw Input (never intercepts, blocks, logs, or reads clipboard/typed text). "
+                       "Some OEM/firmware media keys are not observable by Windows."));
+    d_->lbl_keyboard_scope_info->setWordWrap(true);
+    d_->lbl_keyboard_scope_info->setObjectName(QStringLiteral("hintLabel"));
+    kb->addWidget(d_->lbl_keyboard_scope_info);
+
+    // Per-process exclusion list for system-wide keyboard mode
+    auto* excl_row = new QHBoxLayout();
+    excl_row->setSpacing(theme::controlPadPx());
+    d_->edit_excluded_proc = new QLineEdit();
+    d_->edit_excluded_proc->setPlaceholderText(QStringLiteral("Exclude process (e.g. keepass.exe)"));
+    d_->btn_add_excluded_proc = new QPushButton(QStringLiteral("Add Exclusion"));
+    d_->btn_remove_excluded_proc = new QPushButton(QStringLiteral("Remove"));
+    excl_row->addWidget(d_->edit_excluded_proc, 1);
+    excl_row->addWidget(d_->btn_add_excluded_proc);
+    excl_row->addWidget(d_->btn_remove_excluded_proc);
+    kb->addLayout(excl_row);
+
+    d_->list_excluded_procs = new QListWidget();
+    d_->list_excluded_procs->setMaximumHeight(54);
+    kb->addWidget(d_->list_excluded_procs);
+
+    // 5. KEYBOARD, SHORTCUT & APPLICATION EVENT BROWSER (Sections 2, 8, 9, 11)
+    QVBoxLayout* evb = nullptr;
+    lay->addWidget(begin_section(QStringLiteral("EVENTS & SHORTCUTS"), evb));
+
+    auto* cat_row = new QHBoxLayout();
+    cat_row->setSpacing(theme::controlPadPx());
+    cat_row->addWidget(make_row_label(QStringLiteral("Category")));
+    d_->combo_event_category = new QComboBox();
+    d_->combo_event_category->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    d_->combo_event_category->addItem(QStringLiteral("All Categories"), -1);
+    for (int c = 0; c < static_cast<int>(ptd::SoundEventCategory::Count); ++c) {
+        const auto cat = static_cast<ptd::SoundEventCategory>(c);
+        d_->combo_event_category->addItem(
+            QString::fromLatin1(ptd::sound_event_category_label(cat)), c);
+    }
+    // Default to Typing category so hundreds of F-keys don't flood an ungrouped flat list
+    d_->combo_event_category->setCurrentIndex(1);
+    d_->btn_reset_category = new QPushButton(QStringLiteral("Reset Category"));
+    cat_row->addWidget(d_->combo_event_category, 1);
+    cat_row->addWidget(d_->btn_reset_category);
+    evb->addLayout(cat_row);
+
+    d_->edit_event_search = new QLineEdit();
+    d_->edit_event_search->setPlaceholderText(QStringLiteral("Search events by name or ID (e.g. Copy, Ctrl+C, Backspace)..."));
+    d_->edit_event_search->setClearButtonEnabled(true);
+    evb->addWidget(d_->edit_event_search);
+
+    d_->list_sound_events = new QListWidget();
+    d_->list_sound_events->setUniformItemSizes(true);
+    d_->list_sound_events->setMinimumHeight(140);
+    evb->addWidget(d_->list_sound_events);
+
+    // Selected Event Inspector & Per-Event Audio Controls (Section 8)
+    d_->lbl_selected_event_title = new QLabel(QStringLiteral("Selected Event: Generic Typing (typing.generic)"));
+    d_->lbl_selected_event_title->setWordWrap(true);
+    evb->addWidget(d_->lbl_selected_event_title);
+
+    d_->lbl_selected_event_note = new QLabel();
+    d_->lbl_selected_event_note->setWordWrap(true);
+    d_->lbl_selected_event_note->setObjectName(QStringLiteral("hintLabel"));
+    d_->lbl_selected_event_note->setVisible(false);
+    evb->addWidget(d_->lbl_selected_event_note);
+
+    auto* ev_top_row = new QHBoxLayout();
+    ev_top_row->setSpacing(theme::controlPadPx());
+    d_->chk_event_enabled = new QCheckBox(QStringLiteral("Event Enabled"));
+    d_->chk_event_use_pool = new QCheckBox(QStringLiteral("Use Random Pool"));
+    d_->btn_event_preview = new QPushButton(QStringLiteral("Preview Event"));
+    d_->btn_event_reset = new QPushButton(QStringLiteral("Reset Event"));
+    ev_top_row->addWidget(d_->chk_event_enabled);
+    ev_top_row->addWidget(d_->chk_event_use_pool);
+    ev_top_row->addStretch(1);
+    ev_top_row->addWidget(d_->btn_event_preview);
+    ev_top_row->addWidget(d_->btn_event_reset);
+    evb->addLayout(ev_top_row);
+
+    auto* ev_snd_row = new QHBoxLayout();
+    ev_snd_row->setSpacing(theme::controlPadPx());
+    ev_snd_row->addWidget(make_row_label(QStringLiteral("Assigned WAV")));
+    d_->combo_event_sound = new QComboBox();
+    d_->combo_event_sound->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    d_->btn_event_fav_toggle = new QPushButton(QStringLiteral("Fav"));
+    d_->btn_event_fav_toggle->setFixedWidth(48);
+    ev_snd_row->addWidget(d_->combo_event_sound, 1);
+    ev_snd_row->addWidget(d_->btn_event_fav_toggle);
+    evb->addLayout(ev_snd_row);
+
+    auto* ev_pol_row = new QHBoxLayout();
+    ev_pol_row->setSpacing(theme::controlPadPx());
+    ev_pol_row->addWidget(make_row_label(QStringLiteral("Policy / Scope")));
+    d_->combo_event_policy = new QComboBox();
+    d_->combo_event_policy->addItem(QStringLiteral("Inherit Category"), static_cast<int>(ptd::PlaybackPolicy::Inherit));
+    d_->combo_event_policy->addItem(QStringLiteral("Stack"), static_cast<int>(ptd::PlaybackPolicy::Stack));
+    d_->combo_event_policy->addItem(QStringLiteral("Override"), static_cast<int>(ptd::PlaybackPolicy::Override));
+    d_->combo_event_policy->addItem(QStringLiteral("Cut"), static_cast<int>(ptd::PlaybackPolicy::Cut));
+    d_->combo_event_policy->addItem(QStringLiteral("Queue"), static_cast<int>(ptd::PlaybackPolicy::Queue));
+    d_->combo_event_policy->addItem(QStringLiteral("Coalesce"), static_cast<int>(ptd::PlaybackPolicy::Coalesce));
+
+    d_->combo_event_scope = new QComboBox();
+    d_->combo_event_scope->addItem(QStringLiteral("Inherit Scope"), static_cast<int>(ptd::InterruptScope::Inherit));
+    d_->combo_event_scope->addItem(QStringLiteral("Same Event"), static_cast<int>(ptd::InterruptScope::SameEvent));
+    d_->combo_event_scope->addItem(QStringLiteral("Same Group"), static_cast<int>(ptd::InterruptScope::SameGroup));
+    d_->combo_event_scope->addItem(QStringLiteral("Global"), static_cast<int>(ptd::InterruptScope::Global));
+    ev_pol_row->addWidget(d_->combo_event_policy, 1);
+    ev_pol_row->addWidget(d_->combo_event_scope, 1);
+    evb->addLayout(ev_pol_row);
+
+    d_->event_gain_db = new SliderSpin(
+        "Gain", ptd::EventSoundConfig::kMinGainDb,
+        ptd::EventSoundConfig::kMaxGainDb, 0.5, 1, " dB");
+    d_->event_cooldown_ms = new SliderSpin(
+        "Cooldown", 0.0, 1000.0, 5.0, 0, " ms");
+    d_->event_priority = new SliderSpin(
+        "Priority", ptd::EventSoundConfig::kMinPriority,
+        ptd::EventSoundConfig::kMaxPriority, 1.0, 0, "");
+    evb->addWidget(d_->event_gain_db);
+    evb->addWidget(d_->event_cooldown_ms);
+    evb->addWidget(d_->event_priority);
+
+    // Expandable Advanced Event Controls (Section 8)
+    d_->chk_show_advanced_event = new QCheckBox(QStringLiteral("Show Advanced Event Controls (Fade, Polyphony, Pitch, Normalization)"));
+    evb->addWidget(d_->chk_show_advanced_event);
+
+    d_->advanced_event_panel = new QWidget();
+    auto* adv_ev_lay = new QVBoxLayout(d_->advanced_event_panel);
+    adv_ev_lay->setContentsMargins(0, 0, 0, 0);
+    adv_ev_lay->setSpacing(theme::controlPadPx());
+    d_->event_fade_in_ms = new SliderSpin("Fade In", 0.0, ptd::EventSoundConfig::kMaxFadeMs, 5.0, 0, " ms");
+    d_->event_fade_out_ms = new SliderSpin("Fade Out", 0.0, ptd::EventSoundConfig::kMaxFadeMs, 5.0, 0, " ms");
+    d_->event_min_retrigger_ms = new SliderSpin("Min Retrigger", 0.0, 1000.0, 5.0, 0, " ms");
+    d_->event_polyphony = new SliderSpin("Polyphony", ptd::EventSoundConfig::kMinPolyphony, ptd::EventSoundConfig::kMaxPolyphony, 1.0, 0, "");
+    d_->event_pitch_var = new SliderSpin("Pitch Var", 0.0, ptd::EventSoundConfig::kMaxPitchVariation * 100.0, 1.0, 0, "%");
+    auto* adv_chk_row = new QHBoxLayout();
+    d_->chk_event_no_repeat = new QCheckBox(QStringLiteral("No Immediate Pool Repeat"));
+    d_->chk_event_norm_override = new QCheckBox(QStringLiteral("Override Normalization"));
+    d_->chk_event_norm_enabled = new QCheckBox(QStringLiteral("Normalize"));
+    adv_chk_row->addWidget(d_->chk_event_no_repeat);
+    adv_chk_row->addWidget(d_->chk_event_norm_override);
+    adv_chk_row->addWidget(d_->chk_event_norm_enabled);
+    adv_chk_row->addStretch(1);
+    adv_ev_lay->addWidget(d_->event_fade_in_ms);
+    adv_ev_lay->addWidget(d_->event_fade_out_ms);
+    adv_ev_lay->addWidget(d_->event_min_retrigger_ms);
+    adv_ev_lay->addWidget(d_->event_polyphony);
+    adv_ev_lay->addWidget(d_->event_pitch_var);
+    adv_ev_lay->addLayout(adv_chk_row);
+
+    // T-121 (Gap F): truthful reporting of backend DSP limitations. QSoundEffect
+    // lacks real-time DSP pitch shifting, fading, and normalization.
+    d_->event_fade_in_ms->setEnabled(false);
+    d_->event_fade_in_ms->setToolTip(QStringLiteral("DSP fade-in is not supported by the QSoundEffect audio backend."));
+    d_->event_fade_out_ms->setEnabled(false);
+    d_->event_fade_out_ms->setToolTip(QStringLiteral("DSP fade-out is not supported by the QSoundEffect audio backend."));
+    d_->event_pitch_var->setEnabled(false);
+    d_->event_pitch_var->setToolTip(QStringLiteral("DSP pitch variation is not supported by the QSoundEffect audio backend."));
+    d_->chk_event_norm_override->setEnabled(false);
+    d_->chk_event_norm_override->setToolTip(QStringLiteral("DSP normalization is not supported by the QSoundEffect audio backend."));
+    d_->chk_event_norm_enabled->setEnabled(false);
+    d_->chk_event_norm_enabled->setToolTip(QStringLiteral("DSP normalization is not supported by the QSoundEffect audio backend."));
+
+    d_->advanced_event_panel->setVisible(false);
+    evb->addWidget(d_->advanced_event_panel);
+
+    // Random Sound Pool Editor (Section 9: up to 10 entries, weights, gain, reorder, preview)
+    d_->pool_editor_panel = new QWidget();
+    auto* pool_lay = new QVBoxLayout(d_->pool_editor_panel);
+    pool_lay->setContentsMargins(0, 0, 0, 0);
+    pool_lay->setSpacing(theme::controlPadPx());
+    pool_lay->addWidget(new QLabel(QStringLiteral("Random Sound Pool (up to 10 entries, auto-normalized weights):")));
+    d_->list_pool_entries = new QListWidget();
+    d_->list_pool_entries->setMaximumHeight(96);
+    pool_lay->addWidget(d_->list_pool_entries);
+
+    auto* pool_add_row = new QHBoxLayout();
+    pool_add_row->setSpacing(theme::controlPadPx());
+    d_->combo_pool_add_sound = new QComboBox();
+    d_->combo_pool_add_sound->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    d_->btn_pool_add = new QPushButton(QStringLiteral("Add"));
+    d_->btn_pool_remove = new QPushButton(QStringLiteral("Remove"));
+    d_->btn_pool_up = new QPushButton(QStringLiteral("Up"));
+    d_->btn_pool_down = new QPushButton(QStringLiteral("Down"));
+    pool_add_row->addWidget(d_->combo_pool_add_sound, 1);
+    pool_add_row->addWidget(d_->btn_pool_add);
+    pool_add_row->addWidget(d_->btn_pool_remove);
+    pool_add_row->addWidget(d_->btn_pool_up);
+    pool_add_row->addWidget(d_->btn_pool_down);
+    pool_lay->addLayout(pool_add_row);
+
+    auto* pool_item_row = new QHBoxLayout();
+    pool_item_row->setSpacing(theme::controlPadPx());
+    d_->chk_pool_entry_enabled = new QCheckBox(QStringLiteral("Entry Enabled"));
+    d_->btn_pool_preview_entry = new QPushButton(QStringLiteral("Preview Entry"));
+    d_->btn_pool_preview_random = new QPushButton(QStringLiteral("Preview Pool"));
+    pool_item_row->addWidget(d_->chk_pool_entry_enabled);
+    pool_item_row->addStretch(1);
+    pool_item_row->addWidget(d_->btn_pool_preview_entry);
+    pool_item_row->addWidget(d_->btn_pool_preview_random);
+    pool_lay->addLayout(pool_item_row);
+
+    d_->pool_entry_weight = new SliderSpin("Entry Weight", 0.1, 10.0, 0.1, 1, "x");
+    d_->pool_entry_gain_db = new SliderSpin("Entry Gain", ptd::EventSoundConfig::kMinGainDb, ptd::EventSoundConfig::kMaxGainDb, 0.5, 1, " dB");
+    pool_lay->addWidget(d_->pool_entry_weight);
+    pool_lay->addWidget(d_->pool_entry_gain_db);
+    evb->addWidget(d_->pool_editor_panel);
+
+    // 6. CUSTOM SHORTCUT ASSIGNMENT EDITOR (Section 4)
+    QVBoxLayout* csc = nullptr;
+    lay->addWidget(begin_section(QStringLiteral("CUSTOM SHORTCUTS"), csc));
+    auto* csc_row = new QHBoxLayout();
+    csc_row->setSpacing(theme::controlPadPx());
+    d_->edit_custom_sc_name = new QLineEdit();
+    d_->edit_custom_sc_name->setPlaceholderText(QStringLiteral("Name (e.g. Build)"));
+    d_->edit_custom_sc_chord = new QLineEdit();
+    d_->edit_custom_sc_chord->setPlaceholderText(QStringLiteral("Chord (e.g. Ctrl+Shift+B)"));
+    d_->chk_custom_sc_app = new QCheckBox(QStringLiteral("App Shortcut"));
+    d_->btn_custom_sc_add = new QPushButton(QStringLiteral("Add"));
+    d_->btn_custom_sc_remove = new QPushButton(QStringLiteral("Remove"));
+    csc_row->addWidget(d_->edit_custom_sc_name, 1);
+    csc_row->addWidget(d_->edit_custom_sc_chord, 1);
+    csc_row->addWidget(d_->chk_custom_sc_app);
+    csc_row->addWidget(d_->btn_custom_sc_add);
+    csc_row->addWidget(d_->btn_custom_sc_remove);
+    csc->addLayout(csc_row);
+    d_->list_custom_shortcuts = new QListWidget();
+    d_->list_custom_shortcuts->setMaximumHeight(64);
+    csc->addWidget(d_->list_custom_shortcuts);
+
+    // 7. SCROLL SOUND SYSTEM & LEGACY MOUSE ASSIGNMENTS (Section 5 & T-80)
+    QVBoxLayout* sc_sec = nullptr;
+    lay->addWidget(begin_section(QStringLiteral("SCROLL SOUND SYSTEM"), sc_sec));
+    d_->chk_horizontal_scroll = new QCheckBox(QStringLiteral("Enable Horizontal Scroll Sounds (Scroll Left / Right)"));
+    sc_sec->addWidget(d_->chk_horizontal_scroll);
+    d_->scroll_sensitivity = new SliderSpin("Sensitivity", 25.0, 400.0, 5.0, 0, "%");
+    d_->scroll_cooldown = new SliderSpin("Scroll Cooldown", 0.0, 250.0, 5.0, 0, " ms");
+    d_->scroll_max_rate = new SliderSpin("Max Scroll Rate", 1.0, 120.0, 1.0, 0, " Hz");
+    d_->scroll_pitch_var = new SliderSpin("Pitch Variation", 0.0, 50.0, 1.0, 0, "%");
+    d_->scroll_pitch_var->setEnabled(false);
+    d_->scroll_pitch_var->setToolTip(QStringLiteral("DSP pitch variation is not supported by the QSoundEffect audio backend."));
+    sc_sec->addWidget(d_->scroll_sensitivity);
+    sc_sec->addWidget(d_->scroll_cooldown);
+    sc_sec->addWidget(d_->scroll_max_rate);
+    sc_sec->addWidget(d_->scroll_pitch_var);
+
+    // EVENT SOUNDS: one assignment per normalized mouse event (preserved for T-80 compatibility).
+    QVBoxLayout* as = nullptr;
+    lay->addWidget(begin_section(QStringLiteral("EVENT SOUNDS"), as));
+    static const char* kEventLabels[ptd::kAudioEventCount] = {
+        "Left Down", "Left Up", "Right Down", "Right Up",
+        "Middle Down", "Middle Up", "Scroll Up", "Scroll Down"};
+    for (int i = 0; i < ptd::kAudioEventCount; ++i) {
+        auto* row = new QHBoxLayout();
+        row->setSpacing(theme::controlPadPx());
+        auto* lbl = make_row_label(QString::fromUtf8(kEventLabels[i]));
+        auto* combo = new QComboBox();
+        combo->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        combo->addItem(QStringLiteral("None"), QString());
+        auto* play = new QPushButton("Play");
+        play->setFixedWidth(60);
+        row->addWidget(lbl);
+        row->addWidget(combo, 1);
+        row->addWidget(play);
+        as->addLayout(row);
+        d_->sound_assign[i] = combo;
+        const int index = i;
+        connect(combo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+                this, [this, index] { on_sound_assignment_changed(index); });
+        connect(play, &QPushButton::clicked, this, [this, index] {
+            const QString id = d_->sound_assign[index]->currentData().toString();
+            if (!id.isEmpty()) emit sound_preview_requested(id.toStdString());
+        });
+    }
+
+    refresh_sound_catalog();
+    refresh_keyboard_event_list();
+    populate_event_editor_for(d_->selected_event_id);
+    lay->addStretch();
+}
+
+// Rebuilds the catalog list and every assignment combo from the shipped sound
+// directory. Existing selections are re-applied afterwards by set_audio_widgets.
+void SettingsWindow::refresh_sound_catalog() {
+    const QStringList ids = ptd::SoundCatalog::sound_ids();
+    const QString filter = d_->sound_search->text().trimmed();
+
+    d_->sound_catalog->setUpdatesEnabled(false);
+    d_->sound_catalog->clear();
+    for (const QString& id : ids) {
+        if (!filter.isEmpty() && !id.contains(filter, Qt::CaseInsensitive)) continue;
+        auto* item = new QListWidgetItem(id, d_->sound_catalog);
+        item->setData(Qt::UserRole, id);
+    }
+    d_->sound_catalog->setUpdatesEnabled(true);
+
+    // Only rebuild combo item lists if the underlying catalog changed
+    if (d_->cached_catalog_ids != ids) {
+        d_->cached_catalog_ids = ids;
+        auto rebuild_wav_combo = [&](QComboBox* combo, bool include_none) {
+            if (!combo) return;
+            const QString selected = combo->currentData().toString();
+            const QSignalBlocker blocker(combo);
+            combo->clear();
+            if (include_none) combo->addItem(QStringLiteral("None"), QString());
+            for (const QString& id : ids) combo->addItem(id, id);
+            if (!selected.isEmpty()) {
+                const int at = combo->findData(selected);
+                if (at >= 0) {
+                    combo->setCurrentIndex(at);
+                } else {
+                    combo->addItem(selected + QStringLiteral(" (missing)"), selected);
+                    combo->setCurrentIndex(combo->count() - 1);
+                }
+            }
+        };
+        for (int i = 0; i < ptd::kAudioEventCount; ++i) {
+            rebuild_wav_combo(d_->sound_assign[i], true);
+        }
+        rebuild_wav_combo(d_->combo_event_sound, true);
+        rebuild_wav_combo(d_->combo_pool_add_sound, false);
+    } else {
+        // Ensure missing items are still preserved on current selections
+        for (int i = 0; i < ptd::kAudioEventCount; ++i) {
+            QComboBox* combo = d_->sound_assign[i];
+            if (!combo) continue;
+            const QString selected = combo->currentData().toString();
+            if (!selected.isEmpty() && combo->findData(selected) < 0) {
+                const QSignalBlocker blocker(combo);
+                combo->addItem(selected + QStringLiteral(" (missing)"), selected);
+                combo->setCurrentIndex(combo->count() - 1);
+            }
+        }
+    }
+
+    refresh_sound_favorites();
+    refresh_sound_recent();
+}
+
+void SettingsWindow::refresh_sound_favorites() {
+    if (d_->sound_favorites == nullptr) return;
+    const QStringList& ids = d_->cached_catalog_ids;
+    const QSignalBlocker blocker(d_->sound_favorites);
+    d_->sound_favorites->clear();
+    for (const std::string& raw : audio_cfg_.favorites) {
+        const QString id = QString::fromStdString(raw);
+        const bool present = ids.contains(id);
+        auto* item = new QListWidgetItem(
+            present ? id : id + QStringLiteral(" (missing)"), d_->sound_favorites);
+        item->setData(Qt::UserRole, id);
+    }
+}
+
+void SettingsWindow::refresh_sound_recent() {
+    if (d_->sound_recent == nullptr) return;
+    const QStringList& ids = d_->cached_catalog_ids;
+    const QSignalBlocker blocker(d_->sound_recent);
+    d_->sound_recent->clear();
+    for (const std::string& raw : audio_cfg_.recent_sounds) {
+        const QString id = QString::fromStdString(raw);
+        const bool present = ids.contains(id);
+        auto* item = new QListWidgetItem(
+            present ? id : id + QStringLiteral(" (missing)"), d_->sound_recent);
+        item->setData(Qt::UserRole, id);
+    }
+}
+
+void SettingsWindow::record_recent_sound(const std::string& sound_id) {
+    const std::string clean = ptd::sanitize_sound_id(sound_id);
+    if (clean.empty()) return;
+    auto& rec = audio_cfg_.recent_sounds;
+    rec.erase(std::remove(rec.begin(), rec.end(), clean), rec.end());
+    rec.insert(rec.begin(), clean);
+    if (static_cast<int>(rec.size()) > ptd::AudioConfig::kMaxRecentSounds) {
+        rec.resize(static_cast<std::size_t>(ptd::AudioConfig::kMaxRecentSounds));
+    }
+    refresh_sound_recent();
+}
+
+void SettingsWindow::schedule_catalog_audition(const std::string& sound_id) {
+    if (!audio_cfg_.preview_on_selection || sound_id.empty()) return;
+    if (audio_cfg_.preview_debounce_ms <= 0 || !d_->preview_debounce_timer) {
+        emit sound_preview_requested(sound_id);
+        return;
+    }
+    // Immediate audition for first selection; if user is rapidly scrolling/cycling
+    // while debounce timer is already active, cancel stale pending preview and coalesce!
+    if (!d_->preview_debounce_timer->isActive()) {
+        d_->pending_preview_sound_id.clear();
+        emit sound_preview_requested(sound_id);
+        d_->preview_debounce_timer->start(audio_cfg_.preview_debounce_ms);
+    } else {
+        d_->pending_preview_sound_id = sound_id;
+        d_->preview_debounce_timer->start(audio_cfg_.preview_debounce_ms);
+    }
+}
+
+void SettingsWindow::refresh_keyboard_event_list() {
+    if (!d_->list_sound_events) return;
+    const int cat_filter = d_->combo_event_category ? d_->combo_event_category->currentData().toInt() : -1;
+    const QString search = d_->edit_event_search ? d_->edit_event_search->text().trimmed() : QString();
+
+    const QSignalBlocker blocker(d_->list_sound_events);
+    d_->list_sound_events->setUpdatesEnabled(false);
+    d_->list_sound_events->clear();
+
+    auto format_event_row = [&](const std::string& cid, const QString& display_name,
+                                const QString& cat_label, bool observable) {
+        const ptd::EventSoundConfig ec = audio_cfg_.effective_event_config(cid);
+        QString summary;
+        if (!ec.enabled) {
+            summary = QStringLiteral("Off");
+        } else if (ec.use_pool && !ec.pool.empty()) {
+            summary = QStringLiteral("Pool (%1)").arg(ec.pool.size());
+        } else if (!ec.sound_id.empty()) {
+            const QString qid = QString::fromStdString(ec.sound_id);
+            const bool exists = d_->cached_catalog_ids.contains(qid);
+            summary = exists ? qid : (qid + QStringLiteral(" (missing)"));
+        } else {
+            summary = QStringLiteral("None");
+        }
+        QString label = QStringLiteral("[%1] %2 — %3").arg(cat_label, display_name, summary);
+        if (!observable) {
+            label += QStringLiteral(" [OS/HW dependent]");
+        }
+        auto* item = new QListWidgetItem(label, d_->list_sound_events);
+        item->setData(Qt::UserRole, QString::fromStdString(cid));
+        if (cid == d_->selected_event_id) {
+            d_->list_sound_events->setCurrentItem(item);
+        }
+    };
+
+    for (const auto& desc : ptd::canonical_sound_events()) {
+        if (cat_filter >= 0 && static_cast<int>(desc.category) != cat_filter) {
+            // When searching by text, search across all categories so user finds any event
+            if (search.isEmpty()) continue;
+        }
+        const QString qid = QString::fromLatin1(desc.id);
+        const QString qname = QString::fromLatin1(desc.display_name);
+        const QString qcat = QString::fromLatin1(ptd::sound_event_category_label(desc.category));
+        if (!search.isEmpty()) {
+            if (!qid.contains(search, Qt::CaseInsensitive) &&
+                !qname.contains(search, Qt::CaseInsensitive) &&
+                !qcat.contains(search, Qt::CaseInsensitive)) {
+                continue;
+            }
+        }
+        format_event_row(desc.id, qname, qcat, desc.observable_guarantee);
+    }
+
+    // Custom shortcuts in Custom category (or matching search)
+    if (cat_filter < 0 || cat_filter == static_cast<int>(ptd::SoundEventCategory::Custom) || !search.isEmpty()) {
+        for (const auto& cs : audio_cfg_.custom_shortcuts) {
+            const QString qid = QString::fromStdString(cs.id);
+            const QString qname = QStringLiteral("%1 (%2)").arg(
+                QString::fromStdString(cs.display_name),
+                QString::fromStdString(cs.chord));
+            if (!search.isEmpty() &&
+                !qid.contains(search, Qt::CaseInsensitive) &&
+                !qname.contains(search, Qt::CaseInsensitive)) {
+                continue;
+            }
+            format_event_row(cs.id, qname, QStringLiteral("Custom"), true);
+        }
+    }
+
+    d_->list_sound_events->setUpdatesEnabled(true);
+}
+
+void SettingsWindow::populate_event_editor_for(const std::string& canonical_id) {
+    const std::string cid = ptd::canonicalize_sound_event_id(canonical_id);
+    if (cid.empty()) return;
+    d_->selected_event_id = cid;
+    const ptd::SoundEventDescriptor* desc = ptd::find_sound_event_descriptor(cid);
+    const ptd::EventSoundConfig ec = audio_cfg_.effective_event_config(cid);
+
+    if (d_->lbl_selected_event_title) {
+        const QString disp = desc ? QString::fromLatin1(desc->display_name)
+                                  : QString::fromStdString(cid);
+        d_->lbl_selected_event_title->setText(
+            QStringLiteral("Selected Event: %1 (%2)").arg(disp, QString::fromStdString(cid)));
+    }
+    if (d_->lbl_selected_event_note) {
+        if (desc && !desc->observable_guarantee) {
+            d_->lbl_selected_event_note->setText(
+                QStringLiteral("Note: This key/shortcut may be intercepted by Windows or OEM firmware before reaching applications."));
+            d_->lbl_selected_event_note->setVisible(true);
+        } else {
+            d_->lbl_selected_event_note->setVisible(false);
+        }
+    }
+
+    QSignalBlocker b_en(d_->chk_event_enabled);
+    QSignalBlocker b_pool(d_->chk_event_use_pool);
+    QSignalBlocker b_snd(d_->combo_event_sound);
+    QSignalBlocker b_pol(d_->combo_event_policy);
+    QSignalBlocker b_scp(d_->combo_event_scope);
+    QSignalBlocker b_gn(d_->event_gain_db);
+    QSignalBlocker b_cd(d_->event_cooldown_ms);
+    QSignalBlocker b_pr(d_->event_priority);
+    QSignalBlocker b_fi(d_->event_fade_in_ms);
+    QSignalBlocker b_fo(d_->event_fade_out_ms);
+    QSignalBlocker b_mr(d_->event_min_retrigger_ms);
+    QSignalBlocker b_po(d_->event_polyphony);
+    QSignalBlocker b_pv(d_->event_pitch_var);
+    QSignalBlocker b_nr(d_->chk_event_no_repeat);
+    QSignalBlocker b_no(d_->chk_event_norm_override);
+    QSignalBlocker b_ne(d_->chk_event_norm_enabled);
+
+    d_->chk_event_enabled->setChecked(ec.enabled);
+    d_->chk_event_use_pool->setChecked(ec.use_pool);
+
+    // Populate combo_event_sound selection (showing (missing) if absent from catalog)
+    {
+        for (int i = d_->combo_event_sound->count() - 1; i >= 1; --i) {
+            if (d_->combo_event_sound->itemText(i).endsWith(QStringLiteral(" (missing)"))) {
+                d_->combo_event_sound->removeItem(i);
+            }
+        }
+        if (ec.sound_id.empty()) {
+            d_->combo_event_sound->setCurrentIndex(0);
+        } else {
+            const QString qid = QString::fromStdString(ec.sound_id);
+            const int at = d_->combo_event_sound->findData(qid);
+            if (at >= 0) {
+                d_->combo_event_sound->setCurrentIndex(at);
+            } else {
+                d_->combo_event_sound->addItem(qid + QStringLiteral(" (missing)"), qid);
+                d_->combo_event_sound->setCurrentIndex(d_->combo_event_sound->count() - 1);
+            }
+        }
+    }
+
+    const int pol_idx = d_->combo_event_policy->findData(static_cast<int>(ec.policy));
+    d_->combo_event_policy->setCurrentIndex(pol_idx >= 0 ? pol_idx : 0);
+    const int scp_idx = d_->combo_event_scope->findData(static_cast<int>(ec.interrupt_scope));
+    d_->combo_event_scope->setCurrentIndex(scp_idx >= 0 ? scp_idx : 0);
+
+    d_->event_gain_db->set_value(ec.gain_db);
+    d_->event_cooldown_ms->set_value(ec.cooldown_ms);
+    d_->event_priority->set_value(ec.priority);
+    d_->event_fade_in_ms->set_value(ec.fade_in_ms);
+    d_->event_fade_out_ms->set_value(ec.fade_out_ms);
+    d_->event_min_retrigger_ms->set_value(ec.min_retrigger_ms);
+    d_->event_polyphony->set_value(ec.polyphony_allowance);
+    d_->event_pitch_var->set_value(ec.pitch_variation * 100.0);
+    d_->chk_event_no_repeat->setChecked(ec.no_immediate_repeat);
+    d_->chk_event_norm_override->setChecked(ec.normalize_override);
+    d_->chk_event_norm_enabled->setChecked(ec.normalize_enabled);
+
+    // Populate Random Pool list
+    if (d_->list_pool_entries) {
+        const QSignalBlocker bp(d_->list_pool_entries);
+        d_->list_pool_entries->clear();
+        const std::vector<float> norm_w = ptd::normalized_pool_weights(ec.pool);
+        for (std::size_t i = 0; i < ec.pool.size(); ++i) {
+            const auto& pe = ec.pool[i];
+            const QString qid = QString::fromStdString(pe.sound_id);
+            const bool exists = d_->cached_catalog_ids.contains(qid);
+            const int pct = static_cast<int>(std::lround(norm_w[i] * 100.0f));
+            const QString text = QStringLiteral("%1%2 [w=%3 (%4%), %5 dB]%6")
+                .arg(pe.enabled ? QString() : QStringLiteral("[OFF] "))
+                .arg(qid)
+                .arg(pe.weight, 0, 'f', 1)
+                .arg(pct)
+                .arg(pe.gain_db, 0, 'f', 1)
+                .arg(exists ? QString() : QStringLiteral(" (missing)"));
+            auto* item = new QListWidgetItem(text, d_->list_pool_entries);
+            item->setData(Qt::UserRole, static_cast<int>(i));
+        }
+        if (d_->list_pool_entries->count() > 0) {
+            d_->list_pool_entries->setCurrentRow(0);
+            const auto& first = ec.pool[0];
+            QSignalBlocker bpe(d_->chk_pool_entry_enabled);
+            QSignalBlocker bpw(d_->pool_entry_weight);
+            QSignalBlocker bpg(d_->pool_entry_gain_db);
+            d_->chk_pool_entry_enabled->setChecked(first.enabled);
+            d_->pool_entry_weight->set_value(first.weight);
+            d_->pool_entry_gain_db->set_value(first.gain_db);
+        }
+    }
+}
+
+void SettingsWindow::select_sound_event_for_editing(const QString& canonical_event_id) {
+    const std::string cid = ptd::canonicalize_sound_event_id(canonical_event_id.toStdString());
+    if (cid.empty()) return;
+    populate_event_editor_for(cid);
+    refresh_keyboard_event_list();
+}
+
+QString SettingsWindow::selected_sound_event_id() const {
+    return QString::fromStdString(d_->selected_event_id);
+}
+
+void SettingsWindow::reset_sound_category(ptd::SoundEventCategory cat) {
+    audio_cfg_.reset_category(cat);
+    audio_cfg_ = ptd::AudioConfig::validated(audio_cfg_);
+    set_audio_widgets(audio_cfg_);
+    emit_audio_config();
+}
+
+void SettingsWindow::reset_selected_sound_event() {
+    if (d_->selected_event_id.empty()) return;
+    audio_cfg_.set_event_config(d_->selected_event_id, ptd::EventSoundConfig{});
+    audio_cfg_ = ptd::AudioConfig::validated(audio_cfg_);
+    set_audio_widgets(audio_cfg_);
+    emit_audio_config();
+}
+
+void SettingsWindow::apply_sound_profile_preset(ptd::SoundProfilePreset preset) {
+    std::vector<std::string> avail;
+    for (const QString& qid : d_->cached_catalog_ids) {
+        avail.push_back(qid.toStdString());
+    }
+    audio_cfg_.apply_profile_preset(preset, avail);
+    audio_cfg_ = ptd::AudioConfig::validated(audio_cfg_);
+    set_audio_widgets(audio_cfg_);
+    emit_audio_config();
+}
+
+bool SettingsWindow::import_audio_profile_json(const QByteArray& json, QString* error_msg) {
+    auto imported = ptd::ConfigStorage::deserialize_audio_profile_json(json, audio_cfg_, error_msg);
+    if (!imported) return false;
+    audio_cfg_ = *imported;
+    set_audio_widgets(audio_cfg_);
+    emit_audio_config();
+    return true;
+}
+
+QByteArray SettingsWindow::export_audio_profile_json() const {
+    return ptd::ConfigStorage::serialize_audio_profile_json(audio_cfg_);
+}
+
+bool SettingsWindow::is_browsing_sound_catalog() const {
+    if (!isVisible()) return false;
+    if (!d_->tabs || d_->tabs->currentWidget() != d_->sound_tab) return false;
+    QWidget* fw = focusWidget();
+    if (!fw) return false;
+    return fw == d_->sound_catalog || fw == d_->sound_favorites ||
+           fw == d_->sound_recent || fw == d_->list_sound_events ||
+           (d_->sound_catalog && d_->sound_catalog->isAncestorOf(fw));
+}
+
+// ---- T-80 / T-120 Sound slots ----
+
+void SettingsWindow::on_sound_enabled_toggled() {
+    emit_audio_config();
+}
+
+void SettingsWindow::on_sound_mute_toggled() {
+    emit_audio_config();
+}
+
+void SettingsWindow::on_sound_volume(double) {
+    emit_audio_config();
+}
+
+void SettingsWindow::on_sound_assignment_changed(int index) {
+    if (index < 0 || index >= ptd::kAudioEventCount) return;
+    const QString id = d_->sound_assign[index]->currentData().toString();
+    const std::string sid = id.toStdString();
+    audio_cfg_.sounds[static_cast<std::size_t>(index)] = sid;
+    const std::string cid = ptd::canonicalize_sound_event_id(ptd::audio_event_name(index));
+    ptd::EventSoundConfig ec = audio_cfg_.effective_event_config(cid);
+    ec.sound_id = sid;
+    audio_cfg_.set_event_config(cid, ec);
+    if (!sid.empty()) {
+        record_recent_sound(sid);
+        emit sound_preview_requested(sid);
+    }
+    if (d_->selected_event_id == cid) {
+        populate_event_editor_for(cid);
+    }
+    refresh_keyboard_event_list();
+    emit_audio_config();
+}
+
+void SettingsWindow::on_sound_catalog_selection_changed() {
+    QListWidgetItem* item = d_->sound_catalog->currentItem();
+    if (item == nullptr) return;
+    const std::string sid = item->data(Qt::UserRole).toString().toStdString();
+    record_recent_sound(sid);
+    schedule_catalog_audition(sid);
+}
+
+void SettingsWindow::on_sound_replay_clicked() {
+    QListWidgetItem* item = d_->sound_catalog->currentItem();
+    if (item == nullptr) return;
+    if (d_->preview_debounce_timer) d_->preview_debounce_timer->stop();
+    d_->pending_preview_sound_id.clear();
+    emit sound_preview_requested(item->data(Qt::UserRole).toString().toStdString());
+}
+
+void SettingsWindow::on_sound_stop_clicked() {
+    if (d_->preview_debounce_timer) d_->preview_debounce_timer->stop();
+    d_->pending_preview_sound_id.clear();
+    emit sound_preview_stop_requested();
+}
+
+void SettingsWindow::on_sound_stop_all_clicked() {
+    if (d_->preview_debounce_timer) d_->preview_debounce_timer->stop();
+    d_->pending_preview_sound_id.clear();
+    emit sound_stop_all_requested();
+}
+
+void SettingsWindow::on_sound_catalog_context_menu(const QPoint& pos) {
+    QListWidgetItem* item = d_->sound_catalog->itemAt(pos);
+    if (item == nullptr) return;
+    const QString id = item->data(Qt::UserRole).toString();
+    if (id.isEmpty()) return;
+    QMenu menu(this);
+    const bool is_favorite =
+        std::find(audio_cfg_.favorites.begin(), audio_cfg_.favorites.end(),
+                  id.toStdString()) != audio_cfg_.favorites.end();
+    QAction* toggle = menu.addAction(is_favorite ? QStringLiteral("Remove from Favorites")
+                                                 : QStringLiteral("Add to Favorites"));
+    if (menu.exec(d_->sound_catalog->viewport()->mapToGlobal(pos)) == toggle) {
+        toggle_sound_favorite(id);
+    }
+}
+
+void SettingsWindow::on_sound_favorites_context_menu(const QPoint& pos) {
+    QListWidgetItem* item = d_->sound_favorites->itemAt(pos);
+    if (item == nullptr) return;
+    const QString id = item->data(Qt::UserRole).toString();
+    if (id.isEmpty()) return;
+    QMenu menu(this);
+    QAction* remove = menu.addAction(QStringLiteral("Remove from Favorites"));
+    if (menu.exec(d_->sound_favorites->viewport()->mapToGlobal(pos)) == remove) {
+        toggle_sound_favorite(id);
+    }
+}
+
+void SettingsWindow::toggle_sound_favorite(const QString& id) {
+    const std::string sid = id.toStdString();
+    auto it = std::find(audio_cfg_.favorites.begin(), audio_cfg_.favorites.end(), sid);
+    if (it == audio_cfg_.favorites.end()) {
+        audio_cfg_.favorites.push_back(sid);
+    } else {
+        audio_cfg_.favorites.erase(it);
+    }
+    audio_cfg_ = ptd::AudioConfig::validated(audio_cfg_);
+    refresh_sound_favorites();
+    emit_audio_config();
+}
+
+QStringList SettingsWindow::favorites_for_tests() const {
+    QStringList out;
+    if (d_->sound_favorites == nullptr) return out;
+    for (int i = 0; i < d_->sound_favorites->count(); ++i) {
+        out << d_->sound_favorites->item(i)->data(Qt::UserRole).toString();
+    }
+    return out;
+}
+
+// Silent population: widgets carry audio_cfg_ without publishing or previewing.
+void SettingsWindow::set_audio_widgets(const ptd::AudioConfig& c) {
+    if (d_->preview_debounce_timer) d_->preview_debounce_timer->stop();
+    d_->pending_preview_sound_id.clear();
+
+    QSignalBlocker be(d_->chk_sound_enabled);
+    QSignalBlocker bm(d_->chk_sound_muted);
+    QSignalBlocker bv(d_->sound_volume);
+    QSignalBlocker bp(d_->chk_preview_on_select);
+    QSignalBlocker bk(d_->chk_keyboard_enabled);
+    QSignalBlocker bks(d_->combo_keyboard_scope);
+    QSignalBlocker bt(d_->chk_typing_sounds);
+    QSignalBlocker bmt(d_->chk_modifier_tap_sounds);
+    QSignalBlocker bsr(d_->chk_suppress_repeat_typing);
+    QSignalBlocker bss(d_->chk_suppress_sensitive);
+    QSignalBlocker bhs(d_->chk_horizontal_scroll);
+    QSignalBlocker bssens(d_->scroll_sensitivity);
+    QSignalBlocker bscd(d_->scroll_cooldown);
+    QSignalBlocker bsmr(d_->scroll_max_rate);
+    QSignalBlocker bspv(d_->scroll_pitch_var);
+    QSignalBlocker bprof(d_->combo_sound_profile);
+
+    d_->chk_sound_enabled->setChecked(c.enabled);
+    d_->chk_sound_muted->setChecked(c.muted);
+    d_->sound_volume->set_value(c.volume * 100.0);
+    if (d_->chk_preview_on_select) d_->chk_preview_on_select->setChecked(c.preview_on_selection);
+
+    if (d_->chk_keyboard_enabled) d_->chk_keyboard_enabled->setChecked(c.keyboard_enabled);
+    if (d_->combo_keyboard_scope) {
+        const int idx = d_->combo_keyboard_scope->findData(static_cast<int>(c.keyboard_scope));
+        d_->combo_keyboard_scope->setCurrentIndex(idx >= 0 ? idx : 0);
+    }
+    if (d_->chk_typing_sounds) d_->chk_typing_sounds->setChecked(c.typing_sounds_enabled);
+    if (d_->chk_modifier_tap_sounds) d_->chk_modifier_tap_sounds->setChecked(c.modifier_tap_sounds_enabled);
+    if (d_->chk_suppress_repeat_typing) d_->chk_suppress_repeat_typing->setChecked(c.suppress_repeat_typing);
+    if (d_->chk_suppress_sensitive) d_->chk_suppress_sensitive->setChecked(c.suppress_sensitive_contexts);
+
+    if (d_->list_excluded_procs) {
+        const QSignalBlocker bex(d_->list_excluded_procs);
+        d_->list_excluded_procs->clear();
+        for (const std::string& proc : c.excluded_processes) {
+            d_->list_excluded_procs->addItem(QString::fromStdString(proc));
+        }
+    }
+
+    if (d_->list_custom_shortcuts) {
+        const QSignalBlocker bcs(d_->list_custom_shortcuts);
+        d_->list_custom_shortcuts->clear();
+        for (const auto& cs : c.custom_shortcuts) {
+            auto* item = new QListWidgetItem(
+                QStringLiteral("%1 [%2]%3")
+                    .arg(QString::fromStdString(cs.display_name),
+                         QString::fromStdString(cs.chord),
+                         cs.is_app_shortcut ? QStringLiteral(" (App)") : QStringLiteral(" (User)")),
+                d_->list_custom_shortcuts);
+            item->setData(Qt::UserRole, QString::fromStdString(cs.id));
+        }
+    }
+
+    if (d_->chk_horizontal_scroll) d_->chk_horizontal_scroll->setChecked(c.horizontal_scroll_enabled);
+    if (d_->scroll_sensitivity) d_->scroll_sensitivity->set_value(c.scroll_sensitivity * 100.0);
+    if (d_->scroll_cooldown) d_->scroll_cooldown->set_value(c.scroll_cooldown_ms);
+    if (d_->scroll_max_rate) d_->scroll_max_rate->set_value(c.scroll_max_rate_hz);
+    if (d_->scroll_pitch_var) d_->scroll_pitch_var->set_value(c.scroll_pitch_variation * 100.0);
+
+    if (d_->combo_sound_profile) {
+        const int idx = d_->combo_sound_profile->findData(static_cast<int>(c.active_profile));
+        d_->combo_sound_profile->setCurrentIndex(idx >= 0 ? idx : 0);
+    }
+
+    for (int i = 0; i < ptd::kAudioEventCount; ++i) {
+        QComboBox* combo = d_->sound_assign[i];
+        const QSignalBlocker blocker(combo);
+        for (int j = combo->count() - 1; j >= 1; --j) {
+            if (combo->itemText(j).endsWith(QStringLiteral(" (missing)"))) {
+                combo->removeItem(j);
+            }
+        }
+        const std::string id = ptd::sanitize_sound_id(c.sounds[static_cast<std::size_t>(i)]);
+        if (id.empty()) {
+            combo->setCurrentIndex(0);
+            continue;
+        }
+        const QString qid = QString::fromStdString(id);
+        const int at = combo->findData(qid);
+        if (at >= 0) {
+            combo->setCurrentIndex(at);
+        } else {
+            combo->addItem(qid + QStringLiteral(" (missing)"), qid);
+            combo->setCurrentIndex(combo->count() - 1);
+        }
+    }
+
+    audio_cfg_ = c;
+    refresh_sound_favorites();
+    refresh_sound_recent();
+    refresh_keyboard_event_list();
+    populate_event_editor_for(d_->selected_event_id);
+}
+
+void SettingsWindow::emit_audio_config() {
+    audio_cfg_.enabled = d_->chk_sound_enabled->isChecked();
+    audio_cfg_.muted = d_->chk_sound_muted->isChecked();
+    audio_cfg_.volume =
+        static_cast<float>(d_->sound_volume->value() / 100.0);
+    if (d_->chk_preview_on_select)
+        audio_cfg_.preview_on_selection = d_->chk_preview_on_select->isChecked();
+    if (d_->chk_keyboard_enabled)
+        audio_cfg_.keyboard_enabled = d_->chk_keyboard_enabled->isChecked();
+    if (d_->combo_keyboard_scope)
+        audio_cfg_.keyboard_scope = static_cast<ptd::KeyboardScope>(d_->combo_keyboard_scope->currentData().toInt());
+    if (d_->chk_typing_sounds)
+        audio_cfg_.typing_sounds_enabled = d_->chk_typing_sounds->isChecked();
+    if (d_->chk_modifier_tap_sounds)
+        audio_cfg_.modifier_tap_sounds_enabled = d_->chk_modifier_tap_sounds->isChecked();
+    if (d_->chk_suppress_repeat_typing)
+        audio_cfg_.suppress_repeat_typing = d_->chk_suppress_repeat_typing->isChecked();
+    if (d_->chk_suppress_sensitive)
+        audio_cfg_.suppress_sensitive_contexts = d_->chk_suppress_sensitive->isChecked();
+    if (d_->chk_horizontal_scroll)
+        audio_cfg_.horizontal_scroll_enabled = d_->chk_horizontal_scroll->isChecked();
+    if (d_->scroll_sensitivity)
+        audio_cfg_.scroll_sensitivity = static_cast<float>(d_->scroll_sensitivity->value() / 100.0);
+    if (d_->scroll_cooldown)
+        audio_cfg_.scroll_cooldown_ms = static_cast<int>(d_->scroll_cooldown->value());
+    if (d_->scroll_max_rate)
+        audio_cfg_.scroll_max_rate_hz = static_cast<int>(d_->scroll_max_rate->value());
+    if (d_->scroll_pitch_var)
+        audio_cfg_.scroll_pitch_variation = static_cast<float>(d_->scroll_pitch_var->value() / 100.0);
+    if (d_->combo_sound_profile)
+        audio_cfg_.active_profile = static_cast<ptd::SoundProfilePreset>(d_->combo_sound_profile->currentData().toInt());
+
+    for (int i = 0; i < ptd::kAudioEventCount; ++i) {
+        audio_cfg_.sounds[static_cast<std::size_t>(i)] =
+            d_->sound_assign[i]->currentData().toString().toStdString();
+    }
+    audio_cfg_ = ptd::AudioConfig::validated(audio_cfg_);
+    emit audio_config_changed(audio_cfg_);
+}
+
 void SettingsWindow::build_click_tab() {
     d_->click_tab = new QWidget();
+    d_->click_tab->setObjectName(QStringLiteral("tab_click"));
     auto* root = new QVBoxLayout(d_->click_tab);
     root->setContentsMargins(theme::groupPadPx(), theme::groupPadPx(),
                              theme::groupPadPx(), theme::groupPadPx());
@@ -1382,6 +2600,555 @@ void SettingsWindow::setup_connections() {
     connect(d_->chk_start_with_windows, &QCheckBox::toggled,
             this, &SettingsWindow::on_start_with_windows_toggled);
     connect(d_->btn_restore_all, &QPushButton::clicked, this, &SettingsWindow::on_restore_all);
+
+    // Sound (T-80)
+    connect(d_->chk_sound_enabled, &QCheckBox::toggled,
+            this, &SettingsWindow::on_sound_enabled_toggled);
+    connect(d_->chk_sound_muted, &QCheckBox::toggled,
+            this, &SettingsWindow::on_sound_mute_toggled);
+    connect(d_->sound_volume, &SliderSpin::value_changed,
+            this, &SettingsWindow::on_sound_volume);
+    connect(d_->sound_search, &QLineEdit::textEdited, this, [this] {
+        refresh_sound_catalog();
+    });
+    connect(d_->sound_catalog, &QListWidget::currentItemChanged, this, [this] {
+        on_sound_catalog_selection_changed();
+    });
+    connect(d_->btn_sound_replay, &QPushButton::clicked,
+            this, &SettingsWindow::on_sound_replay_clicked);
+    connect(d_->btn_sound_stop, &QPushButton::clicked,
+            this, &SettingsWindow::on_sound_stop_clicked);
+    // T-107: Stop All + the Favorites column and its right-click menus.
+    connect(d_->btn_sound_stop_all, &QPushButton::clicked,
+            this, &SettingsWindow::on_sound_stop_all_clicked);
+    connect(d_->sound_catalog, &QListWidget::customContextMenuRequested,
+            this, &SettingsWindow::on_sound_catalog_context_menu);
+    connect(d_->sound_favorites, &QListWidget::customContextMenuRequested,
+            this, &SettingsWindow::on_sound_favorites_context_menu);
+    connect(d_->sound_favorites, &QListWidget::currentItemChanged, this, [this] {
+        QListWidgetItem* item = d_->sound_favorites->currentItem();
+        if (item == nullptr) return;
+        emit sound_preview_requested(item->data(Qt::UserRole).toString().toStdString());
+    });
+
+    // T-120 / T-121: keyboard subsystem + scroll settings. Every control here
+    // only feeds emit_audio_config(), which is the single publication path.
+    if (d_->chk_keyboard_enabled) {
+        connect(d_->chk_keyboard_enabled, &QCheckBox::toggled,
+                this, &SettingsWindow::emit_audio_config);
+    }
+    if (d_->chk_typing_sounds) {
+        connect(d_->chk_typing_sounds, &QCheckBox::toggled,
+                this, &SettingsWindow::emit_audio_config);
+    }
+    if (d_->chk_modifier_tap_sounds) {
+        connect(d_->chk_modifier_tap_sounds, &QCheckBox::toggled,
+                this, &SettingsWindow::emit_audio_config);
+    }
+    if (d_->chk_suppress_repeat_typing) {
+        connect(d_->chk_suppress_repeat_typing, &QCheckBox::toggled,
+                this, &SettingsWindow::emit_audio_config);
+    }
+    if (d_->chk_suppress_sensitive) {
+        connect(d_->chk_suppress_sensitive, &QCheckBox::toggled,
+                this, &SettingsWindow::emit_audio_config);
+    }
+    if (d_->chk_preview_on_select) {
+        connect(d_->chk_preview_on_select, &QCheckBox::toggled,
+                this, &SettingsWindow::emit_audio_config);
+    }
+    if (d_->combo_keyboard_scope) {
+        connect(d_->combo_keyboard_scope, QOverload<int>::of(&QComboBox::currentIndexChanged),
+                this, &SettingsWindow::emit_audio_config);
+    }
+    if (d_->chk_horizontal_scroll) {
+        connect(d_->chk_horizontal_scroll, &QCheckBox::toggled,
+                this, &SettingsWindow::emit_audio_config);
+    }
+    if (d_->scroll_sensitivity) {
+        connect(d_->scroll_sensitivity, &SliderSpin::value_changed,
+                this, &SettingsWindow::emit_audio_config);
+    }
+    if (d_->scroll_cooldown) {
+        connect(d_->scroll_cooldown, &SliderSpin::value_changed,
+                this, &SettingsWindow::emit_audio_config);
+    }
+    if (d_->scroll_max_rate) {
+        connect(d_->scroll_max_rate, &SliderSpin::value_changed,
+                this, &SettingsWindow::emit_audio_config);
+    }
+
+    if (d_->combo_event_category) {
+        connect(d_->combo_event_category, QOverload<int>::of(&QComboBox::currentIndexChanged),
+                this, [this] { refresh_keyboard_event_list(); });
+    }
+    if (d_->edit_event_search) {
+        connect(d_->edit_event_search, &QLineEdit::textEdited,
+                this, [this] { refresh_keyboard_event_list(); });
+    }
+    if (d_->list_sound_events) {
+        connect(d_->list_sound_events, &QListWidget::currentItemChanged, this, [this] {
+            QListWidgetItem* item = d_->list_sound_events->currentItem();
+            if (item == nullptr) return;
+            const QString cid = item->data(Qt::UserRole).toString();
+            if (cid.isEmpty() || cid.toStdString() == d_->selected_event_id) return;
+            populate_event_editor_for(cid.toStdString());
+        });
+    }
+
+    // Reads every editor widget into a fresh EventSoundConfig, writes it through
+    // set_event_config, and republishes. One edit = one validated publication,
+    // so the editor and the runtime can never disagree about the stored value.
+    auto commit_event_editor = [this] {
+        if (d_->selected_event_id.empty()) return;
+        ptd::EventSoundConfig ec = audio_cfg_.effective_event_config(d_->selected_event_id);
+        if (d_->chk_event_enabled) ec.enabled = d_->chk_event_enabled->isChecked();
+        if (d_->chk_event_use_pool) ec.use_pool = d_->chk_event_use_pool->isChecked();
+        if (d_->combo_event_sound) {
+            ec.sound_id = d_->combo_event_sound->currentData().toString().toStdString();
+        }
+        if (d_->combo_event_policy) {
+            ec.policy = static_cast<ptd::PlaybackPolicy>(
+                d_->combo_event_policy->currentData().toInt());
+        }
+        if (d_->combo_event_scope) {
+            ec.interrupt_scope = static_cast<ptd::InterruptScope>(
+                d_->combo_event_scope->currentData().toInt());
+        }
+        if (d_->event_gain_db) ec.gain_db = static_cast<float>(d_->event_gain_db->value());
+        if (d_->event_cooldown_ms) {
+            ec.cooldown_ms = static_cast<int>(d_->event_cooldown_ms->value());
+        }
+        if (d_->event_priority) ec.priority = static_cast<int>(d_->event_priority->value());
+        if (d_->event_fade_in_ms) {
+            ec.fade_in_ms = static_cast<int>(d_->event_fade_in_ms->value());
+        }
+        if (d_->event_fade_out_ms) {
+            ec.fade_out_ms = static_cast<int>(d_->event_fade_out_ms->value());
+        }
+        if (d_->event_min_retrigger_ms) {
+            ec.min_retrigger_ms = static_cast<int>(d_->event_min_retrigger_ms->value());
+        }
+        if (d_->event_polyphony) {
+            ec.polyphony_allowance = static_cast<int>(d_->event_polyphony->value());
+        }
+        if (d_->event_pitch_var) {
+            ec.pitch_variation = static_cast<float>(d_->event_pitch_var->value() / 100.0);
+        }
+        if (d_->chk_event_no_repeat) {
+            ec.no_immediate_repeat = d_->chk_event_no_repeat->isChecked();
+        }
+        if (d_->chk_event_norm_override) {
+            ec.normalize_override = d_->chk_event_norm_override->isChecked();
+        }
+        if (d_->chk_event_norm_enabled) {
+            ec.normalize_enabled = d_->chk_event_norm_enabled->isChecked();
+        }
+        audio_cfg_.set_event_config(d_->selected_event_id, ec);
+        audio_cfg_ = ptd::AudioConfig::validated(audio_cfg_);
+        // The eight mouse events have two views of the same slot: this editor
+        // and the legacy EVENT SOUNDS combos. Validated() back-fills the event
+        // config from the legacy combo, so leaving that combo stale would
+        // resurrect the sound the user just cleared.
+        const int legacy = ptd::legacy_mouse_event_index(d_->selected_event_id);
+        if (legacy >= 0 && d_->sound_assign[legacy]) {
+            QComboBox* combo = d_->sound_assign[legacy];
+            const QString qid = QString::fromStdString(ec.sound_id);
+            int at = qid.isEmpty() ? 0 : combo->findData(qid);
+            if (at < 0) {
+                combo->addItem(qid + QStringLiteral(" (missing)"), qid);
+                at = combo->count() - 1;
+            }
+            const QSignalBlocker block(combo);
+            combo->setCurrentIndex(at);
+        }
+        if (!ec.sound_id.empty()) record_recent_sound(ec.sound_id);
+        refresh_keyboard_event_list();
+        populate_event_editor_for(d_->selected_event_id);
+        emit_audio_config();
+    };
+
+    if (d_->chk_event_enabled) {
+        connect(d_->chk_event_enabled, &QCheckBox::toggled, this, commit_event_editor);
+    }
+    if (d_->chk_event_use_pool) {
+        connect(d_->chk_event_use_pool, &QCheckBox::toggled, this, commit_event_editor);
+    }
+    if (d_->combo_event_sound) {
+        connect(d_->combo_event_sound, QOverload<int>::of(&QComboBox::currentIndexChanged),
+                this, commit_event_editor);
+    }
+    if (d_->combo_event_policy) {
+        connect(d_->combo_event_policy, QOverload<int>::of(&QComboBox::currentIndexChanged),
+                this, commit_event_editor);
+    }
+    if (d_->combo_event_scope) {
+        connect(d_->combo_event_scope, QOverload<int>::of(&QComboBox::currentIndexChanged),
+                this, commit_event_editor);
+    }
+    if (d_->event_gain_db) {
+        connect(d_->event_gain_db, &SliderSpin::value_changed, this, commit_event_editor);
+    }
+    if (d_->event_cooldown_ms) {
+        connect(d_->event_cooldown_ms, &SliderSpin::value_changed, this, commit_event_editor);
+    }
+    if (d_->event_priority) {
+        connect(d_->event_priority, &SliderSpin::value_changed, this, commit_event_editor);
+    }
+    if (d_->event_fade_in_ms) {
+        connect(d_->event_fade_in_ms, &SliderSpin::value_changed, this, commit_event_editor);
+    }
+    if (d_->event_fade_out_ms) {
+        connect(d_->event_fade_out_ms, &SliderSpin::value_changed, this, commit_event_editor);
+    }
+    if (d_->event_min_retrigger_ms) {
+        connect(d_->event_min_retrigger_ms, &SliderSpin::value_changed, this, commit_event_editor);
+    }
+    if (d_->event_polyphony) {
+        connect(d_->event_polyphony, &SliderSpin::value_changed, this, commit_event_editor);
+    }
+    if (d_->event_pitch_var) {
+        connect(d_->event_pitch_var, &SliderSpin::value_changed, this, commit_event_editor);
+    }
+    if (d_->chk_event_no_repeat) {
+        connect(d_->chk_event_no_repeat, &QCheckBox::toggled, this, commit_event_editor);
+    }
+    if (d_->chk_event_norm_override) {
+        connect(d_->chk_event_norm_override, &QCheckBox::toggled, this, commit_event_editor);
+    }
+    if (d_->chk_event_norm_enabled) {
+        connect(d_->chk_event_norm_enabled, &QCheckBox::toggled, this, commit_event_editor);
+    }
+
+    if (d_->chk_show_advanced_event) {
+        connect(d_->chk_show_advanced_event, &QCheckBox::toggled, this, [this](bool on) {
+            if (d_->advanced_event_panel) d_->advanced_event_panel->setVisible(on);
+        });
+    }
+    if (d_->btn_event_preview) {
+        connect(d_->btn_event_preview, &QPushButton::clicked, this, [this] {
+            if (d_->selected_event_id.empty()) return;
+            emit sound_event_preview_requested(
+                audio_cfg_.effective_event_config(d_->selected_event_id));
+        });
+    }
+    if (d_->btn_event_reset) {
+        connect(d_->btn_event_reset, &QPushButton::clicked,
+                this, &SettingsWindow::reset_selected_sound_event);
+    }
+    if (d_->btn_event_fav_toggle) {
+        connect(d_->btn_event_fav_toggle, &QPushButton::clicked, this, [this] {
+            const QString id = d_->combo_event_sound
+                ? d_->combo_event_sound->currentData().toString() : QString();
+            if (!id.isEmpty()) toggle_sound_favorite(id);
+        });
+    }
+    if (d_->btn_reset_category) {
+        connect(d_->btn_reset_category, &QPushButton::clicked, this, [this] {
+            const int cat = d_->combo_event_category
+                ? d_->combo_event_category->currentData().toInt() : -1;
+            if (cat < 0) {
+                show_dev_status(QStringLiteral("Select a specific category to reset."));
+                return;
+            }
+            reset_sound_category(static_cast<ptd::SoundEventCategory>(cat));
+        });
+    }
+
+    // Random Sound Pool editor: add/remove/reorder plus per-entry edits, each
+    // committing through set_event_config so the pool is never read-only state.
+    auto pool_entry_index = [this]() -> int {
+        if (!d_->list_pool_entries) return -1;
+        QListWidgetItem* item = d_->list_pool_entries->currentItem();
+        return item ? item->data(Qt::UserRole).toInt() : -1;
+    };
+    if (d_->list_pool_entries) {
+        connect(d_->list_pool_entries, &QListWidget::currentItemChanged, this, [this] {
+            if (d_->selected_event_id.empty()) return;
+            const int idx = [this]() -> int {
+                if (!d_->list_pool_entries) return -1;
+                QListWidgetItem* item = d_->list_pool_entries->currentItem();
+                return item ? item->data(Qt::UserRole).toInt() : -1;
+            }();
+            if (idx < 0) return;
+            const ptd::EventSoundConfig ec =
+                audio_cfg_.effective_event_config(d_->selected_event_id);
+            if (static_cast<std::size_t>(idx) >= ec.pool.size()) return;
+            QSignalBlocker be(d_->chk_pool_entry_enabled);
+            QSignalBlocker bw(d_->pool_entry_weight);
+            QSignalBlocker bg(d_->pool_entry_gain_db);
+            const auto& pe = ec.pool[static_cast<std::size_t>(idx)];
+            d_->chk_pool_entry_enabled->setChecked(pe.enabled);
+            d_->pool_entry_weight->set_value(pe.weight);
+            d_->pool_entry_gain_db->set_value(pe.gain_db);
+        });
+    }
+    auto commit_pool_entry = [this, pool_entry_index] {
+        if (d_->selected_event_id.empty()) return;
+        const int idx = pool_entry_index();
+        if (idx < 0) return;
+        ptd::EventSoundConfig ec = audio_cfg_.effective_event_config(d_->selected_event_id);
+        if (static_cast<std::size_t>(idx) >= ec.pool.size()) return;
+        auto& pe = ec.pool[static_cast<std::size_t>(idx)];
+        if (d_->chk_pool_entry_enabled) pe.enabled = d_->chk_pool_entry_enabled->isChecked();
+        if (d_->pool_entry_weight) pe.weight = static_cast<float>(d_->pool_entry_weight->value());
+        if (d_->pool_entry_gain_db) {
+            pe.gain_db = static_cast<float>(d_->pool_entry_gain_db->value());
+        }
+        audio_cfg_.set_event_config(d_->selected_event_id, ec);
+        audio_cfg_ = ptd::AudioConfig::validated(audio_cfg_);
+        refresh_keyboard_event_list();
+        emit_audio_config();
+    };
+    if (d_->chk_pool_entry_enabled) {
+        connect(d_->chk_pool_entry_enabled, &QCheckBox::toggled, this, commit_pool_entry);
+    }
+    if (d_->pool_entry_weight) {
+        connect(d_->pool_entry_weight, &SliderSpin::value_changed, this, commit_pool_entry);
+    }
+    if (d_->pool_entry_gain_db) {
+        connect(d_->pool_entry_gain_db, &SliderSpin::value_changed, this, commit_pool_entry);
+    }
+    if (d_->btn_pool_add) {
+        connect(d_->btn_pool_add, &QPushButton::clicked, this, [this] {
+            if (d_->selected_event_id.empty()) return;
+            const QString sid = d_->combo_pool_add_sound
+                ? d_->combo_pool_add_sound->currentData().toString() : QString();
+            if (sid.isEmpty()) return;
+            ptd::EventSoundConfig ec =
+                audio_cfg_.effective_event_config(d_->selected_event_id);
+            if (static_cast<int>(ec.pool.size()) >= ptd::EventSoundConfig::kMaxPoolEntries) return;
+            for (const auto& pe : ec.pool) {
+                if (pe.sound_id == sid.toStdString()) return;
+            }
+            ptd::SoundPoolEntry pe;
+            pe.enabled = true;
+            pe.sound_id = sid.toStdString();
+            pe.weight = 1.0f;
+            pe.gain_db = 0.0f;
+            ec.pool.push_back(pe);
+            // Enabling the pool on first entry is what makes the entries audible.
+            ec.use_pool = true;
+            audio_cfg_.set_event_config(d_->selected_event_id, ec);
+            audio_cfg_ = ptd::AudioConfig::validated(audio_cfg_);
+            refresh_keyboard_event_list();
+            populate_event_editor_for(d_->selected_event_id);
+            emit_audio_config();
+        });
+    }
+    if (d_->btn_pool_remove) {
+        connect(d_->btn_pool_remove, &QPushButton::clicked, this, [this] {
+            if (d_->selected_event_id.empty()) return;
+            if (!d_->list_pool_entries || !d_->list_pool_entries->currentItem()) return;
+            const int idx = d_->list_pool_entries->currentItem()->data(Qt::UserRole).toInt();
+            ptd::EventSoundConfig ec =
+                audio_cfg_.effective_event_config(d_->selected_event_id);
+            if (idx < 0 || static_cast<std::size_t>(idx) >= ec.pool.size()) return;
+            ec.pool.erase(ec.pool.begin() + idx);
+            audio_cfg_.set_event_config(d_->selected_event_id, ec);
+            audio_cfg_ = ptd::AudioConfig::validated(audio_cfg_);
+            refresh_keyboard_event_list();
+            populate_event_editor_for(d_->selected_event_id);
+            emit_audio_config();
+        });
+    }
+    auto move_pool_entry = [this](int delta) {
+        if (d_->selected_event_id.empty()) return;
+        if (!d_->list_pool_entries || !d_->list_pool_entries->currentItem()) return;
+        const int idx = d_->list_pool_entries->currentItem()->data(Qt::UserRole).toInt();
+        ptd::EventSoundConfig ec = audio_cfg_.effective_event_config(d_->selected_event_id);
+        const int target = idx + delta;
+        if (idx < 0 || target < 0 || static_cast<std::size_t>(target) >= ec.pool.size()) return;
+        std::swap(ec.pool[static_cast<std::size_t>(idx)], ec.pool[static_cast<std::size_t>(target)]);
+        audio_cfg_.set_event_config(d_->selected_event_id, ec);
+        audio_cfg_ = ptd::AudioConfig::validated(audio_cfg_);
+        refresh_keyboard_event_list();
+        populate_event_editor_for(d_->selected_event_id);
+        emit_audio_config();
+    };
+    if (d_->btn_pool_up) {
+        connect(d_->btn_pool_up, &QPushButton::clicked, this, [move_pool_entry] { move_pool_entry(-1); });
+    }
+    if (d_->btn_pool_down) {
+        connect(d_->btn_pool_down, &QPushButton::clicked, this, [move_pool_entry] { move_pool_entry(1); });
+    }
+    if (d_->btn_pool_preview_entry) {
+        connect(d_->btn_pool_preview_entry, &QPushButton::clicked, this, [this] {
+            if (d_->selected_event_id.empty()) return;
+            if (!d_->list_pool_entries || !d_->list_pool_entries->currentItem()) return;
+            const int idx = d_->list_pool_entries->currentItem()->data(Qt::UserRole).toInt();
+            const ptd::EventSoundConfig ec =
+                audio_cfg_.effective_event_config(d_->selected_event_id);
+            if (idx < 0 || static_cast<std::size_t>(idx) >= ec.pool.size()) return;
+            emit sound_preview_requested(ec.pool[static_cast<std::size_t>(idx)].sound_id);
+        });
+    }
+    if (d_->btn_pool_preview_random) {
+        connect(d_->btn_pool_preview_random, &QPushButton::clicked, this, [this] {
+            if (d_->selected_event_id.empty()) return;
+            emit sound_event_preview_requested(
+                audio_cfg_.effective_event_config(d_->selected_event_id));
+        });
+    }
+
+    // Custom shortcuts: validate before storing, drop by id on remove.
+    if (d_->btn_custom_sc_add) {
+        connect(d_->btn_custom_sc_add, &QPushButton::clicked, this, [this] {
+            const std::string name = d_->edit_custom_sc_name
+                ? d_->edit_custom_sc_name->text().trimmed().toStdString() : std::string();
+            const std::string chord = d_->edit_custom_sc_chord
+                ? d_->edit_custom_sc_chord->text().trimmed().toStdString() : std::string();
+            if (name.empty() || chord.empty()) {
+                show_dev_status(QStringLiteral("Custom shortcut needs both a name and a chord."));
+                return;
+            }
+            if (static_cast<int>(audio_cfg_.custom_shortcuts.size()) >=
+                ptd::AudioConfig::kMaxCustomShortcuts) {
+                show_dev_status(QStringLiteral("Custom shortcut limit reached."));
+                return;
+            }
+            ptd::CustomShortcutBinding cs;
+            // First unused slot id: AudioConfig::validated rejects an id that
+            // does not look like a custom/key event, so it must be well-formed.
+            int slot = 1;
+            while (slot <= ptd::AudioConfig::kMaxCustomShortcuts) {
+                const std::string candidate =
+                    "custom.shortcut_" + std::to_string(slot);
+                const bool taken = std::any_of(
+                    audio_cfg_.custom_shortcuts.begin(), audio_cfg_.custom_shortcuts.end(),
+                    [&](const ptd::CustomShortcutBinding& existing) {
+                        return existing.id == candidate;
+                    });
+                if (!taken) break;
+                ++slot;
+            }
+            cs.id = "custom.shortcut_" + std::to_string(slot);
+            cs.display_name = name;
+            cs.chord = chord;
+            cs.is_app_shortcut = d_->chk_custom_sc_app
+                ? d_->chk_custom_sc_app->isChecked() : false;
+            const ptd::CustomShortcutBinding clean = ptd::CustomShortcutBinding::validated(cs);
+            if (clean.id.empty() || clean.display_name.empty() || clean.chord.empty()) {
+                show_dev_status(QStringLiteral("Custom shortcut is not valid; check the chord text."));
+                return;
+            }
+            audio_cfg_.custom_shortcuts.push_back(clean);
+            audio_cfg_ = ptd::AudioConfig::validated(audio_cfg_);
+            if (d_->edit_custom_sc_name) d_->edit_custom_sc_name->clear();
+            if (d_->edit_custom_sc_chord) d_->edit_custom_sc_chord->clear();
+            set_audio_widgets(audio_cfg_);
+            emit_audio_config();
+        });
+    }
+    if (d_->btn_custom_sc_remove) {
+        connect(d_->btn_custom_sc_remove, &QPushButton::clicked, this, [this] {
+            if (!d_->list_custom_shortcuts || !d_->list_custom_shortcuts->currentItem()) return;
+            const std::string id =
+                d_->list_custom_shortcuts->currentItem()->data(Qt::UserRole).toString().toStdString();
+            if (id.empty()) return;
+            audio_cfg_.custom_shortcuts.erase(
+                std::remove_if(audio_cfg_.custom_shortcuts.begin(),
+                               audio_cfg_.custom_shortcuts.end(),
+                               [&](const ptd::CustomShortcutBinding& cs) { return cs.id == id; }),
+                audio_cfg_.custom_shortcuts.end());
+            audio_cfg_.event_configs.erase(id);
+            audio_cfg_ = ptd::AudioConfig::validated(audio_cfg_);
+            set_audio_widgets(audio_cfg_);
+            emit_audio_config();
+        });
+    }
+
+    // Per-process exclusions in System-Wide scope.
+    if (d_->btn_add_excluded_proc) {
+        connect(d_->btn_add_excluded_proc, &QPushButton::clicked, this, [this] {
+            const std::string proc = d_->edit_excluded_proc
+                ? ptd::sanitize_process_name(d_->edit_excluded_proc->text().trimmed().toStdString())
+                : std::string();
+            if (proc.empty()) {
+                show_dev_status(QStringLiteral("Enter an executable name such as keepass.exe."));
+                return;
+            }
+            if (static_cast<int>(audio_cfg_.excluded_processes.size()) >=
+                ptd::AudioConfig::kMaxProcessExclusions) {
+                show_dev_status(QStringLiteral("Process exclusion limit reached."));
+                return;
+            }
+            if (std::find(audio_cfg_.excluded_processes.begin(),
+                          audio_cfg_.excluded_processes.end(), proc) !=
+                audio_cfg_.excluded_processes.end()) {
+                if (d_->edit_excluded_proc) d_->edit_excluded_proc->clear();
+                return;
+            }
+            audio_cfg_.excluded_processes.push_back(proc);
+            audio_cfg_ = ptd::AudioConfig::validated(audio_cfg_);
+            if (d_->edit_excluded_proc) d_->edit_excluded_proc->clear();
+            set_audio_widgets(audio_cfg_);
+            emit_audio_config();
+        });
+    }
+    if (d_->btn_remove_excluded_proc) {
+        connect(d_->btn_remove_excluded_proc, &QPushButton::clicked, this, [this] {
+            if (!d_->list_excluded_procs || !d_->list_excluded_procs->currentItem()) return;
+            const std::string proc =
+                d_->list_excluded_procs->currentItem()->text().toStdString();
+            audio_cfg_.excluded_processes.erase(
+                std::remove_if(audio_cfg_.excluded_processes.begin(),
+                               audio_cfg_.excluded_processes.end(),
+                               [&](const std::string& existing) { return existing == proc; }),
+                audio_cfg_.excluded_processes.end());
+            audio_cfg_ = ptd::AudioConfig::validated(audio_cfg_);
+            set_audio_widgets(audio_cfg_);
+            emit_audio_config();
+        });
+    }
+
+    // Profiles: apply a template, or move the whole assignment block through JSON.
+    if (d_->btn_apply_sound_profile) {
+        connect(d_->btn_apply_sound_profile, &QPushButton::clicked, this, [this] {
+            const int preset = d_->combo_sound_profile
+                ? d_->combo_sound_profile->currentData().toInt() : 0;
+            apply_sound_profile_preset(static_cast<ptd::SoundProfilePreset>(preset));
+        });
+    }
+    if (d_->btn_export_audio_profile) {
+        connect(d_->btn_export_audio_profile, &QPushButton::clicked, this, [this] {
+            const QString path = QFileDialog::getSaveFileName(
+                this, QStringLiteral("Export Sound Assignments"), QStringLiteral("protrail-audio.json"),
+                QStringLiteral("Audio profile (*.json)"));
+            if (path.isEmpty()) return;
+            QFile f(path);
+            if (!f.open(QIODevice::WriteOnly)) {
+                show_dev_status(QStringLiteral("Export failed: cannot write the selected file."));
+                return;
+            }
+            const QByteArray data = export_audio_profile_json();
+            if (f.write(data) != static_cast<qint64>(data.size())) {
+                show_dev_status(QStringLiteral("Export failed: short write."));
+                return;
+            }
+            show_dev_status(QStringLiteral("Sound assignments exported."));
+        });
+    }
+    if (d_->btn_import_audio_profile) {
+        connect(d_->btn_import_audio_profile, &QPushButton::clicked, this, [this] {
+            const QString path = QFileDialog::getOpenFileName(
+                this, QStringLiteral("Import Sound Assignments"), QString(),
+                QStringLiteral("Audio profile (*.json)"));
+            if (path.isEmpty()) return;
+            QFile f(path);
+            if (!f.open(QIODevice::ReadOnly)) {
+                show_dev_status(QStringLiteral("Import failed: cannot read the selected file."));
+                return;
+            }
+            const QByteArray data = f.readAll();
+            QString err;
+            if (!import_audio_profile_json(data, &err)) {
+                show_dev_status(QStringLiteral("Import failed: %1").arg(err));
+                return;
+            }
+            show_dev_status(QStringLiteral("Sound assignments imported."));
+        });
+    }
 
     // Trail
     connect(d_->trail_head_thickness, &SliderSpin::value_changed,
@@ -1951,6 +3718,7 @@ void SettingsWindow::set_click_widgets(const ptd::ClickConfig& c) {
 void SettingsWindow::populate_from_config() {
     set_trail_widgets(trail_cfg_);
     set_click_widgets(click_cfg_);
+    set_audio_widgets(audio_cfg_);
     QSignalBlocker bm(d_->chk_master);
     QSignalBlocker bt(d_->chk_trail);
     QSignalBlocker bc(d_->chk_click);
@@ -2012,6 +3780,7 @@ ptd::AppConfig SettingsWindow::capture_current_settings() const {
     cfg.start_with_windows = start_with_windows_;
     cfg.trail = trail_cfg_;
     cfg.click = click_cfg_;
+    cfg.audio = audio_cfg_;
     // CORE-004: complete-state authority -- non-UI fields come from the
     // retained baseline (seeded via apply_config / populate_from_config).
     cfg.render = render_baseline_;
@@ -2024,6 +3793,7 @@ void SettingsWindow::set_full_snapshot_for_tests(const ptd::AppConfig& cfg) {
     start_with_windows_ = validated.start_with_windows;
     trail_cfg_ = validated.trail;
     click_cfg_ = validated.click;
+    audio_cfg_ = validated.audio;
     render_baseline_ = validated.render;
     populate_from_config();
 }
@@ -2041,6 +3811,7 @@ void SettingsWindow::apply_config(const ptd::AppConfig& cfg) {
     click_cfg_ = validated.click;
     // CORE-004: retain non-UI baseline for future whole-config captures.
     render_baseline_ = validated.render;
+    audio_cfg_ = validated.audio;
 
     // Programmatically update all widgets with signals blocked
     {
@@ -2057,6 +3828,7 @@ void SettingsWindow::apply_config(const ptd::AppConfig& cfg) {
 
     set_trail_widgets(trail_cfg_);
     set_click_widgets(click_cfg_);
+    set_audio_widgets(audio_cfg_);
 
     // CORE-003 + W2-002: a whole-AppConfig operation is ONE logical
     // publication. Emitting the narrow per-field signals here made
@@ -2206,6 +3978,90 @@ void SettingsWindow::set_object_names() {
     d_->click_particles->setObjectName("click_particles");
     d_->click_element_tint->setObjectName("click_element_tint");
     d_->btn_restore_click->setObjectName("btn_restore_click");
+
+    // T-80 / T-120: Sound tab object names (stable test surface).
+    d_->sound_tab->setObjectName("tab_sound");
+    d_->chk_sound_enabled->setObjectName("chk_sound_enabled");
+    d_->chk_sound_muted->setObjectName("chk_sound_muted");
+    d_->sound_volume->setObjectName("sound_volume");
+    if (d_->chk_preview_on_select) d_->chk_preview_on_select->setObjectName("chk_preview_on_select");
+    d_->sound_search->setObjectName("sound_search");
+    d_->sound_catalog->setObjectName("sound_catalog");
+    d_->sound_favorites->setObjectName("sound_favorites");
+    if (d_->sound_recent) d_->sound_recent->setObjectName("sound_recent");
+    d_->btn_sound_replay->setObjectName("btn_sound_replay");
+    d_->btn_sound_stop->setObjectName("btn_sound_stop");
+    d_->btn_sound_stop_all->setObjectName("btn_sound_stop_all");
+    for (int i = 0; i < ptd::kAudioEventCount; ++i) {
+        d_->sound_assign[i]->setObjectName(
+            QStringLiteral("sound_assign_%1")
+                .arg(QString::fromLatin1(ptd::audio_event_name(i))));
+    }
+    if (d_->chk_keyboard_enabled) d_->chk_keyboard_enabled->setObjectName("chk_keyboard_enabled");
+    if (d_->combo_keyboard_scope) d_->combo_keyboard_scope->setObjectName("combo_keyboard_scope");
+    if (d_->lbl_keyboard_scope_info) d_->lbl_keyboard_scope_info->setObjectName("lbl_keyboard_scope_info");
+    if (d_->chk_typing_sounds) d_->chk_typing_sounds->setObjectName("chk_typing_sounds");
+    if (d_->chk_modifier_tap_sounds) d_->chk_modifier_tap_sounds->setObjectName("chk_modifier_tap_sounds");
+    if (d_->chk_suppress_repeat_typing) d_->chk_suppress_repeat_typing->setObjectName("chk_suppress_repeat_typing");
+    if (d_->chk_suppress_sensitive) d_->chk_suppress_sensitive->setObjectName("chk_suppress_sensitive");
+    if (d_->edit_excluded_proc) d_->edit_excluded_proc->setObjectName("edit_excluded_proc");
+    if (d_->btn_add_excluded_proc) d_->btn_add_excluded_proc->setObjectName("btn_add_excluded_proc");
+    if (d_->btn_remove_excluded_proc) d_->btn_remove_excluded_proc->setObjectName("btn_remove_excluded_proc");
+    if (d_->list_excluded_procs) d_->list_excluded_procs->setObjectName("list_excluded_procs");
+    if (d_->combo_event_category) d_->combo_event_category->setObjectName("combo_event_category");
+    if (d_->edit_event_search) d_->edit_event_search->setObjectName("edit_event_search");
+    if (d_->btn_reset_category) d_->btn_reset_category->setObjectName("btn_reset_category");
+    if (d_->list_sound_events) d_->list_sound_events->setObjectName("list_sound_events");
+    if (d_->lbl_selected_event_title) d_->lbl_selected_event_title->setObjectName("lbl_selected_event_title");
+    if (d_->lbl_selected_event_note) d_->lbl_selected_event_note->setObjectName("lbl_selected_event_note");
+    if (d_->chk_event_enabled) d_->chk_event_enabled->setObjectName("chk_event_enabled");
+    if (d_->combo_event_sound) d_->combo_event_sound->setObjectName("combo_event_sound");
+    if (d_->btn_event_fav_toggle) d_->btn_event_fav_toggle->setObjectName("btn_event_fav_toggle");
+    if (d_->chk_event_use_pool) d_->chk_event_use_pool->setObjectName("chk_event_use_pool");
+    if (d_->combo_event_policy) d_->combo_event_policy->setObjectName("combo_event_policy");
+    if (d_->combo_event_scope) d_->combo_event_scope->setObjectName("combo_event_scope");
+    if (d_->event_gain_db) d_->event_gain_db->setObjectName("event_gain_db");
+    if (d_->event_cooldown_ms) d_->event_cooldown_ms->setObjectName("event_cooldown_ms");
+    if (d_->event_priority) d_->event_priority->setObjectName("event_priority");
+    if (d_->btn_event_preview) d_->btn_event_preview->setObjectName("btn_event_preview");
+    if (d_->btn_event_reset) d_->btn_event_reset->setObjectName("btn_event_reset");
+    if (d_->chk_show_advanced_event) d_->chk_show_advanced_event->setObjectName("chk_show_advanced_event");
+    if (d_->advanced_event_panel) d_->advanced_event_panel->setObjectName("advanced_event_panel");
+    if (d_->event_fade_in_ms) d_->event_fade_in_ms->setObjectName("event_fade_in_ms");
+    if (d_->event_fade_out_ms) d_->event_fade_out_ms->setObjectName("event_fade_out_ms");
+    if (d_->event_min_retrigger_ms) d_->event_min_retrigger_ms->setObjectName("event_min_retrigger_ms");
+    if (d_->event_polyphony) d_->event_polyphony->setObjectName("event_polyphony");
+    if (d_->event_pitch_var) d_->event_pitch_var->setObjectName("event_pitch_var");
+    if (d_->chk_event_no_repeat) d_->chk_event_no_repeat->setObjectName("chk_event_no_repeat");
+    if (d_->chk_event_norm_override) d_->chk_event_norm_override->setObjectName("chk_event_norm_override");
+    if (d_->chk_event_norm_enabled) d_->chk_event_norm_enabled->setObjectName("chk_event_norm_enabled");
+    if (d_->pool_editor_panel) d_->pool_editor_panel->setObjectName("pool_editor_panel");
+    if (d_->list_pool_entries) d_->list_pool_entries->setObjectName("list_pool_entries");
+    if (d_->combo_pool_add_sound) d_->combo_pool_add_sound->setObjectName("combo_pool_add_sound");
+    if (d_->btn_pool_add) d_->btn_pool_add->setObjectName("btn_pool_add");
+    if (d_->btn_pool_remove) d_->btn_pool_remove->setObjectName("btn_pool_remove");
+    if (d_->btn_pool_up) d_->btn_pool_up->setObjectName("btn_pool_up");
+    if (d_->btn_pool_down) d_->btn_pool_down->setObjectName("btn_pool_down");
+    if (d_->chk_pool_entry_enabled) d_->chk_pool_entry_enabled->setObjectName("chk_pool_entry_enabled");
+    if (d_->pool_entry_weight) d_->pool_entry_weight->setObjectName("pool_entry_weight");
+    if (d_->pool_entry_gain_db) d_->pool_entry_gain_db->setObjectName("pool_entry_gain_db");
+    if (d_->btn_pool_preview_entry) d_->btn_pool_preview_entry->setObjectName("btn_pool_preview_entry");
+    if (d_->btn_pool_preview_random) d_->btn_pool_preview_random->setObjectName("btn_pool_preview_random");
+    if (d_->edit_custom_sc_name) d_->edit_custom_sc_name->setObjectName("edit_custom_sc_name");
+    if (d_->edit_custom_sc_chord) d_->edit_custom_sc_chord->setObjectName("edit_custom_sc_chord");
+    if (d_->chk_custom_sc_app) d_->chk_custom_sc_app->setObjectName("chk_custom_sc_app");
+    if (d_->btn_custom_sc_add) d_->btn_custom_sc_add->setObjectName("btn_custom_sc_add");
+    if (d_->btn_custom_sc_remove) d_->btn_custom_sc_remove->setObjectName("btn_custom_sc_remove");
+    if (d_->list_custom_shortcuts) d_->list_custom_shortcuts->setObjectName("list_custom_shortcuts");
+    if (d_->chk_horizontal_scroll) d_->chk_horizontal_scroll->setObjectName("chk_horizontal_scroll");
+    if (d_->scroll_sensitivity) d_->scroll_sensitivity->setObjectName("scroll_sensitivity");
+    if (d_->scroll_cooldown) d_->scroll_cooldown->setObjectName("scroll_cooldown");
+    if (d_->scroll_max_rate) d_->scroll_max_rate->setObjectName("scroll_max_rate");
+    if (d_->scroll_pitch_var) d_->scroll_pitch_var->setObjectName("scroll_pitch_var");
+    if (d_->combo_sound_profile) d_->combo_sound_profile->setObjectName("combo_sound_profile");
+    if (d_->btn_apply_sound_profile) d_->btn_apply_sound_profile->setObjectName("btn_apply_sound_profile");
+    if (d_->btn_export_audio_profile) d_->btn_export_audio_profile->setObjectName("btn_export_audio_profile");
+    if (d_->btn_import_audio_profile) d_->btn_import_audio_profile->setObjectName("btn_import_audio_profile");
 
     if (d_->dev_tab != nullptr) {
         d_->dev_tab->setObjectName("tab_dev");

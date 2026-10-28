@@ -59,6 +59,14 @@ public:
     // Returns std::nullopt on syntax / schema failure.
     static std::optional<AppConfig> deserialize_json(const QByteArray& json, QString* error_msg = nullptr);
 
+    // Serializes only the audio profile/assignments block for user export.
+    static QByteArray serialize_audio_profile_json(const AudioConfig& audio);
+
+    // Deserializes and validates an exported audio profile JSON document.
+    static std::optional<AudioConfig> deserialize_audio_profile_json(
+        const QByteArray& json, const AudioConfig& base_audio = AudioConfig{},
+        QString* error_msg = nullptr);
+
     // CORE-001: status-bearing load. Distinguishes fresh, current, migrated,
     // malformed-backed-up, malformed-backup-failed, unsupported-future-schema
     // and read-failure, and reports whether writing is currently allowed.

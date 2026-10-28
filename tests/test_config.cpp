@@ -104,6 +104,18 @@ private slots:
     // never enrolled into Windows startup by an executable upgrade.
     void start_with_windows_schema10_migration_and_roundtrip();
 
+    // T-80 schema 12: configurable mouse audio effects. The introduction
+    // boundary is SOURCE-SCHEMA authoritative and the default is SILENT: an
+    // upgraded install must not start playing sounds nobody configured.
+    void audio_schema12_migration_and_roundtrip();
+
+    // T-107 schema 13: the curated FAVORITES list inside the audio block. Its
+    // own boundary: a schema-12 writer produced a valid audio block that simply
+    // cannot carry favorites, so an absent list reads as "no favorites" --
+    // never as a list the owner had and the upgrade emptied.
+    void audio_favorites_schema13_migration_and_roundtrip();
+    void audio_favorites_are_sanitized_deduped_and_bounded();
+
     // T-030: a %LOCALAPPDATA% probe failure must produce a logged,
     // deterministic fallback, never a silent working-directory path.
     void default_paths_fail_deterministic_fallback();
@@ -1572,6 +1584,191 @@ void TestConfig::hold_controls_schema9_migration_and_roundtrip() {
 // not merely how an effect looks. So the migration is deliberately maximal:
 // an existing configuration is never enrolled, in either direction, and the
 // only way the value ever becomes true is the user choosing it.
+// T-80: schema 12 introduces the audio block. The boundary is SOURCE-SCHEMA
+// authoritative (kAudioSchema = 12): a historical file MUST NOT be
+// reinterpreted with the new silent default, so the deserialiser reads its
+// stored values; every OTHER preference in the record stays untouched.
+void TestConfig::audio_schema12_migration_and_roundtrip() {
+    QString err;
+
+    QVERIFY(ptd::AppConfig::kCurrentSchemaVersion >= 12);
+    QCOMPARE(ptd::AppConfig::kAudioSchema, 12);
+
+    // HISTORICAL schema < 12 writes no audio key: the migrated record keeps
+    // its own values, and they are exactly what the schema-12 writer wrote.
+    // (A historical file that DID carry the block keeps it verbatim, which is
+    // the same rule the other source-schema boundaries use.)
+    const QByteArray historical = config_json(
+        11, "\"enabled\": true", "\"enabled\": true");
+    auto prev = ptd::ConfigStorage::deserialize_json(historical, &err);
+    QVERIFY2(prev.has_value(), err.toUtf8().constData());
+    QVERIFY(!prev->audio.enabled);
+    QVERIFY(!prev->audio.muted);
+    for (int i = 0; i < ptd::kAudioEventCount; ++i) {
+        QCOMPARE(prev->audio.sounds[static_cast<std::size_t>(i)],
+                 std::string());
+    }
+
+    // The migration touches nothing else: trail and click survive verbatim.
+    auto mixed = ptd::ConfigStorage::deserialize_json(
+        config_json(11, "\"enabled\": true, \"style\": 5",
+                    "\"enabled\": true, \"end_radius_px\": 37.0,"
+                    " \"hold_wake_enabled\": true"), &err);
+    QVERIFY2(mixed.has_value(), err.toUtf8().constData());
+    QCOMPARE(static_cast<int>(mixed->trail.style),
+             static_cast<int>(ptd::TrailStyle::Pulse));
+    QCOMPARE(mixed->click.end_radius_px, 37.0f);
+    QVERIFY(mixed->click.hold_wake_enabled);
+    QVERIFY(!mixed->audio.enabled);
+
+    // A CURRENT-schema file round-trips all eight assignments plus volume
+    // through save/reload: a restart must not lose a configured sound.
+    ptd::AppConfig cfg{};
+    cfg.schema_version = ptd::AppConfig::kCurrentSchemaVersion;
+    cfg.audio.enabled = true;
+    cfg.audio.muted = false;
+    cfg.audio.volume = 0.63f;
+    for (int i = 0; i < ptd::kAudioEventCount; ++i) {
+        cfg.audio.sounds[static_cast<std::size_t>(i)] =
+            std::string("evt") + std::to_string(i) + ".wav";
+    }
+    const QByteArray saved = ptd::ConfigStorage::serialize_json(cfg);
+    QVERIFY(saved.contains(QByteArray("\"audio\":")));
+    QVERIFY(saved.contains(QByteArray("\"volume\":")));
+    auto back = ptd::ConfigStorage::deserialize_json(saved, &err);
+    QVERIFY2(back.has_value(), err.toUtf8().constData());
+    QCOMPARE(back->audio, cfg.audio);
+    QCOMPARE(back->schema_version, ptd::AppConfig::kCurrentSchemaVersion);
+
+    // Validation on load: an out-of-range volume and an escaping sound id
+    // never survive, so no developer-specific path is persisted.
+    const QByteArray hostile = QByteArray(R"({ "schema_version": 12,
+        "audio": { "enabled": true, "muted": false, "volume": 9.5,
+                   "sounds": { "left_down": "../../etc/pwn.wav",
+                               "scroll_up": "ok.wav" } } })");
+    auto fixed = ptd::ConfigStorage::deserialize_json(hostile, &err);
+    QVERIFY2(fixed.has_value(), err.toUtf8().constData());
+    QCOMPARE(fixed->audio.volume, ptd::AudioConfig::kMaxVolume);
+    QCOMPARE(fixed->audio.sounds[static_cast<int>(ptd::AudioEvent::LeftDown)],
+             std::string());
+    QCOMPARE(fixed->audio.sounds[static_cast<int>(ptd::AudioEvent::ScrollUp)],
+             std::string("ok.wav"));
+
+    // The protected-source barrier stays intact with audio keys present: a
+    // future schema is still unsupported, still byte-identical on disk, and
+    // still read-only for persistence. (T-107: the literal is CURRENT+1, not a
+    // hard-coded 13, so adding schema 13 could not turn this into a same-version
+    // file that loads normally.)
+    const std::filesystem::path future = test_dir_ / "t80_future.json";
+    const std::string future_body =
+        "{ \"schema_version\": "
+        + std::to_string(ptd::AppConfig::kCurrentSchemaVersion + 1)
+        + ", \"audio\": { \"enabled\": true,"
+          " \"sounds\": { \"left_down\": \"click.wav\" } },"
+          " \"unknown_future_object\": { \"x\": 1 } }";
+    {
+        std::ofstream out(future, std::ios::trunc);
+        out << future_body;
+    }
+    const auto guarded =
+        ptd::ConfigStorage::load_from_file_result(future.wstring());
+    QCOMPARE(static_cast<int>(guarded.status),
+             static_cast<int>(ptd::ConfigLoadStatus::UnsupportedFutureSchema));
+    QVERIFY(!guarded.persistence_allowed);
+    QVERIFY(!std::filesystem::exists(future.wstring() + L".corrupt"));
+    std::ifstream in(future, std::ios::binary);
+    const std::string after((std::istreambuf_iterator<char>(in)),
+                            std::istreambuf_iterator<char>());
+    QCOMPARE(after, future_body);
+}
+
+// T-107: the favorites list is a SUB-FIELD of the schema-12 audio block and
+// carries its OWN boundary (schema 13). A schema-12 file -- one written before
+// the field existed -- has a valid audio block that simply cannot carry
+// favorites, so it must read as "no favorites". Reading it as anything else
+// would mean an upgrade emptied a list the user never had.
+void TestConfig::audio_favorites_schema13_migration_and_roundtrip() {
+    QString err;
+    QCOMPARE(ptd::AppConfig::kCurrentSchemaVersion, 14);
+    QCOMPARE(ptd::AudioConfig::kAudioFavoritesSchema, 13);
+
+    // A schema-12 file WITH an audio block (valid assignments) but no favorites
+    // key: the assignments survive and the favorites list is empty -- the
+    // upgrade does not invent members.
+    const QByteArray schema12 = QByteArray(R"({ "schema_version": 12,
+        "audio": { "enabled": true, "muted": false, "volume": 0.5,
+                   "sounds": { "left_down": "click.wav" } } })");
+    auto prev = ptd::ConfigStorage::deserialize_json(schema12, &err);
+    QVERIFY2(prev.has_value(), err.toUtf8().constData());
+    QVERIFY(prev->audio.enabled);
+    QCOMPARE(prev->audio.volume, 0.5f);
+    QCOMPARE(prev->audio.sounds[static_cast<int>(ptd::AudioEvent::LeftDown)],
+             std::string("click.wav"));
+    QVERIFY(prev->audio.favorites.empty());
+
+    // A schema-12 file that ILLEGALLY carries a favorites key (only a schema-13
+    // writer could legitimately produce one) must NOT have it adopted: the
+    // boundary is source-schema authoritative, exactly like every other block.
+    const QByteArray schema12_with_favorites = QByteArray(R"({ "schema_version": 12,
+        "audio": { "enabled": true, "favorites": ["sneaky.wav"] } })");
+    auto sneaky = ptd::ConfigStorage::deserialize_json(schema12_with_favorites, &err);
+    QVERIFY2(sneaky.has_value(), err.toUtf8().constData());
+    QVERIFY(sneaky->audio.favorites.empty());
+
+    // A current-schema file round-trips the ordered list exactly, so a restart
+    // never loses the user's curated order.
+    ptd::AppConfig cfg{};
+    cfg.schema_version = ptd::AppConfig::kCurrentSchemaVersion;
+    cfg.audio.enabled = true;
+    cfg.audio.favorites = {"zeta.wav", "alpha.wav", "mid.wav"};
+    const QByteArray saved = ptd::ConfigStorage::serialize_json(cfg);
+    QVERIFY(saved.contains(QByteArray("\"favorites\":")));
+    auto back = ptd::ConfigStorage::deserialize_json(saved, &err);
+    QVERIFY2(back.has_value(), err.toUtf8().constData());
+    QCOMPARE(back->audio.favorites, cfg.audio.favorites);
+    QCOMPARE(back->schema_version, ptd::AppConfig::kCurrentSchemaVersion);
+}
+
+// T-107: favorites reuse the assignment sanitizer, so a favorite can never be a
+// path; the list is de-duplicated keeping FIRST position (the user's order),
+// and bounded by kMaxFavorites so a corrupt file cannot smuggle an unbounded
+// array into the configuration.
+void TestConfig::audio_favorites_are_sanitized_deduped_and_bounded() {
+    QString err;
+
+    // On the deserialize path: an escaping id is dropped, a repeat keeps its
+    // first position, and only plain names survive.
+    const QByteArray hostile = QByteArray(R"({ "schema_version": 13,
+        "audio": { "enabled": true,
+                   "favorites": ["b.wav", "../../etc/pwn.wav", "a.wav", "b.wav", "c"] } })");
+    auto fixed = ptd::ConfigStorage::deserialize_json(hostile, &err);
+    QVERIFY2(fixed.has_value(), err.toUtf8().constData());
+    const std::vector<std::string> expected{"b.wav", "a.wav"};
+    QCOMPARE(fixed->audio.favorites, expected);
+
+    // Directly through validated(): the same rules, plus the bound.
+    ptd::AudioConfig big{};
+    for (int i = 0; i < ptd::AudioConfig::kMaxFavorites + 20; ++i) {
+        big.favorites.push_back(std::string("s") + std::to_string(i) + ".wav");
+    }
+    const ptd::AudioConfig bounded = ptd::AudioConfig::validated(big);
+    QCOMPARE(static_cast<int>(bounded.favorites.size()),
+             ptd::AudioConfig::kMaxFavorites);
+    // The bound truncates the TAIL, so the first curated entries are kept.
+    QCOMPARE(bounded.favorites.front(), std::string("s0.wav"));
+    QCOMPARE(bounded.favorites.back(),
+             std::string("s") + std::to_string(ptd::AudioConfig::kMaxFavorites - 1)
+                 + ".wav");
+
+    // A non-string entry and an empty string are skipped, never coerced.
+    const QByteArray mixed = QByteArray(R"({ "schema_version": 13,
+        "audio": { "enabled": true, "favorites": ["ok.wav", 42, "", "also.wav"] } })");
+    auto cleaned = ptd::ConfigStorage::deserialize_json(mixed, &err);
+    QVERIFY2(cleaned.has_value(), err.toUtf8().constData());
+    const std::vector<std::string> expect2{"ok.wav", "also.wav"};
+    QCOMPARE(cleaned->audio.favorites, expect2);
+}
+
 void TestConfig::start_with_windows_schema10_migration_and_roundtrip() {
     QString err;
 
@@ -1964,11 +2161,16 @@ void TestConfig::load_result_classifies_every_provenance() {
 // future fields survive.
 void TestConfig::future_schema_is_unsupported_not_corrupt() {
     const std::filesystem::path future = test_dir_ / "core001_future.json";
+    // One past the CURRENT schema, so this file is valid-but-unsupported,
+    // never a corrupt one. (T-107: derived from kCurrentSchemaVersion, not a
+    // hard-coded 13, so a future bump cannot turn this into a normal load.)
     const std::string body =
-        "{ \"schema_version\": 12, \"master_enabled\": true, "
-        "\"unknown_future_object\": { \"x\": 1, \"y\": [2, 3] }, "
-        "\"trail\": { \"enabled\": true }, "
-        "\"click\": { \"enabled\": true } }";
+        "{ \"schema_version\": "
+        + std::to_string(ptd::AppConfig::kCurrentSchemaVersion + 1)
+        + ", \"master_enabled\": true, "
+          "\"unknown_future_object\": { \"x\": 1, \"y\": [2, 3] }, "
+          "\"trail\": { \"enabled\": true }, "
+          "\"click\": { \"enabled\": true } }";
     {
         std::ofstream out(future, std::ios::trunc);
         out << body;
@@ -2561,6 +2763,36 @@ void TestConfig::dev_diff_exhaustive_field_coverage() {
         ptd::AppConfig m = base;
         m.render.diagnostic_primitives = !base.render.diagnostic_primitives;
         assert_one_diff(m, "render.diagnostic_primitives");
+    }
+    // 44. audio.enabled (T-80)
+    {
+        ptd::AppConfig m = base;
+        m.audio.enabled = !base.audio.enabled;
+        assert_one_diff(m, "audio.enabled");
+    }
+    // 45. audio.muted (T-80)
+    {
+        ptd::AppConfig m = base;
+        m.audio.muted = !base.audio.muted;
+        assert_one_diff(m, "audio.muted");
+    }
+    // 46. audio.volume (T-80)
+    {
+        ptd::AppConfig m = base;
+        m.audio.volume = (base.audio.volume == 0.5f) ? 0.75f : 0.5f;
+        assert_one_diff(m, "audio.volume");
+    }
+    // 47. audio.sounds.<event> (T-80: one assignment differs = one line)
+    {
+        ptd::AppConfig m = base;
+        m.audio.sounds[0] = "left_down.wav";
+        assert_one_diff(m, "audio.sounds.");
+    }
+    // 48. audio.favorites (T-107: the ordered favorites list is one field)
+    {
+        ptd::AppConfig m = base;
+        m.audio.favorites = {"favorite.wav"};
+        assert_one_diff(m, "audio.favorites");
     }
 }
 

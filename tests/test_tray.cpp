@@ -16,6 +16,8 @@
 #include "../src/config/release_defaults.h"
 #include "../src/core/log.h"
 #include "../src/config/dev_defaults.h"
+#include <QComboBox>
+#include "../src/audio/sound_engine.h"
 #include "../src/platform/autostart.h"
 #include "../src/ui/branding.h"
 #include "../src/ui/settings_window.h"
@@ -53,6 +55,8 @@ private slots:
     void autostart_is_tray_only();
     void close_hides_and_open_reuses_window();
     void restore_defaults_is_one_application_transaction();
+    // T-80: the application master switch gates runtime audio.
+    void application_master_gates_runtime_audio();
     void shutdown_persistence_is_bounded_and_coalesced();
 };
 
@@ -1095,7 +1099,7 @@ void TestTray::manual_startup_shows_one_general_window() {
         QCOMPARE(product_window_count(), 1);
         auto* tabs = product->findChild<QTabWidget*>();
         QVERIFY(tabs != nullptr);
-        QCOMPARE(tabs->count(), ptd::is_dev_build() ? 4 : 3);
+        QCOMPARE(tabs->count(), ptd::is_dev_build() ? 5 : 4);
         QCOMPARE(tabs->currentIndex(), 0);
         QVERIFY(product->findChild<QPushButton*>(QStringLiteral("btn_restore_all")) != nullptr);
     });
@@ -1150,6 +1154,47 @@ void TestTray::restore_defaults_is_one_application_transaction() {
         restore->click();
         QCOMPARE(bulk.count(), 1);
         QCOMPARE(app.save_invocation_count_for_tests(), 1);
+    });
+}
+
+// T-80: the application is the single owner of the audio engine. Two
+// application-level controls must hold end to end:
+//   1. the master switch gates runtime sound -- an assignment published
+//      through the real Sound tab must not become audible while ProTrail is
+//      disabled, and must become audible the moment it is enabled;
+//   2. shutdown leaves no active playback behind.
+void TestTray::application_master_gates_runtime_audio() {
+    with_running_application("audio_master", ptd::StartupMode::Normal,
+                             [](Application& app) {
+        auto* product = app.product_window_for_tests();
+        QVERIFY(product != nullptr);
+
+        // Disable ProTrail at the application level first: the master switch
+        // is a RUNTIME gate for sound as well.
+        auto* chk_master = product->findChild<QCheckBox*>("chk_master");
+        QVERIFY(chk_master != nullptr);
+        chk_master->setChecked(false);
+        QVERIFY(!app.sound_engine_for_tests().audio_audible());
+        QCOMPARE(app.sound_engine_for_tests().active_voice_count(), 0);
+
+        // Enable audio through the real Sound tab while the master is still
+        // OFF. The configuration is accepted, but nothing becomes audible: the
+        // application-level gate wins over the audio configuration.
+        auto* chk_sound = product->findChild<QCheckBox*>("chk_sound_enabled");
+        QVERIFY(chk_sound != nullptr);
+        chk_sound->setChecked(true);
+        QVERIFY(!app.sound_engine_for_tests().audio_audible());
+        QCOMPARE(app.sound_engine_for_tests().active_voice_count(), 0);
+        QVERIFY(!app.sound_engine_for_tests().is_playing_preview());
+
+        // Enabling the master switch re-arms the engine with the same config.
+        chk_master->setChecked(true);
+        QVERIFY(app.sound_engine_for_tests().audio_audible());
+
+        // Turning the master switch off again suppresses runtime sound.
+        chk_master->setChecked(false);
+        QVERIFY(!app.sound_engine_for_tests().audio_audible());
+        QCOMPARE(app.sound_engine_for_tests().active_voice_count(), 0);
     });
 }
 

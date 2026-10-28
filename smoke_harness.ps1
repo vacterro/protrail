@@ -11,7 +11,14 @@ param(
     [switch]$RequireProductIcon,
     # SanitizedPath: launch with a system-only PATH so no developer Qt/MSVC
     # directory can satisfy a missing package dependency.
-    [switch]$SanitizedPath
+    [switch]$SanitizedPath,
+    # T-81 RequireSounds: the package must stage a NONEMPTY sound catalog
+    # beside the executable and the deployed backend must report an actual
+    # audio self-check. Used by the local-only rehearsal path.
+    [switch]$RequireSounds,
+    # T-81: launch with an unrelated working directory. The sound catalog is
+    # executable-relative, so audio must work regardless of the CWD.
+    [string]$WorkingDirectory = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -32,12 +39,34 @@ if (-not (Test-Path $exe)) {
 
 # Required deployment files
 $requiredFiles = @("Qt6Core.dll", "Qt6Gui.dll", "Qt6Widgets.dll", "platforms\qwindows.dll")
+if ($RequireSounds) {
+    # T-81: the audio engine links Qt6::Multimedia, so a sound-carrying package
+    # must also stage the multimedia module.
+    $requiredFiles += "Qt6Multimedia.dll"
+}
 foreach ($f in $requiredFiles) {
     $target = Join-Path $fullDeployDir $f
     if (-not (Test-Path $target)) {
         [Console]::Error.WriteLine("SMOKE_FAIL_MISSING_FILE: $f not found in $fullDeployDir")
         exit 1
     }
+}
+
+# --- T-81: sound catalog staging gate (file existence only; actual playback
+# is proven from the AUDIO_SELFCHECK log line at the end of this harness) ---
+$soundDir = Join-Path $fullDeployDir "sound"
+$soundCount = 0
+if (Test-Path -LiteralPath $soundDir) {
+    $soundCount = @(Get-ChildItem -LiteralPath $soundDir -Filter *.wav -File -ErrorAction SilentlyContinue).Count
+}
+if ($RequireSounds -and $soundCount -lt 1) {
+    [Console]::Error.WriteLine("SMOKE_FAIL_SOUND_CATALOG_EMPTY: no .wav beside the executable in $fullDeployDir")
+    exit 1
+}
+if ($soundCount -ge 1) {
+    Write-Output "SOUND_CATALOG_STAGED ($soundCount wav files beside the executable)"
+} else {
+    Write-Output "SOUND_CATALOG_EMPTY (none staged)"
 }
 
 # --- Release metadata gates (packaged binaries) ---
@@ -183,7 +212,12 @@ if ($SanitizedPath) {
     Write-Output "SANITIZED_PATH: $env:PATH"
 }
 try {
-    $proc = Start-Process -FilePath $exe -WorkingDirectory $fullDeployDir -PassThru -WindowStyle Hidden
+    $launchDir = if ($WorkingDirectory) { $WorkingDirectory } else { $fullDeployDir }
+    if ($WorkingDirectory) {
+        New-Item -ItemType Directory -Path $WorkingDirectory -Force | Out-Null
+        Write-Output "LAUNCH_WORKING_DIRECTORY: $WorkingDirectory"
+    }
+    $proc = Start-Process -FilePath $exe -WorkingDirectory $launchDir -PassThru -WindowStyle Hidden
 } finally {
     $env:PATH = $savedPath
 }
@@ -303,6 +337,33 @@ if ($markerIndex -lt $expectedMarkers.Length) {
 }
 
 Write-Output "SHUTDOWN_LOG_EVIDENCE_OK"
+
+# --- T-81: the deployed multimedia backend must have actually loaded and
+# played a shipped sound. The application writes one AUDIO_SELFCHECK line in
+# smoke mode; file staging and metadata cannot prove this. PLAYBACK_VERIFIED
+# needs a human with speakers (HARDWARE), so PLAYED and BACKEND_ONLY are the
+# machine-verifiable outcomes: either proves the deployed backend decoded and
+# played the file. LOAD_ERROR means the backend refused it -- that is a real
+# failure, not an environment note.
+$audioLine = $logContent | Where-Object { $_ -match 'AUDIO_SELFCHECK' } | Select-Object -Last 1
+if ($audioLine) {
+    Write-Output "AUDIO_SELFCHECK: $audioLine"
+    if ($audioLine -match 'RESULT=LOAD_ERROR' -or $audioLine -match 'RESULT=INIT_FAILED' -or $audioLine -match 'RESULT=RESOLVE_FAILED') {
+        Fail-Smoke "SMOKE_FAIL_AUDIO_BACKEND: deployed backend failed the audio self-check"
+    }
+    if ($audioLine -match 'RESULT=NO_SOUNDS' -and $RequireSounds) {
+        Fail-Smoke "SMOKE_FAIL_SOUND_CATALOG_EMPTY: self-check found no shipped sounds"
+    }
+    if ($audioLine -match 'RESULT=PLAYED') {
+        Write-Output "DEPLOYED_AUDIO_PLAYBACK_OK (QSoundEffect reached Playing through the deployed backend)"
+    } elseif ($audioLine -match 'RESULT=BACKEND_ONLY') {
+        Write-Output "DEPLOYED_AUDIO_BACKEND_OK (no output device; the deployed backend loaded and accepted playback)"
+    }
+} elseif ($RequireSounds) {
+    Fail-Smoke "SMOKE_FAIL_AUDIO_SELFCHECK_MISSING: no AUDIO_SELFCHECK line in the smoke log"
+} else {
+    Write-Output "AUDIO_SELFCHECK absent (not required for this package)"
+}
 
 # Verify isolated config was written during shutdown
 if (-not (Test-Path $configFile)) {

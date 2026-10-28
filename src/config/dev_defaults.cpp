@@ -78,6 +78,17 @@ void check_field_diff(std::vector<std::string>& out, const char* name, const T& 
     }
 }
 
+// T-80: sound identifiers are strings, so the field diff needs a text form.
+void check_field_diff(std::vector<std::string>& out, const char* name,
+                      const std::string& cur, const std::string& ref) {
+    if (cur != ref) {
+        std::ostringstream ss;
+        ss << name << ": " << (ref.empty() ? "none" : ref)
+           << " -> " << (cur.empty() ? "none" : cur);
+        out.push_back(ss.str());
+    }
+}
+
 void check_color_diff(std::vector<std::string>& out, const char* name,
                       uint8_t cr, uint8_t cg, uint8_t cb,
                       uint8_t rr, uint8_t rg, uint8_t rb) {
@@ -298,6 +309,108 @@ std::vector<std::string> diff_configs_lines(const AppConfig& cur, const AppConfi
     check_field_diff(diffs, "click.outline_thickness_px", cur.click.outline_thickness_px, ref.click.outline_thickness_px);
     check_field_diff(diffs, "click.fill_opacity", cur.click.fill_opacity, ref.click.fill_opacity);
     check_field_diff(diffs, "click.easing", static_cast<int>(cur.click.easing), static_cast<int>(ref.click.easing));
+
+    // T-80 Audio
+    check_field_diff(diffs, "audio.enabled", cur.audio.enabled, ref.audio.enabled);
+    check_field_diff(diffs, "audio.muted", cur.audio.muted, ref.audio.muted);
+    check_field_diff(diffs, "audio.volume", cur.audio.volume, ref.audio.volume);
+    for (int i = 0; i < kAudioEventCount; ++i) {
+        const std::string key = std::string("audio.sounds.") + audio_event_name(i);
+        check_field_diff(diffs, key.c_str(), cur.audio.sounds[static_cast<std::size_t>(i)],
+                         ref.audio.sounds[static_cast<std::size_t>(i)]);
+    }
+    // T-107: the favorites list is one ordered field. Compare it as a single
+    // joined value so the diff reports one line (the same shape every other
+    // multi-value field uses), not one line per element.
+    {
+        std::string cur_favs;
+        for (const std::string& id : cur.audio.favorites) {
+            if (!cur_favs.empty()) cur_favs += ',';
+            cur_favs += id;
+        }
+        std::string ref_favs;
+        for (const std::string& id : ref.audio.favorites) {
+            if (!ref_favs.empty()) ref_favs += ',';
+            ref_favs += id;
+        }
+        check_field_diff(diffs, "audio.favorites", cur_favs, ref_favs);
+    }
+
+    // T-120 schema 14 audio fields
+    {
+        std::string cur_rec;
+        for (const std::string& id : cur.audio.recent_sounds) {
+            if (!cur_rec.empty()) cur_rec += ',';
+            cur_rec += id;
+        }
+        std::string ref_rec;
+        for (const std::string& id : ref.audio.recent_sounds) {
+            if (!ref_rec.empty()) ref_rec += ',';
+            ref_rec += id;
+        }
+        check_field_diff(diffs, "audio.recent_sounds", cur_rec, ref_rec);
+    }
+    check_field_diff(diffs, "audio.preview_on_selection", cur.audio.preview_on_selection, ref.audio.preview_on_selection);
+    check_field_diff(diffs, "audio.preview_debounce_ms", cur.audio.preview_debounce_ms, ref.audio.preview_debounce_ms);
+    check_field_diff(diffs, "audio.keyboard_enabled", cur.audio.keyboard_enabled, ref.audio.keyboard_enabled);
+    check_field_diff(diffs, "audio.keyboard_scope", std::string(keyboard_scope_name(cur.audio.keyboard_scope)),
+                     std::string(keyboard_scope_name(ref.audio.keyboard_scope)));
+    check_field_diff(diffs, "audio.typing_sounds_enabled", cur.audio.typing_sounds_enabled, ref.audio.typing_sounds_enabled);
+    check_field_diff(diffs, "audio.modifier_tap_sounds_enabled", cur.audio.modifier_tap_sounds_enabled, ref.audio.modifier_tap_sounds_enabled);
+    check_field_diff(diffs, "audio.suppress_repeat_typing", cur.audio.suppress_repeat_typing, ref.audio.suppress_repeat_typing);
+    check_field_diff(diffs, "audio.typing_repeat_cooldown_ms", cur.audio.typing_repeat_cooldown_ms, ref.audio.typing_repeat_cooldown_ms);
+    check_field_diff(diffs, "audio.suppress_sensitive_contexts", cur.audio.suppress_sensitive_contexts, ref.audio.suppress_sensitive_contexts);
+    {
+        std::string cur_ex;
+        for (const std::string& p : cur.audio.excluded_processes) {
+            if (!cur_ex.empty()) cur_ex += ',';
+            cur_ex += p;
+        }
+        std::string ref_ex;
+        for (const std::string& p : ref.audio.excluded_processes) {
+            if (!ref_ex.empty()) ref_ex += ',';
+            ref_ex += p;
+        }
+        check_field_diff(diffs, "audio.excluded_processes", cur_ex, ref_ex);
+    }
+    check_field_diff(diffs, "audio.horizontal_scroll_enabled", cur.audio.horizontal_scroll_enabled, ref.audio.horizontal_scroll_enabled);
+    check_field_diff(diffs, "audio.scroll_sensitivity", cur.audio.scroll_sensitivity, ref.audio.scroll_sensitivity);
+    check_field_diff(diffs, "audio.scroll_cooldown_ms", cur.audio.scroll_cooldown_ms, ref.audio.scroll_cooldown_ms);
+    check_field_diff(diffs, "audio.scroll_max_rate_hz", cur.audio.scroll_max_rate_hz, ref.audio.scroll_max_rate_hz);
+    check_field_diff(diffs, "audio.scroll_pitch_variation", cur.audio.scroll_pitch_variation, ref.audio.scroll_pitch_variation);
+    check_field_diff(diffs, "audio.active_profile", std::string(sound_profile_preset_name(cur.audio.active_profile)),
+                     std::string(sound_profile_preset_name(ref.audio.active_profile)));
+    {
+        std::string cur_cs;
+        for (const auto& cs : cur.audio.custom_shortcuts) {
+            if (!cur_cs.empty()) cur_cs += ';';
+            cur_cs += cs.id + "=" + cs.chord;
+        }
+        std::string ref_cs;
+        for (const auto& cs : ref.audio.custom_shortcuts) {
+            if (!ref_cs.empty()) ref_cs += ';';
+            ref_cs += cs.id + "=" + cs.chord;
+        }
+        check_field_diff(diffs, "audio.custom_shortcuts", cur_cs, ref_cs);
+    }
+    {
+        auto summarize_ec = [](const std::unordered_map<std::string, EventSoundConfig>& m) {
+            std::vector<std::string> keys;
+            keys.reserve(m.size());
+            for (const auto& [k, _] : m) keys.push_back(k);
+            std::sort(keys.begin(), keys.end());
+            std::string s;
+            for (const auto& k : keys) {
+                const auto& ec = m.at(k);
+                if (!s.empty()) s += ';';
+                s += k + ":" + ec.sound_id + ":" + (ec.enabled ? "1" : "0");
+            }
+            return s;
+        };
+        check_field_diff(diffs, "audio.event_configs",
+                         summarize_ec(cur.audio.event_configs),
+                         summarize_ec(ref.audio.event_configs));
+    }
 
     // Render
     check_field_diff(diffs, "render.diagnostic_primitives", cur.render.diagnostic_primitives, ref.render.diagnostic_primitives);

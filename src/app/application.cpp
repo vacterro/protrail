@@ -7,6 +7,7 @@
 #include "../core/cursor_history.h"
 #include "../platform/dpi_awareness.h"
 #include "../platform/mouse_input.h"
+#include "../platform/monotonic_clock.h"
 #include "../render/overlay_manager.h"
 #include "../effects/trail_effect.h"
 #include "../effects/click_bubble_effect.h"
@@ -19,8 +20,11 @@
 #include "../config/release_defaults.h"
 #include "../render/render_scheduler.h"
 #include "../render/deferred_coalescer.h"
+#include "../audio/sound_backend.h"
 
 #include <QApplication>
+#include <QElapsedTimer>
+#include <QEventLoop>
 #include <QFont>
 #include <QString>
 #include <QTimer>
@@ -519,8 +523,43 @@ int Application::run() {
         // knows nothing about effects or rendering.
         d_->mouse_input->set_activity_callback(
             [this](const ptd::CursorSample& s) { on_mouse_activity(s); });
+        // T-80: the wheel travels its own path. It is not an activity sample:
+        // it never reaches CursorHistory and never wakes the renderer, so a
+        // scroll while the trail is off produces sound and nothing else.
+        d_->mouse_input->set_wheel_callback(
+            [this](int64_t ts, int delta) { on_mouse_wheel(ts, delta); });
+        // T-120: horizontal wheel and the auxiliary X1/X2 buttons travel the
+        // same audio-only path as the vertical wheel. They never reach
+        // CursorHistory and never wake the renderer, so a horizontal scroll
+        // produces sound and nothing else.
+        d_->mouse_input->set_horizontal_wheel_callback(
+            [this](int64_t ts, int delta) { on_mouse_horizontal_wheel(ts, delta); });
+        d_->mouse_input->set_aux_button_callback(
+            [this](int64_t ts, const char* canonical_event_id) {
+                on_mouse_aux_button(ts, canonical_event_id);
+            });
+
+        // T-120: the passive keyboard listener on the same GUI thread. It
+        // registers a global raw-input sink ONLY when the user explicitly opts
+        // into SYSTEM_WIDE capture; the AppOnly default receives events only
+        // from ProTrail's own surface, so no other application's typing is
+        // observed.
+        keyboard_input_ = std::make_unique<ptd::KeyboardInput>();
+        if (keyboard_input_->create(inst)) {
+            keyboard_input_->set_event_callback(
+                [this](int64_t ts, const ptd::ClassifiedKeyEvent& ev) {
+                    on_keyboard_event(ts, ev);
+                });
+            // The subsystem starts with the persisted config, which defaults to
+            // OFF, so a fresh install captures no typing at all.
+            keyboard_input_->apply_config(d_->app_config.audio);
+            app_log(2, "keyboard input layer started (passive raw input, APP_ONLY default)");
+        } else {
+            keyboard_input_.reset();
+            app_log(2, "keyboard input creation failed; continuing without keyboard sounds");
+        }
     } else {
-        app_log(3, "mouse input creation failed; continuing without input sampling");
+        app_log(2, "mouse input creation failed; continuing without input sampling");
     }
 
     // T-007R A3: the 8 ms input-pump QTimer is gone. WM_INPUT for the
@@ -581,6 +620,52 @@ int Application::run() {
     // for Trail/Click/Master, validated config publication.
     d_->settings = std::make_unique<ptd::ui::SettingsWindow>(d_->app_config);
     d_->settings->set_developer_defaults_controller(true);
+
+    // T-80: the audio engine follows the durable configuration snapshot that
+    // was already loaded exactly once, then the Sound tab publishes into it.
+    sound_engine_.set_master_enabled(d_->master_enabled);
+    sound_engine_.apply_config(d_->app_config.audio);
+    if (!sound_engine_.initialize()) {
+        app_log(3, "audio engine initialization failed; continuing without sound");
+    }
+    // T-81: in smoke mode only, prove the DEPLOYED backend can actually load
+    // and play a shipped sound (file metadata gates cannot see a broken or
+    // missing multimedia plugin). Deferred to the first idle turn: the probe
+    // pumps the event loop, and running it inline would delay the product
+    // window past the smoke probe. Gate admission is bypassed on purpose: this
+    // drives QtSoundPlayer directly, independent of the user config.
+    {
+        wchar_t smoke_check[8]{};
+        const DWORD smoke_exit_len =
+            GetEnvironmentVariableW(L"PROTRAIL_SMOKE_AUTO_EXIT_MS", smoke_check, 8);
+        if (smoke_exit_len > 0 && smoke_exit_len < 8 && _wtoi(smoke_check) > 0) {
+            QTimer::singleShot(0, qApp, [this] { run_audio_self_check(); });
+        }
+    }
+    QObject::connect(d_->settings.get(), &ptd::ui::SettingsWindow::audio_config_changed,
+            [this](const ptd::AudioConfig& c) { apply_audio_config(c); });
+    QObject::connect(d_->settings.get(), &ptd::ui::SettingsWindow::sound_preview_requested,
+            [this](const std::string& id) { sound_engine_.preview_sound(id); });
+    // T-121: event preview resolves the event's own configuration (single WAV
+    // or random pool), so the audition matches what runtime playback does.
+    QObject::connect(d_->settings.get(), &ptd::ui::SettingsWindow::sound_event_preview_requested,
+            [this](const ptd::EventSoundConfig& ec) { sound_engine_.preview_event_config(ec); });
+    QObject::connect(d_->settings.get(), &ptd::ui::SettingsWindow::sound_preview_stop_requested,
+            [this] { sound_engine_.stop_preview(); });
+    // T-120: Stop All silences every live voice, not just the preview slot.
+    QObject::connect(d_->settings.get(), &ptd::ui::SettingsWindow::sound_stop_all_requested,
+            [this] { sound_engine_.stop_all_sounds(); });
+    // T-120: the AppOnly keyboard scope. This window is the only event source
+    // in that scope, so Application feeds its keys to the passive listener and
+    // the router decides. handle_local_key_event drops them while the global
+    // sink is registered, so SystemWide mode never hears a key twice.
+    QObject::connect(d_->settings.get(), &ptd::ui::SettingsWindow::app_key_event,
+            [this](int vk, int scan_code, bool extended, bool is_down) {
+                if (keyboard_input_ == nullptr) return;
+                keyboard_input_->handle_local_key_event(
+                    static_cast<uint16_t>(vk), static_cast<uint16_t>(scan_code),
+                    extended, is_down, ptd::now_ns());
+            });
     // Manual launch opens the single ProTrail window on General. Autostart
     // remains tray-only: the product window is created but never shown.
     if (ptd::startup_mode_requests_product_window(d_->startup_mode)) {
@@ -760,6 +845,30 @@ void Application::on_mouse_activity(const ptd::CursorSample& newest) {
             break;
     }
 
+    // T-80: mouse sounds. Deliberately independent of the visual Click FX:
+    // audio plays with the Click effect disabled, and it never contributes to
+    // the render-wake decision below (playing a sound must not start a frame).
+    switch (newest.button) {
+        case ptd::MouseButton::Left:
+            sound_engine_.play_event(newest.action == ptd::ButtonAction::Down
+                                         ? ptd::AudioEvent::LeftDown
+                                         : ptd::AudioEvent::LeftUp);
+            break;
+        case ptd::MouseButton::Right:
+            sound_engine_.play_event(newest.action == ptd::ButtonAction::Down
+                                         ? ptd::AudioEvent::RightDown
+                                         : ptd::AudioEvent::RightUp);
+            break;
+        case ptd::MouseButton::Middle:
+            sound_engine_.play_event(newest.action == ptd::ButtonAction::Down
+                                         ? ptd::AudioEvent::MiddleDown
+                                         : ptd::AudioEvent::MiddleUp);
+            break;
+        case ptd::MouseButton::None:
+        default:
+            break;
+    }
+
     // C10/C11 + T-024: wake the shared active-only scheduler when either
     // effect can produce live content. Movement wakes only for the trail; a
     // spawned bubble wakes even with the trail disabled. has_live_content()
@@ -774,6 +883,128 @@ void Application::on_mouse_activity(const ptd::CursorSample& newest) {
     }
 }
 
+void Application::on_mouse_wheel(int64_t timestamp_ns, int vertical_delta) {
+    // The master switch is a runtime gate for audio too: no wheel event may
+    // produce a sound while ProTrail is disabled.
+    if (!d_->master_enabled) return;
+    if (d_->settings && d_->settings->is_browsing_sound_catalog()) return;
+
+    // Bounded accumulation: a high-resolution wheel (or a host that reports
+    // unscaled deltas) yields at most a fixed number of events per packet,
+    // scaled by user scroll sensitivity.
+    const int events = ptd::accumulate_wheel_scaled(
+        wheel_accumulator_, vertical_delta, d_->app_config.audio.scroll_sensitivity);
+    for (int i = 0; i < events; ++i) {
+        sound_engine_.play_event_at(ptd::AudioEvent::ScrollUp, timestamp_ns);
+    }
+    for (int i = 0; i < -events; ++i) {
+        sound_engine_.play_event_at(ptd::AudioEvent::ScrollDown, timestamp_ns);
+    }
+}
+
+// T-120: horizontal wheel. Direction is derived from the signed delta, and the
+// same bounded-accumulator contract applies so a high-resolution trackpad
+// cannot flood the engine. The master switch gates it exactly like the vertical
+// wheel.
+void Application::on_mouse_horizontal_wheel(int64_t timestamp_ns, int horizontal_delta) {
+    if (!d_->master_enabled) return;
+    if (!d_->app_config.audio.horizontal_scroll_enabled) return;
+    if (d_->settings && d_->settings->is_browsing_sound_catalog()) return;
+
+    const int events = ptd::accumulate_wheel_scaled(
+        hwheel_accumulator_, horizontal_delta, d_->app_config.audio.scroll_sensitivity);
+    for (int i = 0; i < events; ++i) {
+        sound_engine_.play_event_at("mouse.scroll_right", timestamp_ns);
+    }
+    for (int i = 0; i < -events; ++i) {
+        sound_engine_.play_event_at("mouse.scroll_left", timestamp_ns);
+    }
+}
+
+// T-120: auxiliary mouse buttons (X1/X2). MouseInput normalizes the flag into
+// the canonical event id, so the application only routes it.
+void Application::on_mouse_aux_button(int64_t timestamp_ns, const char* canonical_event_id) {
+    if (!d_->master_enabled) return;
+    if (canonical_event_id == nullptr || *canonical_event_id == '\0') return;
+    sound_engine_.play_event(canonical_event_id);
+    (void)timestamp_ns;
+}
+
+// T-120: passive keyboard event. The pure KeyboardInputRouter already resolved
+// the 7-tier arbitration, so the empty event id means "silence" and is dropped
+// here. Repeat suppression honours the user's cooldown preference.
+void Application::on_keyboard_event(int64_t timestamp_ns, const ptd::ClassifiedKeyEvent& ev) {
+    if (!d_->master_enabled) return;
+    if (ev.event_id.empty()) return;
+    if (ev.is_repeat && d_->app_config.audio.suppress_repeat_typing) return;
+    sound_engine_.play_event_at(ev.event_id, timestamp_ns);
+}
+
+void Application::apply_audio_config(const ptd::AudioConfig& cfg) {
+    const ptd::AudioConfig next = ptd::AudioConfig::validated(cfg);
+    d_->app_config.audio = next;
+    sound_engine_.apply_config(next);
+    // T-120: the keyboard router resolves events from the SAME configuration, so
+    // a changed shortcut or a disabled subsystem takes effect on the next key
+    // without recreating the listener.
+    if (keyboard_input_) {
+        keyboard_input_->apply_config(next);
+    }
+    // PERF-002: preview immediate; durable write debounced.
+    request_deferred_save();
+}
+
+ptd::KeyboardInput* Application::keyboard_input_for_tests() const {
+    return keyboard_input_.get();
+}
+
+// T-81: smoke-only deployed-backend check. A package manifest and a staging
+// file list cannot prove the multimedia runtime works; this does. The result
+// vocabulary is deliberately narrow: PLAYED (a voice reached Playing),
+// BACKEND_ONLY (the file decoded and played through the deployed backend but
+// no output device was available), NO_SOUNDS (nothing staged), INIT_FAILED,
+// LOAD_ERROR (the backend refused the file), RESOLVE_FAILED.
+void Application::run_audio_self_check() {
+    const QStringList ids = ptd::SoundCatalog::sound_ids();
+    if (ids.isEmpty()) {
+        app_log(2, "AUDIO_SELFCHECK catalog=0 RESULT=NO_SOUNDS "
+                   "(no sound directory beside the executable)");
+        return;
+    }
+    const QString first = ids.first();
+    const QString path = ptd::SoundCatalog::resolve_sound_path(first.toStdString());
+    if (path.isEmpty()) {
+        app_log(3, "AUDIO_SELFCHECK RESULT=RESOLVE_FAILED id=" + first.toStdString());
+        return;
+    }
+    ptd::QtSoundPlayer probe;
+    if (!probe.initialize()) {
+        app_log(3, "AUDIO_SELFCHECK RESULT=INIT_FAILED");
+        return;
+    }
+    const bool accepted = probe.play("@selfcheck", path.toStdString(), false);
+    std::string status = probe.backend_status();
+    // Bounded wait for the Loading transition, driven by the live event loop.
+    QElapsedTimer clock;
+    clock.start();
+    while (clock.elapsed() < 2000 && (status == "LOADING" || probe.active_voice_count() == 0)) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        status = probe.backend_status();
+    }
+    const int voices = probe.active_voice_count();
+    probe.stop_all();
+    probe.shutdown();
+
+    const std::string result =
+        !accepted ? "LOAD_ERROR"
+        : status == "ERROR" ? "LOAD_ERROR"
+        : voices > 0 ? "PLAYED"
+                     : "BACKEND_ONLY";
+    app_log(2, "AUDIO_SELFCHECK catalog=" + std::to_string(ids.size()) +
+                   " file=" + first.toStdString() + " status=" + status +
+                   " voices=" + std::to_string(voices) + " RESULT=" + result);
+}
+
 // MVP 05 Phase R: master enable/disable.
 // OFF: clear visible effects deterministically (no frozen trail/bubble),
 //      present a transparent clear, stop the timer, and refuse new
@@ -782,6 +1013,8 @@ void Application::set_master_enabled(bool on) {
     if (d_->master_enabled == on) return;
     d_->master_enabled = on;
     d_->app_config.master_enabled = on;
+    // T-80: the application-level master switch suppresses runtime audio.
+    sound_engine_.set_master_enabled(on);
     if (d_->tray_icon) d_->tray_icon->set_master_enabled(on);
     if (on) {
         app_log(2, "ProTrail master enable: ON");
@@ -1043,6 +1276,10 @@ void Application::apply_app_config_transaction(const ptd::AppConfig& cfg) {
     d_->trail_config = next.trail;
     d_->click_config = next.click;
     d_->app_config = next;
+    // T-80: one transaction covers audio as well. The master gate is
+    // re-applied first, so a Restore All that clears master is silent.
+    sound_engine_.set_master_enabled(d_->master_enabled);
+    sound_engine_.apply_config(next.audio);
     d_->trail_effect.set_config(d_->trail_config);
     d_->click_effect.set_config(d_->click_config);
     if (d_->tray_icon) d_->tray_icon->set_master_enabled(d_->master_enabled);
@@ -1205,6 +1442,9 @@ void Application::shutdown() {
         d_->mouse_input->destroy();
         d_->mouse_input.reset();
     }
+    // T-80: silence every voice before the Qt object graph goes away, so no
+    // QSoundEffect callback can fire against a torn-down event loop.
+    sound_engine_.shutdown();
     d_->cursor_history.clear();
     d_->click_effect.clear();
     if (d_->tray_icon) {

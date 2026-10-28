@@ -1,1 +1,0 @@
-test_trail_effect: 12667 checks, 0 failures

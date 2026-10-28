@@ -9,6 +9,10 @@ artifacts/
 dist/
 .freebuff/
 
+# Python byte-compiled cache
+__pycache__/
+*.pyc
+
 # Local tooling state (editor/agent caches, never product sources)
 .codebase-memory/
 dev/presets/
@@ -30,6 +34,8 @@ dev/presets/
 /*.bat
 /*.ps1
 /*.cmd
+# protrail.cmd is the canonical single launcher, not scratch.
+!/protrail.cmd
 /*.tmp
 /*.dmp
 /*.zip

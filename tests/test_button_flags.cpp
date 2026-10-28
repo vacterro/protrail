@@ -4,8 +4,10 @@
 // unit-test binary.
 
 #include "../src/platform/button_flags.h"
+#include "../src/config/audio_config.h"
 
 #include <cstdio>
+#include <string>
 
 namespace {
 
@@ -28,6 +30,14 @@ void expect_transitions(USHORT flags, int want_count,
             std::printf("FAIL %s: transition %d mismatch\n", what, i);
             return;
         }
+    }
+}
+
+void expect_eq(int got, int want, const char* what) {
+    ++g_checks;
+    if (got != want) {
+        ++g_failures;
+        std::printf("FAIL %s: got %d want %d\n", what, got, want);
     }
 }
 
@@ -91,6 +101,40 @@ int main() {
 
     // Capacity constant sanity.
     expect_true(kMaxButtonTransitions == 6, "capacity constant is 6");
+
+    // ---- T-80: bounded wheel accumulation (config-layer arithmetic) ----
+    // One notch is WHEEL_DELTA units; partial high-resolution deltas fold into
+    // the running remainder instead of being lost, and a burst cannot produce
+    // an unbounded number of events from one packet.
+
+    int notch = 0;
+    expect_eq(ptd::accumulate_wheel(notch, 120), 1, "one notch up emits one event");
+    expect_eq(ptd::accumulate_wheel(notch, -120), -1, "one notch down emits one event");
+    expect_true(notch == 0, "notches consumed exactly");
+
+    int partial = 0;
+    expect_eq(ptd::accumulate_wheel(partial, 40), 0, "a third of a notch emits nothing");
+    expect_eq(ptd::accumulate_wheel(partial, 40), 0, "two thirds emit nothing");
+    expect_eq(ptd::accumulate_wheel(partial, 40), 1, "the third completes one event");
+    expect_true(partial == 0, "remainder carried across packets, never dropped");
+
+    int burst = 0;
+    expect_eq(ptd::accumulate_wheel(burst, 120 * 50), ptd::kMaxWheelEventsPerPacket,
+              "a 50-notch burst is bounded per packet");
+    expect_true(burst == 0, "the accumulator never carries more than one packet");
+
+    // A partial up followed by a partial down cancels: no notch, no leftover.
+    int opposite = 0;
+    expect_eq(ptd::accumulate_wheel(opposite, 40), 0, "partial up emits nothing");
+    expect_eq(ptd::accumulate_wheel(opposite, -40), 0, "opposite partial cancels the accumulator");
+    expect_true(opposite == 0, "cancelled accumulator is zero");
+    expect_eq(ptd::accumulate_wheel(opposite, 40), 0, "cancelled accumulator emits nothing");
+
+    // Event key family: eight stable persisted names, indices are the enum.
+    expect_true(std::string(ptd::audio_event_name(0)) == "left_down", "event key 0");
+    expect_true(std::string(ptd::audio_event_name(7)) == "scroll_down", "event key 7");
+    expect_true(std::string(ptd::audio_event_name(8)).empty(), "out-of-range key is empty");
+    expect_eq(ptd::kAudioEventCount, 8, "eight assignable audio events");
 
     std::printf("test_button_flags: %d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

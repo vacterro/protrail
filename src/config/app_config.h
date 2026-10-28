@@ -2,6 +2,7 @@
 
 #include "../effects/trail_config.h"
 #include "../effects/click_config.h"
+#include "audio_config.h"
 
 namespace ptd {
 
@@ -43,7 +44,19 @@ struct AppConfig {
     // T-36: schema 11 adds the Advanced Motion Wake block
     // (click.wake_strength/wake_size/wake_spread/speed_response/
     // min_motion_speed_px_s/turn_accent/stop_accent).
-    static constexpr int kCurrentSchemaVersion = 11;
+    // T-80: schema 12 adds the audio configuration block (audio.enabled /
+    // audio.muted / audio.volume plus the eight event sound assignments).
+    // All assignments default to None and audio itself defaults to
+    // disabled, so a schema-11 file migrates to the silent defaults without
+    // touching a single visual, autostart or render preference.
+    // T-107: schema 13 adds the favorites list (audio.favorites) inside that
+    // same block; a schema-12 file migrates with an empty list, so an
+    // upgraded install keeps every assignment and simply has no favorites.
+    // T-120: schema 14 adds the comprehensive keyboard, mouse, shortcut,
+    // scroll, random pool, and playback policy system inside the audio block;
+    // a schema-13 file migrates with keyboard capture OFF, typing sounds OFF,
+    // and all existing mouse assignments and favorites preserved.
+    static constexpr int kCurrentSchemaVersion = 14;
 
     // Schema at which each late-introduced enum family became legitimate.
     static constexpr int kElementalClickStyleSchema = 6;  // ClickStyle 7..10
@@ -118,6 +131,27 @@ struct AppConfig {
     // ConfigStorage owns the enforcement; see config_storage.cpp.
     static constexpr int kAdvancedMotionWakeSchema = 11;
 
+    // T-80 AUDIO INTRODUCTION BOUNDARY. SOURCE SCHEMA AUTHORITATIVE, the
+    // same discipline as kHoldWakeSchema/kStartWithWindowsSchema: the whole
+    // audio block exists only from schema 12 onward. A file written by a
+    // schema <= 11 writer cannot carry audio semantics, so every audio key
+    // in such a file is ignored and the silent defaults stand -- an upgraded
+    // executable must never start making noise its owner never chose. From
+    // schema 12 the keys load normally and are clamped by
+    // AudioConfig::validated(). ConfigStorage owns the enforcement; see
+    // config_storage.cpp.
+    static constexpr int kAudioSchema = AudioConfig::kAudioSchema;
+
+    // T-107 FAVORITES INTRODUCTION BOUNDARY. The favorites list is a sub-field
+    // of the schema-12 audio block, so it is gated by its OWN schema: a
+    // schema-12 file carries a valid audio block that simply cannot contain a
+    // favorites list, and an absent list means "no favorites", never "the user
+    // emptied it". An assignment list written before this field existed is
+    // loaded unchanged; only the new list stays empty. ConfigStorage owns the
+    // enforcement; see config_storage.cpp.
+    static constexpr int kAudioFavoritesSchema = AudioConfig::kAudioFavoritesSchema;
+    static constexpr int kAudioKeyboardSystemSchema = AudioConfig::kAudioKeyboardSystemSchema;
+
     int schema_version = kCurrentSchemaVersion;
     bool master_enabled = true;
 
@@ -130,6 +164,9 @@ struct AppConfig {
     bool start_with_windows = false;
     TrailConfig trail{};
     ClickConfig click{};
+    // T-80: audio assignments + master enable/mute/volume. Not an effect
+    // setting, so it lives next to master_enabled rather than inside ClickConfig.
+    AudioConfig audio{};
     RenderConfig render{};
 
     static AppConfig validated(const AppConfig& in);

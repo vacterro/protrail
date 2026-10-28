@@ -9,6 +9,7 @@ AppConfig AppConfig::validated(const AppConfig& in) {
     }
     out.trail = TrailConfig::validated(out.trail);
     out.click = ClickConfig::validated(out.click);
+    out.audio = AudioConfig::validated(out.audio);
     return out;
 }
 

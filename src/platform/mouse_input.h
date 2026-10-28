@@ -1,5 +1,7 @@
 #pragma once
 
+#include "monotonic_clock.h"
+
 #include "../core/cursor_sample.h"
 #include "../core/cursor_history.h"
 
@@ -34,7 +36,9 @@ namespace ptd {
 //   CursorHistory.
 //
 // A RAWINPUT packet can carry more than one button transition; every
-// transition found is emitted (A5 fix).
+// transition found is emitted (A5 fix). The vertical wheel travels a separate
+// typed path (T-80): it is never folded into the activity sample stream and
+// never wakes the renderer.
 //
 // Renderer independence (B9): MouseInput never renders and never touches
 // effects. It exposes an optional activity callback: after each push into
@@ -74,6 +78,21 @@ public:
     // sample after it has been stored in CursorHistory.
     using ActivityCallback = std::function<void(const CursorSample&)>;
 
+    // T-80: independent wheel notification, deliberately NOT an activity
+    // sample. A wheel packet never feeds CursorHistory (it is not movement)
+    // and never wakes the trail renderer; it only carries the signed vertical
+    // delta so the audio engine can accumulate it into bounded events.
+    // Positive = wheel up. Delivered on the GUI thread from the raw-input
+    // WndProc, so the receiver must be non-blocking.
+    using WheelCallback = std::function<void(int64_t timestamp_ns, int vertical_delta)>;
+
+    // T-120: horizontal wheel notification (RI_MOUSE_HWHEEL). Positive = right, negative = left.
+    using HorizontalWheelCallback = std::function<void(int64_t timestamp_ns, int horizontal_delta)>;
+
+    // T-120: auxiliary mouse button notification (RI_MOUSE_BUTTON_4_DOWN/UP, RI_MOUSE_BUTTON_5_DOWN/UP).
+    // Carries the canonical event id ("mouse.x1_down", "mouse.x1_up", "mouse.x2_down", "mouse.x2_up").
+    using AuxButtonCallback = std::function<void(int64_t timestamp_ns, const char* canonical_event_id)>;
+
     MouseInput() = default;
     ~MouseInput();
 
@@ -92,9 +111,21 @@ public:
     // thread that owns the raw-input window).
     void set_activity_callback(ActivityCallback cb) { activity_ = std::move(cb); }
 
+    // T-80: set/clear the wheel callback (same thread rule as above).
+    void set_wheel_callback(WheelCallback cb) { wheel_ = std::move(cb); }
+
+    // T-120: set/clear horizontal wheel and auxiliary button callbacks.
+    void set_horizontal_wheel_callback(HorizontalWheelCallback cb) { hwheel_ = std::move(cb); }
+    void set_aux_button_callback(AuxButtonCallback cb) { aux_button_ = std::move(cb); }
+
     // Test/observability counters. Not diagnostics-logged.
     uint64_t movement_count() const { return movement_count_; }
     uint64_t button_count() const { return button_count_; }
+    // T-80: packets that carried a vertical wheel delta, and deltas delivered.
+    uint64_t wheel_count() const { return wheel_count_; }
+    uint64_t wheel_delta_count() const { return wheel_delta_count_; }
+    uint64_t hwheel_count() const { return hwheel_count_; }
+    uint64_t aux_button_count() const { return aux_button_count_; }
     // Real coalescing count, taken from CursorHistory::PushResult -- not
     // inferred from history size (A4 fix).
     uint64_t coalesced_count() const { return coalesced_count_; }
@@ -110,6 +141,12 @@ public:
                                                     bool registration_succeeded,
                                                     bool any_expected_activity);
 
+    // Pure WM_INPUT delivery decision. RIM_INPUT (foreground) requires the
+    // system cleanup that DefWindowProc performs; RIM_INPUTSINK (background,
+    // the RIDEV_INPUTSINK path) does not. Pure so the foreground/background
+    // dispatch split can be proven without a real foreground window.
+    static bool raw_input_needs_default_cleanup(WPARAM wp);
+
 private:
     static LRESULT CALLBACK wnd_proc_static(HWND, UINT, WPARAM, LPARAM);
     static MouseInput* s_instance_;
@@ -122,10 +159,17 @@ private:
     CursorHistory* history_ = nullptr;
     bool registered_ = false;
     ActivityCallback activity_;
+    WheelCallback wheel_;
+    HorizontalWheelCallback hwheel_;
+    AuxButtonCallback aux_button_;
 
     // Diagnostic counters (always accumulated in memory; cheap).
     uint64_t movement_count_ = 0;
     uint64_t button_count_ = 0;
+    uint64_t wheel_count_ = 0;
+    uint64_t wheel_delta_count_ = 0;
+    uint64_t hwheel_count_ = 0;
+    uint64_t aux_button_count_ = 0;
     uint64_t coalesced_count_ = 0;
     uint64_t transition_count_ = 0;  // A5: every transition preserved in history
 
@@ -139,10 +183,5 @@ private:
     char diag_last_button_ = '-';
     char diag_last_action_ = '-';
 };
-
-// Monotonic high-resolution clock: QueryPerformanceCounter-derived
-// nanoseconds via the overflow-safe split conversion (timestamp.h).
-// Never wall-clock.
-int64_t now_ns();
 
 } // namespace ptd

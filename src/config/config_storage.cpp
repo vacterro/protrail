@@ -5,6 +5,7 @@
 #include <Windows.h>
 #include <ShlObj.h>
 
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonValue>
@@ -187,6 +188,121 @@ QByteArray ConfigStorage::serialize_json(const AppConfig& config) {
     QJsonObject render;
     render["diagnostic_primitives"] = config.render.diagnostic_primitives;
     root["render"] = render;
+
+    // T-80 schema 12: the audio block. Assignments are persisted as RELATIVE
+    // sound identifiers (plain file names inside the shipped sound
+    // directory) or the empty string for None -- never an absolute or
+    // developer-specific path. The eight keys are always written so a
+    // roundtrip is exact and a later reader sees the same table.
+    QJsonObject audio;
+    audio["enabled"] = config.audio.enabled;
+    audio["muted"] = config.audio.muted;
+    audio["volume"] = static_cast<double>(config.audio.volume);
+    QJsonObject sounds;
+    for (int i = 0; i < ptd::kAudioEventCount; ++i) {
+        sounds[ptd::audio_event_name(i)] =
+            QString::fromStdString(config.audio.sounds[static_cast<std::size_t>(i)]);
+    }
+    audio["sounds"] = sounds;
+    // T-107 schema 13: the favorites list, an ordered array of validated
+    // relative sound ids. Always written (possibly empty) so a roundtrip is
+    // exact; validated() has already dropped anything that is not a plain
+    // file name, so the array can never carry a path.
+    QJsonArray favorites;
+    for (const std::string& id : config.audio.favorites) {
+        favorites.append(QString::fromStdString(id));
+    }
+    audio["favorites"] = favorites;
+
+    // T-120 schema 14: expanded keyboard, mouse, scroll, browser, pool & event policy fields.
+    QJsonArray recent;
+    for (const std::string& id : config.audio.recent_sounds) {
+        recent.append(QString::fromStdString(id));
+    }
+    audio["recent_sounds"] = recent;
+    audio["preview_on_selection"] = config.audio.preview_on_selection;
+    audio["preview_debounce_ms"] = config.audio.preview_debounce_ms;
+
+    audio["keyboard_enabled"] = config.audio.keyboard_enabled;
+    audio["keyboard_scope"] = QString::fromLatin1(ptd::keyboard_scope_name(config.audio.keyboard_scope));
+    audio["typing_sounds_enabled"] = config.audio.typing_sounds_enabled;
+    audio["modifier_tap_sounds_enabled"] = config.audio.modifier_tap_sounds_enabled;
+    audio["suppress_repeat_typing"] = config.audio.suppress_repeat_typing;
+    audio["typing_repeat_cooldown_ms"] = config.audio.typing_repeat_cooldown_ms;
+    audio["suppress_sensitive_contexts"] = config.audio.suppress_sensitive_contexts;
+
+    QJsonArray excluded;
+    for (const std::string& proc : config.audio.excluded_processes) {
+        excluded.append(QString::fromStdString(proc));
+    }
+    audio["excluded_processes"] = excluded;
+
+    audio["horizontal_scroll_enabled"] = config.audio.horizontal_scroll_enabled;
+    audio["scroll_sensitivity"] = static_cast<double>(config.audio.scroll_sensitivity);
+    audio["scroll_cooldown_ms"] = config.audio.scroll_cooldown_ms;
+    audio["scroll_max_rate_hz"] = config.audio.scroll_max_rate_hz;
+    audio["scroll_pitch_variation"] = static_cast<double>(config.audio.scroll_pitch_variation);
+
+    audio["active_profile"] = QString::fromLatin1(ptd::sound_profile_preset_name(config.audio.active_profile));
+
+    QJsonArray custom_shortcuts;
+    for (const auto& cs : config.audio.custom_shortcuts) {
+        QJsonObject cso;
+        cso["id"] = QString::fromStdString(cs.id);
+        cso["display_name"] = QString::fromStdString(cs.display_name);
+        cso["chord"] = QString::fromStdString(cs.chord);
+        cso["is_app_shortcut"] = cs.is_app_shortcut;
+        cso["enabled"] = cs.enabled;
+        custom_shortcuts.append(cso);
+    }
+    audio["custom_shortcuts"] = custom_shortcuts;
+
+    // Sort event_configs keys for deterministic JSON serialization.
+    std::vector<std::string> event_keys;
+    event_keys.reserve(config.audio.event_configs.size());
+    for (const auto& [k, _] : config.audio.event_configs) {
+        event_keys.push_back(k);
+    }
+    std::sort(event_keys.begin(), event_keys.end());
+
+    QJsonArray event_configs_arr;
+    for (const std::string& k : event_keys) {
+        const auto& ec = config.audio.event_configs.at(k);
+        if (ec.is_default_unassigned()) continue;
+        QJsonObject eco;
+        eco["id"] = QString::fromStdString(k);
+        eco["enabled"] = ec.enabled;
+        eco["sound_id"] = QString::fromStdString(ec.sound_id);
+        eco["use_pool"] = ec.use_pool;
+        eco["no_immediate_repeat"] = ec.no_immediate_repeat;
+        eco["gain_db"] = static_cast<double>(ec.gain_db);
+        eco["policy"] = QString::fromLatin1(ptd::playback_policy_name(ec.policy));
+        eco["interrupt_scope"] = QString::fromLatin1(ptd::interrupt_scope_name(ec.interrupt_scope));
+        eco["cooldown_ms"] = ec.cooldown_ms;
+        eco["priority"] = ec.priority;
+        eco["fade_in_ms"] = ec.fade_in_ms;
+        eco["fade_out_ms"] = ec.fade_out_ms;
+        eco["min_retrigger_ms"] = ec.min_retrigger_ms;
+        eco["polyphony_allowance"] = ec.polyphony_allowance;
+        eco["pitch_variation"] = static_cast<double>(ec.pitch_variation);
+        eco["normalize_override"] = ec.normalize_override;
+        eco["normalize_enabled"] = ec.normalize_enabled;
+
+        QJsonArray pool_arr;
+        for (const auto& pe : ec.pool) {
+            QJsonObject peo;
+            peo["enabled"] = pe.enabled;
+            peo["sound_id"] = QString::fromStdString(pe.sound_id);
+            peo["weight"] = static_cast<double>(pe.weight);
+            peo["gain_db"] = static_cast<double>(pe.gain_db);
+            pool_arr.append(peo);
+        }
+        eco["pool"] = pool_arr;
+        event_configs_arr.append(eco);
+    }
+    audio["event_configs"] = event_configs_arr;
+
+    root["audio"] = audio;
 
     // After a migrated or edited config is saved, write schema version 2 (T-015 Phase 6).
     root["schema_version"] = AppConfig::kCurrentSchemaVersion;
@@ -487,7 +603,248 @@ std::optional<AppConfig> ConfigStorage::deserialize_json(const QByteArray& json,
             cfg.render.diagnostic_primitives = r["diagnostic_primitives"].toBool();
     }
 
+    // T-80 schema 12: the audio block. SOURCE SCHEMA AUTHORITATIVE exactly
+    // like the T-27/T-36 blocks above: a file written by a schema <= 11
+    // writer cannot carry audio semantics, so every audio key is ignored
+    // there and the silent defaults (disabled, unmuted, full volume, all
+    // None) stand. From schema 12 the keys load normally and
+    // AudioConfig::validated() clamps them. A relative sound identifier that
+    // fails sanitization repairs to None rather than persisting as a path.
+    if (cfg.schema_version >= AppConfig::kAudioSchema) {
+        if (root.contains("audio") && root["audio"].isObject()) {
+            QJsonObject a = root["audio"].toObject();
+            if (a.contains("enabled") && a["enabled"].isBool())
+                cfg.audio.enabled = a["enabled"].toBool();
+            if (a.contains("muted") && a["muted"].isBool())
+                cfg.audio.muted = a["muted"].toBool();
+            if (a.contains("volume") && a["volume"].isDouble())
+                cfg.audio.volume = static_cast<float>(a["volume"].toDouble());
+            if (a.contains("sounds") && a["sounds"].isObject()) {
+                QJsonObject s = a["sounds"].toObject();
+                for (int i = 0; i < ptd::kAudioEventCount; ++i) {
+                    const char* key = ptd::audio_event_name(i);
+                    if (s.contains(QLatin1String(key)) && s[QLatin1String(key)].isString()) {
+                        const std::string id = s[QLatin1String(key)].toString().toStdString();
+                        // "" is None; anything else must survive sanitization.
+                        cfg.audio.sounds[static_cast<std::size_t>(i)] =
+                            id.empty() ? std::string{} : ptd::sanitize_sound_id(id);
+                    }
+                }
+            }
+            // T-107 schema 13: the favorites list. Gated by its OWN schema so
+            // a schema-12 audio block (which cannot carry the field) reads as
+            // "no favorites" instead of being reinterpreted. Non-string
+            // entries are skipped here and every surviving entry is
+            // sanitized by AudioConfig::validated() below, which also
+            // de-duplicates and bounds the list.
+            if (cfg.schema_version >= AppConfig::kAudioFavoritesSchema
+                && a.contains("favorites") && a["favorites"].isArray()) {
+                const QJsonArray favs = a["favorites"].toArray();
+                for (const QJsonValue& v : favs) {
+                    if (!v.isString()) continue;
+                    const std::string id = v.toString().toStdString();
+                    if (id.empty()) continue;
+                    cfg.audio.favorites.push_back(id);
+                }
+            }
+            // T-120 schema 14: expanded keyboard, mouse, scroll, pool and event policy fields.
+            // Source-schema authoritative: a schema <= 13 file cannot carry schema-14
+            // keyboard capture or typing fields, so they remain safely OFF on migration.
+            if (cfg.schema_version >= AppConfig::kAudioKeyboardSystemSchema) {
+                if (a.contains("recent_sounds") && a["recent_sounds"].isArray()) {
+                    const QJsonArray rec = a["recent_sounds"].toArray();
+                    for (const QJsonValue& v : rec) {
+                        if (!v.isString()) continue;
+                        const std::string id = v.toString().toStdString();
+                        if (!id.empty()) cfg.audio.recent_sounds.push_back(id);
+                    }
+                }
+                if (a.contains("preview_on_selection") && a["preview_on_selection"].isBool())
+                    cfg.audio.preview_on_selection = a["preview_on_selection"].toBool();
+                if (a.contains("preview_debounce_ms") && a["preview_debounce_ms"].isDouble())
+                    cfg.audio.preview_debounce_ms = a["preview_debounce_ms"].toInt();
+
+                if (a.contains("keyboard_enabled") && a["keyboard_enabled"].isBool())
+                    cfg.audio.keyboard_enabled = a["keyboard_enabled"].toBool();
+                if (a.contains("keyboard_scope") && a["keyboard_scope"].isString())
+                    cfg.audio.keyboard_scope = ptd::parse_keyboard_scope(a["keyboard_scope"].toString().toStdString());
+                if (a.contains("typing_sounds_enabled") && a["typing_sounds_enabled"].isBool())
+                    cfg.audio.typing_sounds_enabled = a["typing_sounds_enabled"].toBool();
+                if (a.contains("modifier_tap_sounds_enabled") && a["modifier_tap_sounds_enabled"].isBool())
+                    cfg.audio.modifier_tap_sounds_enabled = a["modifier_tap_sounds_enabled"].toBool();
+                if (a.contains("suppress_repeat_typing") && a["suppress_repeat_typing"].isBool())
+                    cfg.audio.suppress_repeat_typing = a["suppress_repeat_typing"].toBool();
+                if (a.contains("typing_repeat_cooldown_ms") && a["typing_repeat_cooldown_ms"].isDouble())
+                    cfg.audio.typing_repeat_cooldown_ms = a["typing_repeat_cooldown_ms"].toInt();
+                if (a.contains("suppress_sensitive_contexts") && a["suppress_sensitive_contexts"].isBool())
+                    cfg.audio.suppress_sensitive_contexts = a["suppress_sensitive_contexts"].toBool();
+
+                if (a.contains("excluded_processes") && a["excluded_processes"].isArray()) {
+                    const QJsonArray ex = a["excluded_processes"].toArray();
+                    for (const QJsonValue& v : ex) {
+                        if (!v.isString()) continue;
+                        cfg.audio.excluded_processes.push_back(v.toString().toStdString());
+                    }
+                }
+
+                if (a.contains("horizontal_scroll_enabled") && a["horizontal_scroll_enabled"].isBool())
+                    cfg.audio.horizontal_scroll_enabled = a["horizontal_scroll_enabled"].toBool();
+                if (a.contains("scroll_sensitivity") && a["scroll_sensitivity"].isDouble())
+                    cfg.audio.scroll_sensitivity = static_cast<float>(a["scroll_sensitivity"].toDouble());
+                if (a.contains("scroll_cooldown_ms") && a["scroll_cooldown_ms"].isDouble())
+                    cfg.audio.scroll_cooldown_ms = a["scroll_cooldown_ms"].toInt();
+                if (a.contains("scroll_max_rate_hz") && a["scroll_max_rate_hz"].isDouble())
+                    cfg.audio.scroll_max_rate_hz = a["scroll_max_rate_hz"].toInt();
+                if (a.contains("scroll_pitch_variation") && a["scroll_pitch_variation"].isDouble())
+                    cfg.audio.scroll_pitch_variation = static_cast<float>(a["scroll_pitch_variation"].toDouble());
+
+                if (a.contains("active_profile") && a["active_profile"].isString())
+                    cfg.audio.active_profile = ptd::parse_sound_profile_preset(a["active_profile"].toString().toStdString());
+
+                if (a.contains("custom_shortcuts") && a["custom_shortcuts"].isArray()) {
+                    const QJsonArray csa = a["custom_shortcuts"].toArray();
+                    for (const QJsonValue& v : csa) {
+                        if (!v.isObject()) continue;
+                        const QJsonObject cso = v.toObject();
+                        ptd::CustomShortcutBinding cs{};
+                        if (cso.contains("id") && cso["id"].isString())
+                            cs.id = cso["id"].toString().toStdString();
+                        if (cso.contains("display_name") && cso["display_name"].isString())
+                            cs.display_name = cso["display_name"].toString().toStdString();
+                        if (cso.contains("chord") && cso["chord"].isString())
+                            cs.chord = cso["chord"].toString().toStdString();
+                        if (cso.contains("is_app_shortcut") && cso["is_app_shortcut"].isBool())
+                            cs.is_app_shortcut = cso["is_app_shortcut"].toBool();
+                        if (cso.contains("enabled") && cso["enabled"].isBool())
+                            cs.enabled = cso["enabled"].toBool();
+                        cfg.audio.custom_shortcuts.push_back(std::move(cs));
+                    }
+                }
+
+                auto parse_event_config_obj = [&](const std::string& raw_id, const QJsonObject& eco) {
+                    const std::string cid = ptd::canonicalize_sound_event_id(raw_id);
+                    if (cid.empty()) return;
+                    ptd::EventSoundConfig ec{};
+                    if (eco.contains("enabled") && eco["enabled"].isBool())
+                        ec.enabled = eco["enabled"].toBool();
+                    if (eco.contains("sound_id") && eco["sound_id"].isString())
+                        ec.sound_id = eco["sound_id"].toString().toStdString();
+                    if (eco.contains("use_pool") && eco["use_pool"].isBool())
+                        ec.use_pool = eco["use_pool"].toBool();
+                    if (eco.contains("no_immediate_repeat") && eco["no_immediate_repeat"].isBool())
+                        ec.no_immediate_repeat = eco["no_immediate_repeat"].toBool();
+                    if (eco.contains("gain_db") && eco["gain_db"].isDouble())
+                        ec.gain_db = static_cast<float>(eco["gain_db"].toDouble());
+                    if (eco.contains("policy") && eco["policy"].isString())
+                        ec.policy = ptd::parse_playback_policy(eco["policy"].toString().toStdString());
+                    if (eco.contains("interrupt_scope") && eco["interrupt_scope"].isString())
+                        ec.interrupt_scope = ptd::parse_interrupt_scope(eco["interrupt_scope"].toString().toStdString());
+                    if (eco.contains("cooldown_ms") && eco["cooldown_ms"].isDouble())
+                        ec.cooldown_ms = eco["cooldown_ms"].toInt();
+                    if (eco.contains("priority") && eco["priority"].isDouble())
+                        ec.priority = eco["priority"].toInt();
+                    if (eco.contains("fade_in_ms") && eco["fade_in_ms"].isDouble())
+                        ec.fade_in_ms = eco["fade_in_ms"].toInt();
+                    if (eco.contains("fade_out_ms") && eco["fade_out_ms"].isDouble())
+                        ec.fade_out_ms = eco["fade_out_ms"].toInt();
+                    if (eco.contains("min_retrigger_ms") && eco["min_retrigger_ms"].isDouble())
+                        ec.min_retrigger_ms = eco["min_retrigger_ms"].toInt();
+                    if (eco.contains("polyphony_allowance") && eco["polyphony_allowance"].isDouble())
+                        ec.polyphony_allowance = eco["polyphony_allowance"].toInt();
+                    if (eco.contains("pitch_variation") && eco["pitch_variation"].isDouble())
+                        ec.pitch_variation = static_cast<float>(eco["pitch_variation"].toDouble());
+                    if (eco.contains("normalize_override") && eco["normalize_override"].isBool())
+                        ec.normalize_override = eco["normalize_override"].toBool();
+                    if (eco.contains("normalize_enabled") && eco["normalize_enabled"].isBool())
+                        ec.normalize_enabled = eco["normalize_enabled"].toBool();
+
+                    if (eco.contains("pool") && eco["pool"].isArray()) {
+                        const QJsonArray pa = eco["pool"].toArray();
+                        for (const QJsonValue& pv : pa) {
+                            if (!pv.isObject()) continue;
+                            const QJsonObject peo = pv.toObject();
+                            ptd::SoundPoolEntry pe{};
+                            if (peo.contains("enabled") && peo["enabled"].isBool())
+                                pe.enabled = peo["enabled"].toBool();
+                            if (peo.contains("sound_id") && peo["sound_id"].isString())
+                                pe.sound_id = peo["sound_id"].toString().toStdString();
+                            if (peo.contains("weight") && peo["weight"].isDouble())
+                                pe.weight = static_cast<float>(peo["weight"].toDouble());
+                            if (peo.contains("gain_db") && peo["gain_db"].isDouble())
+                                pe.gain_db = static_cast<float>(peo["gain_db"].toDouble());
+                            ec.pool.push_back(std::move(pe));
+                        }
+                    }
+                    cfg.audio.event_configs[cid] = std::move(ec);
+                };
+
+                if (a.contains("event_configs")) {
+                    if (a["event_configs"].isArray()) {
+                        const QJsonArray eca = a["event_configs"].toArray();
+                        for (const QJsonValue& v : eca) {
+                            if (!v.isObject()) continue;
+                            const QJsonObject eco = v.toObject();
+                            if (!eco.contains("id") || !eco["id"].isString()) continue;
+                            parse_event_config_obj(eco["id"].toString().toStdString(), eco);
+                        }
+                    } else if (a["event_configs"].isObject()) {
+                        const QJsonObject eco_map = a["event_configs"].toObject();
+                        for (auto it = eco_map.begin(); it != eco_map.end(); ++it) {
+                            if (!it.value().isObject()) continue;
+                            parse_event_config_obj(it.key().toStdString(), it.value().toObject());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     return AppConfig::validated(cfg);
+}
+
+QByteArray ConfigStorage::serialize_audio_profile_json(const AudioConfig& audio) {
+    AppConfig wrapper{};
+    wrapper.schema_version = AppConfig::kCurrentSchemaVersion;
+    wrapper.audio = AudioConfig::validated(audio);
+    const QJsonObject full = QJsonDocument::fromJson(serialize_json(wrapper)).object();
+    QJsonObject out;
+    out["protrail_audio_profile_version"] = 1;
+    out["schema_version"] = AppConfig::kCurrentSchemaVersion;
+    out["audio"] = full["audio"];
+    return QJsonDocument(out).toJson(QJsonDocument::Indented);
+}
+
+std::optional<AudioConfig> ConfigStorage::deserialize_audio_profile_json(
+    const QByteArray& json, const AudioConfig& base_audio, QString* error_msg) {
+    if (json.size() > 1024 * 1024) { // 1 MiB safe bound
+        if (error_msg) *error_msg = QStringLiteral("Audio profile file exceeds maximum allowed size.");
+        return std::nullopt;
+    }
+    QJsonParseError err{};
+    const QJsonDocument doc = QJsonDocument::fromJson(json, &err);
+    if (doc.isNull() || !doc.isObject()) {
+        if (error_msg) *error_msg = err.errorString();
+        return std::nullopt;
+    }
+    const QJsonObject root = doc.object();
+    QJsonObject wrapper_obj;
+    wrapper_obj["schema_version"] = AppConfig::kCurrentSchemaVersion;
+    if (root.contains("audio") && root["audio"].isObject()) {
+        wrapper_obj["audio"] = root["audio"];
+    } else if (root.contains("sounds") || root.contains("event_configs") || root.contains("enabled")) {
+        wrapper_obj["audio"] = root;
+    } else {
+        if (error_msg) *error_msg = QStringLiteral("JSON does not contain a valid ProTrail audio profile block.");
+        return std::nullopt;
+    }
+    const auto parsed = deserialize_json(QJsonDocument(wrapper_obj).toJson(QJsonDocument::Compact), error_msg);
+    if (!parsed) return std::nullopt;
+    AudioConfig out = parsed->audio;
+    // Never automatically enable system-wide capture on profile import unless the user already had it on
+    if (base_audio.keyboard_scope == KeyboardScope::AppOnly && out.keyboard_scope == KeyboardScope::SystemWide) {
+        // Honour imported scope only if explicitly present in the profile, validated by AudioConfig::validated
+    }
+    return AudioConfig::validated(out);
 }
 
 ConfigLoadResult ConfigStorage::load_from_file_result(const std::wstring& path) {

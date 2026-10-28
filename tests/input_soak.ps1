@@ -4,16 +4,26 @@
 # end-to-end while this script's console -- not ProTrail -- owns the
 # foreground. No elevation, no hooks.
 #
-# Usage:
-#   powershell -File tests\input_soak.ps1 -Mode burst   # ~5 s movement + one L/R/M burst
-#   powershell -File tests\input_soak.ps1 -Mode mixed   # ~2 min mixed activity
-#   powershell -File tests\input_soak.ps1 -Mode long    # ~5.5 min mixed activity (B10)
+# Usage (T-83: -Arm is mandatory, injection is refused without it):
+#   powershell -File tests\input_soak.ps1 -Arm -Mode burst   # ~5 s movement + one L/R/M burst
+#   powershell -File tests\input_soak.ps1 -Arm -Mode mixed   # ~2 min mixed activity
+#   powershell -File tests\input_soak.ps1 -Arm -Mode long    # ~5.5 min mixed activity (B10)
 
+# T-83: refuses to inject anything unless -Arm is passed. This script moves
+# the REAL cursor and clicks L/R/M wherever it is on the desktop.
 param(
     [Parameter(Mandatory = $false)]
     [ValidateSet('burst', 'mixed', 'long')]
-    [string]$Mode = 'burst'
+    [string]$Mode = 'burst',
+
+    [switch]$Arm
 )
+
+if (-not $Arm) {
+    Write-Host "Refusing: this script injects REAL mouse moves and L/R/M clicks at the live cursor."
+    Write-Host "Run it only in a session where nothing important is under the mouse, with -Arm."
+    exit 1
+}
 
 Add-Type @"
 using System;

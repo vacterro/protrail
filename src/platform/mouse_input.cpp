@@ -13,30 +13,7 @@ namespace {
 
 constexpr wchar_t kClassName[] = L"ProTrailMouseInput";
 
-// Cached QPC frequency. QueryPerformanceFrequency cannot fail on Windows
-// XP+ (it always writes a nonzero value), but we still check defensively
-// (T-007R A1): a failed/zero frequency yields the monotonic raw-tick
-// passthrough from ticks_to_ns instead of a division by zero.
-int64_t qpc_freq() {
-    static int64_t freq = [] {
-        LARGE_INTEGER f{};
-        QueryPerformanceCounter(&f); // ensure QPC is usable on this machine
-        if (!QueryPerformanceFrequency(&f)) return int64_t{0};
-        return f.QuadPart;
-    }();
-    return freq;
-}
-
 } // namespace
-
-int64_t now_ns() {
-    LARGE_INTEGER c{};
-    QueryPerformanceCounter(&c);
-    // Overflow-safe split conversion (seconds + remainder). The previous
-    // c.QuadPart * 1e9 / freq form overflowed after ~922 s of QPC counter
-    // time at 10 MHz. See timestamp.h for the proof.
-    return ticks_to_ns(c.QuadPart, qpc_freq());
-}
 
 MouseInput* MouseInput::s_instance_ = nullptr;
 
@@ -48,10 +25,22 @@ LRESULT CALLBACK MouseInput::wnd_proc_static(HWND hwnd, UINT msg, WPARAM wp, LPA
     // Single instance per process; GWLP_USERDATA wiring is unnecessary.
     auto* self = s_instance_;
     if (msg == WM_INPUT && self) {
+        // Microsoft WM_INPUT contract: read the raw data FIRST, then run
+        // DefWindowProc on the foreground (RIM_INPUT) path so the system can
+        // clean up; background RIM_INPUTSINK must not call DefWindowProc.
         self->handle_raw_input(lp);
+        if (raw_input_needs_default_cleanup(wp)) {
+            DefWindowProcW(hwnd, msg, wp, lp);
+        }
         return 0;
     }
     return DefWindowProcW(hwnd, msg, wp, lp);
+}
+
+// Pure decision, separate from the WndProc so the dispatch split is unit-testable
+// without a real foreground/background window.
+bool MouseInput::raw_input_needs_default_cleanup(WPARAM wp) {
+    return GET_RAWINPUT_CODE_WPARAM(wp) == RIM_INPUT;
 }
 
 bool MouseInput::create(HINSTANCE instance, CursorHistory* history) {
@@ -120,6 +109,9 @@ void MouseInput::destroy() {
     }
     if (s_instance_ == this) s_instance_ = nullptr;
     activity_ = nullptr;
+    wheel_ = nullptr;
+    hwheel_ = nullptr;
+    aux_button_ = nullptr;
 }
 
 MouseInput::RawInputVerdict MouseInput::classify_input_injection(
@@ -178,7 +170,50 @@ void MouseInput::handle_raw_input(LPARAM lp) {
         ++transition_count_;
         record_sample(ts, p.x, p.y, transitions[i].button, transitions[i].action);
     }
-    if (n > 0) return; // wheel-only packets fall through to movement check
+    // T-80: the wheel is dispatched independently from the button
+    // transitions. A combined button+wheel packet keeps every transition
+    // above AND its vertical delta below (the old `if (n > 0) return;`
+    // dropped the wheel half of such packets). usButtonData is the high word
+    // of the wheel data and carries the signed delta; RI_MOUSE_WHEEL marks it.
+    if (m.usButtonFlags & RI_MOUSE_WHEEL) {
+        const int delta = static_cast<short>(m.usButtonData);  // signed
+        ++wheel_count_;
+        if (delta != 0 && wheel_) {
+            ++wheel_delta_count_;
+            wheel_(ts, delta);
+        }
+    }
+    // T-120: horizontal wheel (RI_MOUSE_HWHEEL = 0x0800).
+#ifndef RI_MOUSE_HWHEEL
+#define RI_MOUSE_HWHEEL 0x0800
+#endif
+    if (m.usButtonFlags & RI_MOUSE_HWHEEL) {
+        const int hdelta = static_cast<short>(m.usButtonData); // signed
+        ++hwheel_count_;
+        if (hdelta != 0 && hwheel_) {
+            hwheel_(ts, hdelta);
+        }
+    }
+    // T-120: auxiliary mouse buttons (XButton1 / XButton2).
+    if (m.usButtonFlags & (RI_MOUSE_BUTTON_4_DOWN | RI_MOUSE_BUTTON_4_UP |
+                           RI_MOUSE_BUTTON_5_DOWN | RI_MOUSE_BUTTON_5_UP)) {
+        if (m.usButtonFlags & RI_MOUSE_BUTTON_4_DOWN) {
+            ++aux_button_count_;
+            if (aux_button_) aux_button_(ts, "mouse.x1_down");
+        }
+        if (m.usButtonFlags & RI_MOUSE_BUTTON_4_UP) {
+            ++aux_button_count_;
+            if (aux_button_) aux_button_(ts, "mouse.x1_up");
+        }
+        if (m.usButtonFlags & RI_MOUSE_BUTTON_5_DOWN) {
+            ++aux_button_count_;
+            if (aux_button_) aux_button_(ts, "mouse.x2_down");
+        }
+        if (m.usButtonFlags & RI_MOUSE_BUTTON_5_UP) {
+            ++aux_button_count_;
+            if (aux_button_) aux_button_(ts, "mouse.x2_up");
+        }
+    }
 
     // Movement activity: any relative/absolute displacement (wheel excluded).
     const bool moved = (m.lLastX != 0 || m.lLastY != 0);
@@ -188,7 +223,6 @@ void MouseInput::handle_raw_input(LPARAM lp) {
         ++movement_count_;
         record_sample(ts, mp.x, mp.y, MouseButton::None, ButtonAction::None);
     }
-    // Wheel / other flags: intentionally ignored in MVP 02 (extensible later).
 }
 
 void MouseInput::record_sample(int64_t now_ns_, int x, int y, MouseButton button, ButtonAction action) {

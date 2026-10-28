@@ -2,6 +2,8 @@
 
 # ProTrail
 
+**v0.1.9**
+
 **Native Windows cursor trails, click effects, hold effects, and motion wake rendered in click-through overlays.**
 
 [![Version](https://img.shields.io/badge/version-0.1.9-D4B86A?style=flat-square)](VERSION)
@@ -20,10 +22,10 @@ ProTrail renders through Direct2D and DirectComposition into per-monitor, non-ac
 Windows 10/11 only. MSVC (Visual Studio 2022) with Qt 6.8 is the supported
 toolchain.
 
-- **One ProTrail window** — the product surface has General, Trail, and Click
-  tabs, plus Developer in developer builds. Every setting has one visible editor
-  location; Trail and Click use visible checkable selector grids rather than
-  drop-down style controls. General is the default launch tab and contains
+- **One ProTrail window** — the product surface has General, Trail, Click, and
+  Sound tabs, plus Developer in developer builds. Every setting has one visible
+  editor location; Trail and Click use visible checkable selector grids rather
+  than drop-down style controls. General is the default launch tab and contains
   enable toggles, startup, quick color presets, and Restore All Defaults.
 - **Trail and Click tabs** — the complete Trail/Sparkle and Click/Hold/Motion
   Wake editors live in scrollable tabs, each with its own domain restore action.
@@ -50,6 +52,13 @@ toolchain.
   animates independently of the cursor. Advanced controls cover wake strength,
   size, spread, speed response, a minimum motion-speed gate, and turn/stop
   accents.
+- **Sound** — eight assignable event sounds (left/right/middle down and up,
+  scroll up and down) behind a master enable that is off by default, plus Mute,
+  a volume control, immediate preview and Stop. Each event points at a `.wav`
+  file by name inside a `sound` folder beside the executable, or None. Official
+  packages do not ship that `sound` folder — the sound catalog is staged only
+  for a local rehearsal — so a fresh install is silent and the folder stays
+  empty until you add your own `.wav` files.
 
 ## Windows integration
 
@@ -102,6 +111,19 @@ cmake --build build --config Release --parallel
 cmake --build build --config Debug --parallel
 ```
 
+The single root launcher wraps the same steps; toolchain paths come from a
+gitignored `protrail.local.cmd` beside it or the `PROTRAIL_VCVARS` /
+`PROTRAIL_QT` environment variables:
+
+```powershell
+protrail.cmd build            # configure once, then build Release + Debug
+protrail.cmd test             # full CTest suite, Release + Debug
+protrail.cmd run              # launch the Release build
+protrail.cmd smoke <dir>      # smoke-test a deployment dir
+protrail.cmd package          # official packaging pipeline
+protrail.cmd clean            # remove build/ and Testing/ (dist kept)
+```
+
 The configure step validates the canonical release defaults source and fails
 loudly if it is missing or malformed. MSVC builds use `/W4 /WX`. Configure with
 `-DPROTRAIL_DEV_BUILD=ON` to enable the developer defaults authoring panel in a
@@ -126,6 +148,7 @@ headless through Qt's `offscreen` platform.
 
 | Path | Contents |
 |------|----------|
+| `protrail.cmd` | Single root launcher: build, test, run, smoke, package, clean |
 | `src/` | Application source (app, config, core, effects, platform, render, ui) |
 | `tests/` | Test executables registered with CTest |
 | `resources/` | Canonical defaults source and its Qt resource |

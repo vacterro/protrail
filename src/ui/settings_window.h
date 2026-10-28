@@ -3,12 +3,18 @@
 #include "../effects/trail_config.h"
 #include "../effects/click_config.h"
 #include "../config/app_config.h"
+#include "../config/audio_config.h"
 
 #include <QWidget>
 #include <optional>
 
 class QPushButton;
 class QCheckBox;
+class QKeyEvent;
+class QComboBox;
+class QLineEdit;
+class QListWidget;
+class QPoint;
 
 namespace ptd {
 namespace ui {
@@ -131,6 +137,21 @@ signals:
     // the window only reports the user's intent.
     void start_with_windows_changed(bool);
     void set_current_as_release_defaults_requested();
+    // T-80: the audio assignment block. The window owns the editors and the
+    // preview INTENT only; Application owns the engine, so playback and the
+    // master gate never live in the UI.
+    void audio_config_changed(const ptd::AudioConfig&);
+    void sound_preview_requested(const std::string& sound_id);
+    void sound_event_preview_requested(const ptd::EventSoundConfig& event_cfg);
+    void sound_preview_stop_requested();
+    // T-107: one click silences EVERY voice (runtime event voices and the
+    // preview alike). Separate from sound_preview_stop_requested, which only
+    // cancels the preview slot, so the UI never over-claims what Stop does.
+    void sound_stop_all_requested();
+    // T-120: ProTrail's own window is the ONLY keyboard event source in the
+    // AppOnly scope. The window reports the physical key; Application owns the
+    // passive listener, so the sound decision never lives in the UI.
+    void app_key_event(int vk, int scan_code, bool extended, bool is_down);
 
 public slots:
     // Called by Application when master disable clears visible effects;
@@ -143,6 +164,26 @@ public slots:
 public:
     // T-032: current Start with Windows state as shown to the user.
     bool start_with_windows() const;
+
+    // T-107: add/remove a sound id in the curated favorites list, republish,
+    // and refresh the Favorites column. Public because it is the ONE membership
+    // path both right-click menus route through, so the catalog and the
+    // Favorites column can never disagree about a sound.
+    void toggle_sound_favorite(const QString& id);
+    // T-107: current favorites exactly as shown in the Favorites column.
+    QStringList favorites_for_tests() const;
+
+    // T-120: Sound & Keyboard UI helpers for deterministic testing and programmatic control.
+    void select_sound_event_for_editing(const QString& canonical_event_id);
+    QString selected_sound_event_id() const;
+    void reset_sound_category(ptd::SoundEventCategory cat);
+    void reset_selected_sound_event();
+    void apply_sound_profile_preset(ptd::SoundProfilePreset preset);
+    bool import_audio_profile_json(const QByteArray& json, QString* error_msg = nullptr);
+    QByteArray export_audio_profile_json() const;
+    // Returns true while the user is actively scrolling/navigating the sound browser
+    // so Application can suppress wheel/arrow sound effects during catalog audition.
+    bool is_browsing_sound_catalog() const;
 
     // T-34: Developer defaults & presets interface
      ptd::AppConfig capture_current_settings() const;
@@ -174,6 +215,23 @@ private slots:
     void on_restore_all();
     void on_restore_trail();
     void on_restore_click();
+    // T-80: Sound tab. emit_audio_config() is the single publication path;
+    // the preview slots only forward intent to Application.
+    void emit_audio_config();
+    void on_sound_enabled_toggled();
+    void on_sound_mute_toggled();
+    void on_sound_volume(double);
+    void on_sound_assignment_changed(int index);
+    void on_sound_catalog_selection_changed();
+    void on_sound_replay_clicked();
+    void on_sound_stop_clicked();
+    // T-107: stop every voice, not just the preview slot.
+    void on_sound_stop_all_clicked();
+    // T-107: right-click on a catalog row toggles its favorite membership.
+    void on_sound_catalog_context_menu(const QPoint& pos);
+    // T-107: right-click on a favorites row removes it (same membership
+    // toggle, so the two lists can never disagree about a sound).
+    void on_sound_favorites_context_menu(const QPoint& pos);
     void emit_trail_config();
     void emit_click_config();
     // T-020: selector buttons (one user click = one coherent publication).
@@ -200,6 +258,7 @@ private:
     void build_general_tab();
     void build_trail_tab();
     void build_click_tab();
+    void build_sound_tab();
     void build_dev_tab();
     void refresh_dev_presets();
     std::optional<ptd::AppConfig> resolve_dev_selected_config() const;
@@ -217,6 +276,17 @@ private:
     void populate_from_config();
     void set_trail_widgets(const ptd::TrailConfig&);
     void set_click_widgets(const ptd::ClickConfig&);
+    // T-80: silent population. Never publishes and never previews, so
+    // opening/loading the window produces no audio.
+    void set_audio_widgets(const ptd::AudioConfig&);
+    // Rebuilds the assignment combo contents from the current catalog.
+    void refresh_sound_catalog();
+    void refresh_sound_favorites();
+    void refresh_sound_recent();
+    void refresh_keyboard_event_list();
+    void populate_event_editor_for(const std::string& canonical_id);
+    void record_recent_sound(const std::string& sound_id);
+    void schedule_catalog_audition(const std::string& sound_id);
     void apply_enable_states();
 
      bool master_enabled_ = true;
@@ -225,6 +295,8 @@ private:
     bool start_with_windows_ = false;
     ptd::TrailConfig trail_cfg_;
     ptd::ClickConfig click_cfg_;
+    // T-80: eight independent sound assignments plus enable/mute/volume.
+    ptd::AudioConfig audio_cfg_{};
     // CORE-004: complete canonical baseline so non-UI fields survive capture.
     ptd::RenderConfig render_baseline_{};
     std::optional<ptd::AppConfig> captured_config_;
@@ -234,6 +306,12 @@ private:
     std::unique_ptr<Impl> d_;
 
 protected:
+    // T-120 / T-121: report physical keys to the passive router without double-dispatch.
+    // Catches key input across all child widgets (e.g. focused QLineEdit, QComboBox).
+    bool eventFilter(QObject* watched, QEvent* event) override;
+    void keyPressEvent(QKeyEvent* event) override;
+    void keyReleaseEvent(QKeyEvent* event) override;
+
     void closeEvent(QCloseEvent* event) override;
 };
 

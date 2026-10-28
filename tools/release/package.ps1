@@ -10,7 +10,9 @@
       2. branding     approved icon + APPROVAL.md hash (official mode only)
       3. build        fresh Release configure/build, /W4 /WX, zero warnings
       4. tests        complete CTest suite, 100% pass
-      5. stage        protrail.exe + windeployqt runtime + app-local MSVC CRT
+      5. stage        protrail.exe + windeployqt runtime (incl. the Qt
+                      Multimedia module and its backend plugin) + app-local
+                      MSVC CRT [+ sound catalog, opt-in via -IncludeSounds]
       6. closure      every PE dependency resolves inside the package or to
                       the OS; no developer path is embedded in protrail.exe
       7. smoke        staged package, sanitized PATH, release metadata gates
@@ -23,6 +25,24 @@
     rehearsal output carries a REHEARSAL name so it can never be mistaken
     for, or uploaded as, the official artifact.
 
+    T-81 LOCAL-ONLY SOUND REHEARSAL. The shipped sound catalog is third-party
+    material whose redistribution rights are not established, so no official
+    package may ever carry it. For a local deployment where the operator has
+    cleared the sound folder for their own use:
+
+        powershell -NoProfile -ExecutionPolicy Bypass -File tools\release\package.ps1 `
+            -Rehearsal -IncludeSounds
+
+    That produces the exact official pipeline (clean build, /W4 /WX, full
+    CTest, windeployqt incl. the multimedia backend, dependency closure,
+    sanitized-PATH smoke) with the user's sound directory staged beside the
+    executable, and it verifies actual deployed playback through the
+    AUDIO_SELFCHECK line the app writes in smoke mode. That line is
+    DEVICE-REPORTED playback (a voice reached Playing); the pipeline never
+    claims a human heard it -- only -HumanAudibleVerified records physical
+    acceptance, and only after a person has genuinely heard it. The output is
+    named REHEARSAL and must never be published.
+
 .EXAMPLE
     powershell -NoProfile -ExecutionPolicy Bypass -File tools\release\package.ps1
 .EXAMPLE
@@ -32,7 +52,18 @@ param(
     [switch]$Rehearsal,
     [string]$QtDir = "",
     [string]$OutDir = "",
-    [string]$BuildDir = ""
+    [string]$BuildDir = "",
+    # T-80: stage the WAV catalog next to the executable. OFF by default on
+    # purpose: the catalog is third-party material whose redistribution rights
+    # are not established, so an artifact must never carry it implicitly.
+    # Pass -IncludeSounds only for a LOCAL rehearsal where the operator has
+    # cleared that folder for their own use; the official path stays silent.
+    [switch]$IncludeSounds,
+    # T-82: operator attestation. Pass ONLY after a person has genuinely heard
+    # the deployed audio on real hardware. This is the sole way the manifest
+    # ever records HUMAN_AUDIBLE_VERIFIED; without it every run -- however
+    # green -- records HUMAN_AUDIBLE_NOT_VERIFIED.
+    [switch]$HumanAudibleVerified
 )
 
 $ErrorActionPreference = "Stop"
@@ -171,6 +202,95 @@ if ($summary.Count -gt 0) {
 }
 if ($testTotal -lt 1) { Fail "TESTS_UNCOUNTED" "no CTest summary in $ctestLog" }
 
+# --------------------------------------------------------- audio evidence
+# T-82: a green CTest summary alone cannot say what the audio suite actually
+# proved -- a skipped catalog check inside a passing suite must never be
+# readable as a successful catalog verification. Both audio binaries run
+# directly here so their EVIDENCE lines and exit codes are captured verbatim
+# and a missing evidence line fails the release instead of passing silently.
+Step "Audio backend evidence"
+$audioEvidence = [ordered]@{}
+$audioStatuses = @()
+foreach ($case in @(
+    @{ name = "protrail_audio_tests";        allow = @(0);    required = @(
+            "staged_wav_count", "distinct_preview_source_count",
+            "reparse_symlink_guard", "shipped_catalog_decode") },
+    @{ name = "protrail_audio_runtime_tests"; allow = @(0, 2); required = @(
+            "staged_wav_count", "shipped_format_sample_count",
+            "distinct_preview_test_count", "voice_pool_capacity",
+            "backend_test_exit_code", "audio_device_available",
+            "natural_completion") }
+)) {
+    $exe = Join-Path $BuildDir "Release\$($case.name).exe"
+    if (-not (Test-Path -LiteralPath $exe)) { Fail "AUDIO_TEST_MISSING" "$exe not built" }
+    $log = Join-Path $BuildDir "$($case.name)-evidence.log"
+    $ErrorActionPreference = "Continue"
+    # CTest normally prepends the Qt bin directory for these executables; a
+    # direct run needs the same PATH or the Qt DLLs cannot load.
+    $env:PATH = (Join-Path $QtDir "bin") + ";" + $env:PATH
+    Push-Location $repo
+    try { & $exe 2>&1 | Tee-Object -FilePath $log | Out-Null } finally { Pop-Location }
+    $rc = $LASTEXITCODE
+    $ErrorActionPreference = "Stop"
+    # Exit 2 of the runtime suite means BACKEND_VERIFIED without an output
+    # device: acceptable for a portable package, but only with the evidence
+    # lines saying so. Anything else is a test failure.
+    if ($case.allow -notcontains $rc) {
+        Fail "AUDIO_TEST_FAILED" "$($case.name) exit $rc (see $log)"
+    }
+    $perCase = [ordered]@{ "exit_code" = "$rc" }
+    foreach ($m in (Select-String -LiteralPath $log -Pattern '^EVIDENCE (\S+): (.+)$')) {
+        $perCase[$m.Matches[0].Groups[1].Value] = $m.Matches[0].Groups[2].Value.Trim()
+    }
+    foreach ($m in (Select-String -LiteralPath $log -Pattern '^STATUS (.+)$')) {
+        $audioStatuses += $m.Matches[0].Groups[1].Value.Trim()
+    }
+    foreach ($requiredKey in $case.required) {
+        if (-not $perCase.Contains($requiredKey)) {
+            Fail "AUDIO_EVIDENCE_MISSING" "$($case.name) printed no EVIDENCE $requiredKey line"
+        }
+    }
+    $audioEvidence[$case.name] = $perCase
+    foreach ($kv in $perCase.GetEnumerator()) {
+        Write-Output ("evidence    {0}.{1} = {2}" -f $case.name, $kv.Key, $kv.Value)
+    }
+}
+# When the sound material is being STAGED, its checks must have RUN. A SKIP or
+# PARTIAL here is an unverified guard, never a verified one.
+#
+# T-95: the two lines that happened to be enumerated here were value-checked
+# while every other REQUIRED sound line -- notably reparse_symlink_guard -- was
+# only checked for EXISTENCE, so an escape guard that reported "SKIP
+# (create_symlink failed; needs elevation or Developer Mode) -- NOT VERIFIED"
+# was recorded into verification.audio and the release still exited 0 with
+# RELEASE_PACKAGE_PASS. The value gate now enumerates every sound line whose
+# verdict can be non-verifying, so a newly required line cannot silently skip
+# the same way, and it accepts the guard's PARTIAL variant as the
+# non-verification it is (test_sound_engine.cpp:868).
+if ($IncludeSounds) {
+    $soundVerdictGates = @(
+        @{ case = "protrail_audio_tests";         key = "shipped_catalog_decode"     },
+        @{ case = "protrail_audio_tests";         key = "reparse_symlink_guard"      },
+        @{ case = "protrail_audio_runtime_tests"; key = "shipped_format_sample_count" }
+    )
+    $unverifiedSounds = @()
+    foreach ($gate in $soundVerdictGates) {
+        $verdict = [string]$audioEvidence[$gate.case][$gate.key]
+        if ($verdict -like "SKIP*" -or $verdict -like "PARTIAL*" -or $verdict -like "*NOT VERIFIED*") {
+            $unverifiedSounds += ("{0}.{1} = {2}" -f $gate.case, $gate.key, $verdict)
+        }
+    }
+    if ($unverifiedSounds.Count -gt 0) {
+        Fail "SOUND_CATALOG_UNVERIFIED" "-IncludeSounds requires the shipped-catalog and escape-guard checks to RUN, not SKIP: $($unverifiedSounds -join '; ')"
+    }
+}
+$humanAudibleStatus = if ($HumanAudibleVerified) {
+    "HUMAN_AUDIBLE_VERIFIED (operator attested after physical acceptance)"
+} else {
+    "HUMAN_AUDIBLE_NOT_VERIFIED"
+}
+Write-Output ("statuses    " + ($audioStatuses -join "; "))
+
 # --------------------------------------------------------------------- stage
 $packageName = "ProTrail-v$version-win-x64-portable"
 if ($Rehearsal) {
@@ -188,10 +308,54 @@ foreach ($p in @($stage, $zipPath, $sumsPath)) {
 New-Item -ItemType Directory -Path $stage | Out-Null
 Copy-Item -LiteralPath (Join-Path $BuildDir "Release\protrail.exe") -Destination $stage
 Invoke-Checked "windeployqt" {
+    # T-80: the audio engine links Qt6::Multimedia, so windeployqt must deploy
+    # the multimedia module AND its backend plugin. The old --no-ffmpeg flag is
+    # gone on purpose: the ffmpeg backend is what decodes the WAV catalog, and
+    # Qt6Multimedia.dll alone cannot play anything.
     & $windeployqt --release --no-translations --no-system-d3d-compiler --no-system-dxc-compiler `
-        --no-opengl-sw --no-compiler-runtime --no-quick-import --no-ffmpeg `
+        --no-opengl-sw --no-compiler-runtime --no-quick-import `
         --skip-plugin-types "iconengines,imageformats,generic,networkinformation,tls,platforminputcontexts" `
         (Join-Path $stage "protrail.exe") 2>&1 | Tee-Object -FilePath (Join-Path $BuildDir "windeployqt.log") | Out-Null
+}
+
+# T-80: prove the multimedia RUNTIME is actually deployable, not just linked.
+if (-not (Test-Path -LiteralPath (Join-Path $stage "Qt6Multimedia.dll"))) {
+    Fail "MULTIMEDIA_INCOMPLETE" "Qt6Multimedia.dll was not deployed"
+}
+# windeployqt puts the backend plugin in <appDir>/multimedia (the layout this
+# Qt uses for platforms/ and styles/ too), so accept that and the nested
+# plugins/multimedia form.
+$mmPlugins = @(Get-ChildItem -LiteralPath (Join-Path $stage "multimedia") -Filter *.dll -File -ErrorAction SilentlyContinue |
+    ForEach-Object { $_.Name.ToLowerInvariant() }) +
+    @(Get-ChildItem -LiteralPath (Join-Path $stage "plugins\multimedia") -Filter *.dll -File -ErrorAction SilentlyContinue |
+    ForEach-Object { $_.Name.ToLowerInvariant() })
+if ($mmPlugins.Count -lt 1) {
+    Fail "MULTIMEDIA_BACKEND_MISSING" "no multimedia backend dll staged; Qt6Multimedia.dll alone cannot decode the WAV catalog"
+}
+
+# T-81: the sound catalog is a sibling of the executable, never a
+# working-directory relative path, so a portable copy keeps working from any
+# launch location. Opt-in only (see the param comment above).
+$soundCount = 0
+# A skip and a verification are different facts; the manifest records which
+# one actually happened.
+$soundCatalogStatus = "NOT_STAGED (opt-in omitted) -- package sound catalog NOT VERIFIED"
+if ($IncludeSounds) {
+    $soundSrc = Join-Path $repo "sound"
+    if (-not (Test-Path -LiteralPath $soundSrc)) { Fail "SOUND_DIR_MISSING" "$soundSrc" }
+    Copy-Item -LiteralPath $soundSrc -Destination $stage -Recurse -Force
+    $soundCount = @(Get-ChildItem -LiteralPath (Join-Path $stage "sound") -Filter *.wav -File).Count
+    if ($soundCount -lt 1) { Fail "SOUND_DIR_EMPTY" "no .wav staged into $stage\sound" }
+    $srcWav = @(Get-ChildItem -LiteralPath $soundSrc -Filter *.wav -File).Count
+    if ($soundCount -ne $srcWav) {
+        Fail "SOUND_CATALOG_INCOMPLETE" "staged $soundCount of $srcWav source WAV files"
+    }
+    $soundCatalogStatus = "STAGED_VERIFIED ($soundCount assets, matches the source catalog)"
+    foreach ($required in @("Qt6Multimedia.dll")) {
+        if (-not (Test-Path -LiteralPath (Join-Path $stage $required))) {
+            Fail "MULTIMEDIA_INCOMPLETE" "-IncludeSounds needs $required (audio engine links Qt6::Multimedia)"
+        }
+    }
 }
 
 function Get-Dependents([string]$pe) {
@@ -228,7 +392,7 @@ foreach ($pe in $pes) {
     }
 }
 if ($unresolved.Count -gt 0) { Fail "DEPENDENCY_UNRESOLVED" ($unresolved -join "; ") }
-foreach ($required in @("protrail.exe", "Qt6Core.dll", "Qt6Gui.dll", "Qt6Widgets.dll", "platforms\qwindows.dll")) {
+foreach ($required in @("protrail.exe", "Qt6Core.dll", "Qt6Gui.dll", "Qt6Widgets.dll", "Qt6Multimedia.dll", "platforms\\qwindows.dll")) {
     if (-not (Test-Path -LiteralPath (Join-Path $stage $required))) { Fail "PACKAGE_INCOMPLETE" "$required missing" }
 }
 $forbidden = @(Get-ChildItem -LiteralPath $stage -Recurse -File |
@@ -246,15 +410,19 @@ foreach ($needle in @($repo, $repo.Replace('\', '/'), $BuildDir, $BuildDir.Repla
     }
 }
 $packageFiles = @(Get-ChildItem -LiteralPath $stage -Recurse -File | Sort-Object FullName)
-Write-Output "closure     $($pes.Count) PE files, all imports resolved; no developer path in protrail.exe"
+Write-Output "closure     $($pes.Count) PE files, all imports resolved; multimedia backends: $($mmPlugins -join ', '); sound catalog: $soundCatalogStatus; package assets: $($packageFiles.Count); no developer path in protrail.exe"
 
 # ---------------------------------------------------------------------- smoke
 $harness = Join-Path $repo "smoke_harness.ps1"
-function Invoke-Smoke([string]$dir, [string]$label) {
+function Invoke-Smoke([string]$dir, [string]$label, [string]$WorkingDirectory = "") {
     $ErrorActionPreference = "Continue"
     $smokeArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $harness,
                    "-DeployDir", $dir, "-ExpectedVersion", $version, "-SanitizedPath")
     if (-not $Rehearsal) { $smokeArgs += "-RequireProductIcon" }
+    # A staged catalog must be heard through the deployed backend, never
+    # accepted on file existence alone.
+    if ($IncludeSounds) { $smokeArgs += "-RequireSounds" }
+    if ($WorkingDirectory) { $smokeArgs += "-WorkingDirectory", $WorkingDirectory }
     $output = & powershell.exe @smokeArgs 2>&1
     $rc = $LASTEXITCODE
     $output | ForEach-Object { Write-Output "    [$label] $_" }
@@ -262,6 +430,14 @@ function Invoke-Smoke([string]$dir, [string]$label) {
 }
 Step "Smoke: staged package"
 Invoke-Smoke $stage "staged"
+
+# T-81: the catalog is executable-relative, so the same staged package must
+# also play from an unrelated working directory. Gated on -IncludeSounds
+# because that is the only working-directory-sensitive asset.
+if ($IncludeSounds) {
+    Step "Smoke: unrelated working directory"
+    Invoke-Smoke $stage "cwd:temp" -WorkingDirectory ([System.IO.Path]::GetTempPath())
+}
 
 Step "Portable path matrix"
 $matrixRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("protrail_paths_" + [guid]::NewGuid().ToString("N"))
@@ -347,6 +523,21 @@ $manifest = [ordered]@{
     tag_exists     = [bool]$tagCommit
     product_icon   = $iconStatus
     signing        = "UNSIGNED"
+    # Opt-in only: a rehearsal that staged the operator-cleared catalog records
+    # the asset count, the official package records the fact it stayed out.
+    sound_assets   = if ($IncludeSounds) { $soundCount } else { "not staged (opt-in)" }
+    # T-82: explicit acceptance evidence. Every audio claim here comes from a
+    # captured test EVIDENCE line or a counted package fact; a skipped check
+    # reads as SKIP, never as verified.
+    verification   = [ordered]@{
+        sound_catalog                = $soundCatalogStatus
+        portable_package_asset_count = $packageFiles.Count
+        ctest_exit_code              = $ctestRc
+        audio                        = $audioEvidence
+        audio_statuses               = $audioStatuses
+        human_audible                = $humanAudibleStatus
+        note                         = "QSoundEffect reaching Playing is device-reported playback, never a human hearing claim"
+    }
     toolchain      = [ordered]@{ msvc = $msvcVer; qt = $qtVersion; cmake = ((cmake --version) | Select-Object -First 1) }
     tests_total    = $testTotal
     tests_passed   = $testTotal
@@ -361,4 +552,8 @@ Step "RELEASE_PACKAGE_PASS ($mode)"
 Write-Output "archive     $zipPath"
 Write-Output "checksums   $sumsPath"
 Write-Output "manifest    $manifestPath"
+foreach ($s in $audioStatuses) {
+    if ($s -notlike "HUMAN_AUDIBLE*") { Write-Output "STATUS      $s" }
+}
+Write-Output "STATUS      $humanAudibleStatus"
 exit 0

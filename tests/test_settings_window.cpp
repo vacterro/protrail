@@ -14,6 +14,7 @@
 #include "../src/config/release_defaults.h"
 #include "../src/config/config_storage.h"
 #include "../src/config/dev_defaults.h"
+#include "../src/audio/sound_engine.h"
 
 #include <QtTest/QtTest>
 #include <QSignalSpy>
@@ -37,6 +38,7 @@
 #include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QListWidget>
+#include <QWheelEvent>
 #include <filesystem>
 
 #include <algorithm>
@@ -188,12 +190,88 @@ private slots:
     void restore_click_defaults_resets_motion_wake_controls();
 
 
+    // T-80: Sound tab editor contracts.
+    void soundTabPopulationIsSilent();
+    void soundAssignmentPublishesOnce();
+    void restoreAllResetsAudioToSilent();
+    void audioIsIndependentOfVisualClickFx();
+
+    // T-107: favorites column, Stop All, and wheel scrolling of the picker.
+    void soundFavoritesColumnTogglesAndPublishes();
+    void soundFavoritesRoundTripThroughWindow();
+    void soundStopAllIsItsOwnSignal();
+    void soundCatalogScrollsWithTheWheel();
+    void soundEventEditorUpdatesAndPublishes();
+    void soundPoolEditorOperations();
+    void soundCustomShortcutsAndExclusions();
+    void soundAppOnlyKeyboardFilterDeduplication();
+
 private:
     // Shared helpers.
     QCheckBox* find_checkbox(const SettingsWindow& w, const QString& name) const;
     QPushButton* find_button(const SettingsWindow& w, const QString& text) const;
     SliderSpin* find_slider(const SettingsWindow& w, const QString& name) const;
+
+private slots:
+    // The sound catalog is executable-relative. Once T-106 stages the shipped
+    // 380 wavs beside the exe, EVERY SettingsWindow these tests build would
+    // rebuild 8 assignment combos with 380 entries each -- a quarter of a
+    // million combo items per suite run, and a Debug CTest timeout. Before
+    // that staging existed the ambient directory was simply absent, so the
+    // suite inherited that absence by accident and said nothing about it. Pin
+    // the catalog for the whole suite, exactly as the T-80 sound tests already
+    // do individually: the suite's cost must be its own, not whatever the build
+    // happens to leave beside the executable.
+    void initTestCase();
+
+    void cleanupTestCase();
 };
+
+// Suite-wide catalog root. initTestCase stages a tiny hermetic one so no test
+// depends on the ambient executable-relative directory; every teardown restores
+// it instead of dropping the override back to the ambient (possibly 380-file)
+// directory.
+namespace {
+QTemporaryDir* g_suite_catalog = nullptr;
+const char* kSuiteCatalogClick = "click.wav";
+const char* kSuiteCatalogBoomer = "boomer.wav";
+
+bool write_placeholder_wav(const QString& path) {
+    QFile f(path);
+    if (!f.open(QIODevice::WriteOnly)) return false;
+    f.write(QByteArray(64, '\0'));  // content is irrelevant here
+    f.close();
+    return true;
+}
+
+void stage_suite_catalog() {
+    if (g_suite_catalog != nullptr) {
+        ptd::SoundCatalog::set_sound_directory_for_tests(g_suite_catalog->path());
+    }
+}
+}  // namespace
+
+void TestSettingsWindow::initTestCase() {
+    g_suite_catalog = new QTemporaryDir;
+    if (!g_suite_catalog->isValid()) {
+        delete g_suite_catalog;
+        g_suite_catalog = nullptr;
+        return;
+    }
+    if (write_placeholder_wav(g_suite_catalog->filePath(QString::fromLatin1(kSuiteCatalogClick))) &&
+        write_placeholder_wav(g_suite_catalog->filePath(QString::fromLatin1(kSuiteCatalogBoomer)))) {
+        ptd::SoundCatalog::set_sound_directory_for_tests(g_suite_catalog->path());
+    } else {
+        delete g_suite_catalog;
+        g_suite_catalog = nullptr;
+    }
+}
+
+void TestSettingsWindow::cleanupTestCase() {
+    delete g_suite_catalog;
+    g_suite_catalog = nullptr;
+    ptd::SoundCatalog::clear_sound_directory_for_tests();
+}
 
 
 // ---- T-021 sparkle decoration section ----
@@ -511,14 +589,20 @@ void TestSettingsWindow::tab_construction_succeeds() {
     SettingsWindow w(tc, cc);
     w.show();
     QVERIFY(w.findChild<QTabWidget*>() != nullptr);
-    const int expected_tabs = ptd::is_dev_build() ? 4 : 3;
+    // T-80: Sound is a real tab of the same window, ahead of the optional
+    // Developer tab.
+    const int expected_tabs = ptd::is_dev_build() ? 5 : 4;
     QCOMPARE(w.findChild<QTabWidget*>()->count(), expected_tabs);
     QCOMPARE(w.findChild<QTabWidget*>()->tabText(0), QStringLiteral("General"));
     QCOMPARE(w.findChild<QTabWidget*>()->tabText(1), QStringLiteral("Trail"));
     QCOMPARE(w.findChild<QTabWidget*>()->tabText(2), QStringLiteral("Click"));
-    QVERIFY(w.findChildren<QComboBox*>().isEmpty());
+    QCOMPARE(w.findChild<QTabWidget*>()->tabText(3), QStringLiteral("Sound"));
+    // The Sound tab is the only one that owns selectors.
+    auto* sound_tab = w.findChild<QWidget*>(QStringLiteral("tab_sound"));
+    QVERIFY(sound_tab != nullptr);
+    QVERIFY(!sound_tab->findChildren<QComboBox*>().isEmpty());
     if (ptd::is_dev_build()) {
-        QCOMPARE(w.findChild<QTabWidget*>()->tabText(3), QStringLiteral("Developer"));
+        QCOMPARE(w.findChild<QTabWidget*>()->tabText(4), QStringLiteral("Developer"));
     }
 }
 
@@ -751,8 +835,12 @@ void TestSettingsWindow::no_recursive_signal_storm() {
     QCOMPARE(trailSpy.count(), 0);
     QCOMPARE(clickSpy.count(), 0);
 
-    // User drag on one slider emits exactly once.
-    auto* slider = sliders[0]->findChild<QSlider*>();
+    // User drag on one slider emits exactly once. The control is picked by
+    // name: the Sound tab's volume slider starts at its maximum, where a +1
+    // drag cannot move and would silently emit nothing.
+    auto* trail_spin = w.findChild<SliderSpin*>(QStringLiteral("trail_head_thickness"));
+    QVERIFY(trail_spin != nullptr);
+    auto* slider = trail_spin->findChild<QSlider*>();
     slider->setValue(slider->value() + 1);
     QCOMPARE(trailSpy.count() + clickSpy.count(), 1);
 }
@@ -2501,11 +2589,14 @@ void TestSettingsWindow::trail_control_labels_are_user_facing() {
     QCOMPARE(label_of("trail_smoothing"), QStringLiteral("Smoothness"));
     QCOMPARE(label_of("trail_fade_start"), QStringLiteral("Fade start"));
 
-    // Fade curve stays an exclusive button selector.
+    // Fade curve stays an exclusive button selector. Selectors live only in
+    // the Sound tab's assignment combos, never in a trail row.
     QVERIFY(w.findChild<QPushButton*>("trail_fade_linear"));
     QVERIFY(w.findChild<QPushButton*>("trail_fade_smooth"));
     QVERIFY(w.findChild<QPushButton*>("trail_fade_ease_out"));
-    QVERIFY(w.findChildren<QComboBox*>().isEmpty());
+    auto* trail_tab = w.findChild<QWidget*>(QStringLiteral("tab_trail"));
+    QVERIFY(trail_tab != nullptr);
+    QVERIFY(trail_tab->findChildren<QComboBox*>().isEmpty());
 }
 
 // T-020R1 TARGET 3: the STYLE / COLOR / SHAPE / TRAIL anchors must not move
@@ -4157,12 +4248,14 @@ void TestSettingsWindow::dev_tab_presence_contract() {
     if (ptd::is_dev_build()) {
         QVERIFY(w.has_dev_tab());
         QVERIFY(w.dev_tab() != nullptr);
-        QCOMPARE(tabs->count(), 4);
-        QCOMPARE(tabs->tabText(3), QStringLiteral("Developer"));
+        QCOMPARE(tabs->count(), 5);
+        QCOMPARE(tabs->tabText(3), QStringLiteral("Sound"));
+        QCOMPARE(tabs->tabText(4), QStringLiteral("Developer"));
     } else {
         QVERIFY(!w.has_dev_tab());
         QVERIFY(w.dev_tab() == nullptr);
-        QCOMPARE(tabs->count(), 3);
+        QCOMPARE(tabs->count(), 4);
+        QCOMPARE(tabs->tabText(3), QStringLiteral("Sound"));
     }
 }
 
@@ -4176,7 +4269,7 @@ void TestSettingsWindow::dev_tab_presence_override() {
         SettingsWindow w(tc, cc, true, false);
         QVERIFY(!w.has_dev_tab());
         QVERIFY(w.dev_tab() == nullptr);
-        QCOMPARE(w.findChild<QTabWidget*>()->count(), 3);
+        QCOMPARE(w.findChild<QTabWidget*>()->count(), 4);
     }
 
     // 2. Force enabled
@@ -4185,8 +4278,8 @@ void TestSettingsWindow::dev_tab_presence_override() {
         SettingsWindow w(tc, cc, true, false);
         QVERIFY(w.has_dev_tab());
         QVERIFY(w.dev_tab() != nullptr);
-        QCOMPARE(w.findChild<QTabWidget*>()->count(), 4);
-        QCOMPARE(w.findChild<QTabWidget*>()->tabText(3), QStringLiteral("Developer"));
+        QCOMPARE(w.findChild<QTabWidget*>()->count(), 5);
+        QCOMPARE(w.findChild<QTabWidget*>()->tabText(4), QStringLiteral("Developer"));
     }
 
     ptd::set_dev_build_override_for_tests(std::nullopt);
@@ -4639,5 +4732,609 @@ void TestSettingsWindow::restore_click_defaults_resets_motion_wake_controls() {
     QCOMPARE(find_checkbox(w, "chk_stop_accent")->isChecked(), d.click.stop_accent);
 }
 
+
+// ------------------------------------------------------------------ T-80 UI
+
+// The catalog is executable-relative, so the GUI tests stage a private one:
+// the assertions then do not depend on the developer's sound directory.
+struct SoundCatalogFixture {
+    QTemporaryDir dir;
+    QString click_id;
+    QString boomer_id;
+
+    bool stage() {
+        if (!dir.isValid()) return false;
+        click_id = QStringLiteral("click.wav");
+        boomer_id = QStringLiteral("boomer.wav");
+        auto write = [this](const QString& name) {
+            QFile f(dir.filePath(name));
+            if (!f.open(QIODevice::WriteOnly)) return false;
+            f.write(QByteArray(64, '\0'));  // content is irrelevant here
+            f.close();
+            return true;
+        };
+        if (!write(click_id) || !write(boomer_id)) return false;
+        ptd::SoundCatalog::set_sound_directory_for_tests(dir.path());
+        return true;
+    }
+    ~SoundCatalogFixture() {
+        // Restore the suite catalog, not the ambient one: dropping the override
+        // here would hand the next test the 380-file staged directory.
+        stage_suite_catalog();
+    }
+};
+
+// The Sound tab is populated PROGRAMMATICALLY on open: a stored config with
+// audio already enabled and assigned must not play anything while the window
+// is being built. The window owns editors and preview INTENT only, and the
+// intent must come from a user action, never from loading.
+void TestSettingsWindow::soundTabPopulationIsSilent() {
+    ptd::AppConfig cfg{};
+    cfg.audio.enabled = true;
+    cfg.audio.muted = false;
+    cfg.audio.volume = 0.55f;
+    for (int i = 0; i < ptd::kAudioEventCount; ++i) {
+        cfg.audio.sounds[static_cast<std::size_t>(i)] =
+            std::string("evt") + std::to_string(i) + ".wav";
+    }
+
+    SettingsWindow w(cfg);
+    w.show();
+
+    QSignalSpy audioSpy(&w, &SettingsWindow::audio_config_changed);
+    QSignalSpy previewSpy(&w, &SettingsWindow::sound_preview_requested);
+    QSignalSpy stopSpy(&w, &SettingsWindow::sound_preview_stop_requested);
+    QSignalSpy bulkSpy(&w, &SettingsWindow::app_config_applied);
+    QCOMPARE(audioSpy.count(), 0);
+    QCOMPARE(previewSpy.count(), 0);
+    QCOMPARE(stopSpy.count(), 0);
+    QCOMPARE(bulkSpy.count(), 0);
+
+    // The loaded state is what the user sees.
+    QCheckBox* chk_enabled = w.findChild<QCheckBox*>("chk_sound_enabled");
+    QCheckBox* chk_muted = w.findChild<QCheckBox*>("chk_sound_muted");
+    QVERIFY(chk_enabled);
+    QVERIFY(chk_muted);
+    QCOMPARE(chk_enabled->isChecked(), true);
+    QCOMPARE(chk_muted->isChecked(), false);
+    QCOMPARE(w.findChild<SliderSpin*>("sound_volume")->value(), 55.0);
+
+    for (int i = 0; i < ptd::kAudioEventCount; ++i) {
+        const QString name = QStringLiteral("sound_assign_%1")
+                                 .arg(QString::fromLatin1(
+                                     ptd::audio_event_name(i)));
+        QComboBox* combo = w.findChild<QComboBox*>(name);
+        QVERIFY2(combo != nullptr, "every event owns an assignment selector");
+        QCOMPARE(combo->currentData().toString(),
+                 QString::fromStdString(cfg.audio.sounds[static_cast<std::size_t>(i)]));
+        QCOMPARE(combo->itemText(0), QStringLiteral("None"));
+    }
+
+    // A capture round-trips the block unchanged: a restart loses nothing.
+    QCOMPARE(w.capture_current_settings().audio,
+             ptd::AudioConfig::validated(cfg.audio));
+
+    // A programmatic re-apply stays silent too.
+    w.apply_config(cfg);
+    QCOMPARE(audioSpy.count(), 0);
+    QCOMPARE(previewSpy.count(), 0);
+}
+
+// One user change to the audio block publishes exactly once, and it never
+// leaks into the visual config publications.
+void TestSettingsWindow::soundAssignmentPublishesOnce() {
+    SoundCatalogFixture catalog;
+    QVERIFY(catalog.stage());
+    QVERIFY(ptd::SoundCatalog::sound_ids().contains(catalog.click_id));
+
+    ptd::AppConfig cfg{};
+    cfg.audio.enabled = true;
+    SettingsWindow w(cfg);
+    w.show();
+
+    QSignalSpy audioSpy(&w, &SettingsWindow::audio_config_changed);
+    QSignalSpy trailSpy(&w, &SettingsWindow::trail_config_changed);
+    QSignalSpy clickSpy(&w, &SettingsWindow::click_config_changed);
+    QSignalSpy previewSpy(&w, &SettingsWindow::sound_preview_requested);
+
+    QComboBox* combo = w.findChild<QComboBox*>("sound_assign_left_down");
+    QVERIFY(combo != nullptr);
+    QVERIFY(combo->count() >= 3);  // None + the two staged sounds
+    combo->setCurrentIndex(1);    // first catalog entry after None
+    QCOMPARE(audioSpy.count(), 1);
+    QCOMPARE(trailSpy.count(), 0);
+    QCOMPARE(clickSpy.count(), 0);
+    // Choosing a sound for an event previews it immediately, and the preview
+    // carries the chosen id.
+    QCOMPARE(previewSpy.count(), 1);
+    const QString previewed = QString::fromStdString(
+        previewSpy.takeFirst().at(0).value<std::string>());
+    QVERIFY2(previewSpy.isEmpty(),
+             "one assignment change previews exactly once");
+    QCOMPARE(previewed, combo->currentData().toString());
+    QVERIFY2(previewed == catalog.click_id || previewed == catalog.boomer_id,
+             qPrintable("previewed id is a staged catalog id: " + previewed));
+
+    const ptd::AudioConfig published =
+        audioSpy.takeFirst().at(0).value<ptd::AudioConfig>();
+    QCOMPARE(published.enabled, true);
+    QCOMPARE(published.sounds[static_cast<int>(ptd::AudioEvent::LeftDown)],
+             combo->currentData().toString().toStdString());
+    QCOMPARE(published.sounds[static_cast<int>(ptd::AudioEvent::LeftDown)],
+             combo->currentData().toString().toStdString());
+
+    // Volume is published as a validated config value (0..1), not a raw
+    // slider percentage. set_value() is the silent population path, so the
+    // user drag goes through the inner QSlider exactly like the real widget.
+    SliderSpin* volume = w.findChild<SliderSpin*>("sound_volume");
+    volume->findChild<QSlider*>()->setValue(37);
+    QCOMPARE(audioSpy.count(), 1);
+    QCOMPARE(audioSpy.takeFirst().at(0).value<ptd::AudioConfig>().volume, 0.37f);
+    QCOMPARE(w.capture_current_settings().audio.volume, 0.37f);
+
+    // Muting is independent of enabling.
+    QCheckBox* chk_muted = w.findChild<QCheckBox*>("chk_sound_muted");
+    chk_muted->setChecked(true);
+    QCOMPARE(audioSpy.count(), 1);
+    QVERIFY(w.capture_current_settings().audio.muted);
+    QVERIFY(w.capture_current_settings().audio.enabled);
+
+    // Preview INTENT: a catalog selection asks for a preview, it never edits
+    // the stored assignment itself.
+    QListWidget* list = w.findChild<QListWidget*>("sound_catalog");
+    QVERIFY(list != nullptr);
+    QVERIFY(list->count() >= 2);
+    list->setCurrentRow(1);  // a real catalog selection
+    QCOMPARE(previewSpy.count(), 1);
+    QCOMPARE(previewSpy.takeFirst().at(0).value<std::string>(),
+             list->currentItem()->data(Qt::UserRole).toString().toStdString());
+    // The catalog never edits the stored assignment itself.
+    QCOMPARE(w.capture_current_settings()
+                 .audio.sounds[static_cast<int>(ptd::AudioEvent::LeftDown)],
+             combo->currentData().toString().toStdString());
+
+    // Stop intent is its own signal.
+    QSignalSpy stopSpy(&w, &SettingsWindow::sound_preview_stop_requested);
+    w.findChild<QPushButton*>("btn_sound_stop")->click();
+    QCOMPARE(stopSpy.count(), 1);
+
+}
+
+// Restore All Defaults resets the audio block to the silent defaults in ONE
+// whole-config publication (CORE-003).
+void TestSettingsWindow::restoreAllResetsAudioToSilent() {
+    ptd::AppConfig cfg{};
+    cfg.audio.enabled = true;
+    cfg.audio.muted = true;
+    cfg.audio.volume = 0.8f;
+    cfg.audio.sounds[static_cast<int>(ptd::AudioEvent::LeftDown)] = "evt0.wav";
+    cfg.audio.sounds[static_cast<int>(ptd::AudioEvent::ScrollDown)] = "evt7.wav";
+    SettingsWindow w(cfg);
+    w.show();
+
+    QSignalSpy bulkSpy(&w, &SettingsWindow::app_config_applied);
+    QSignalSpy previewSpy(&w, &SettingsWindow::sound_preview_requested);
+    QPushButton* btn = w.findChild<QPushButton*>("btn_restore_all");
+    QVERIFY(btn != nullptr);
+    btn->click();
+
+    QCOMPARE(bulkSpy.count(), 1);
+    QCOMPARE(previewSpy.count(), 0);
+    const ptd::AppConfig restored =
+        bulkSpy.takeFirst().at(0).value<ptd::AppConfig>();
+    QCOMPARE(restored.audio, ptd::AudioConfig{});
+
+    QCheckBox* chk_enabled = w.findChild<QCheckBox*>("chk_sound_enabled");
+    QCOMPARE(chk_enabled->isChecked(), false);
+    for (int i = 0; i < ptd::kAudioEventCount; ++i) {
+        const QString name = QStringLiteral("sound_assign_%1")
+                                 .arg(QString::fromLatin1(
+                                     ptd::audio_event_name(i)));
+        QCOMPARE(w.findChild<QComboBox*>(name)->currentData().toString(),
+                 QString());
+    }
+}
+
+// Audio is NOT a child of the visual Click FX master switch. Turning Click FX
+// off must leave the sound configuration intact.
+void TestSettingsWindow::audioIsIndependentOfVisualClickFx() {
+    ptd::AppConfig cfg{};
+    cfg.click.enabled = true;
+    cfg.audio.enabled = true;
+    cfg.audio.sounds[static_cast<int>(ptd::AudioEvent::LeftDown)] = "evt0.wav";
+    SettingsWindow w(cfg);
+    w.show();
+
+    QSignalSpy clickSpy(&w, &SettingsWindow::click_enabled_changed);
+    QSignalSpy audioSpy(&w, &SettingsWindow::audio_config_changed);
+    QCheckBox* chk_click = w.findChild<QCheckBox*>("chk_click");
+    QVERIFY(chk_click != nullptr);
+    chk_click->setChecked(false);
+    QCOMPARE(clickSpy.count(), 1);
+    QCOMPARE(audioSpy.count(), 0);  // audio never moves because Click FX moved
+
+    QVERIFY(w.capture_current_settings().audio.enabled);
+    QCOMPARE(w.capture_current_settings()
+                 .audio.sounds[static_cast<int>(ptd::AudioEvent::LeftDown)],
+             std::string("evt0.wav"));
+
+    // The reverse order too: turning audio off does not touch Click FX.
+    chk_click->setChecked(true);
+    clickSpy.clear();
+    QCheckBox* chk_sound = w.findChild<QCheckBox*>("chk_sound_enabled");
+    chk_sound->setChecked(false);
+    QCOMPARE(audioSpy.count(), 1);
+    QCOMPARE(clickSpy.count(), 0);
+    QVERIFY(w.capture_current_settings().click.enabled);
+}
+
+
+// T-107: the Favorites column is a real second column. Right-click toggles
+// membership through the ONE shared path, the column mirrors the model, and a
+// toggle publishes exactly one AudioConfig -- never a trail/click config.
+void TestSettingsWindow::soundFavoritesColumnTogglesAndPublishes() {
+    SoundCatalogFixture catalog;
+    QVERIFY(catalog.stage());
+
+    SettingsWindow w(ptd::AppConfig{});
+    w.show();
+
+    QListWidget* favorites = w.findChild<QListWidget*>("sound_favorites");
+    QListWidget* all = w.findChild<QListWidget*>("sound_catalog");
+    QVERIFY(favorites != nullptr);
+    QVERIFY(all != nullptr);
+    // Two independent columns: distinct widgets, and the favorites column
+    // starts empty because nothing is curated yet.
+    QVERIFY(favorites != all);
+    QCOMPARE(favorites->count(), 0);
+    QVERIFY(all->count() >= 2);
+
+    QSignalSpy audioSpy(&w, &SettingsWindow::audio_config_changed);
+    QSignalSpy trailSpy(&w, &SettingsWindow::trail_config_changed);
+    QSignalSpy clickSpy(&w, &SettingsWindow::click_config_changed);
+
+    // Adding a favorite appends it, preserving the order of curation.
+    w.toggle_sound_favorite(catalog.click_id);
+    QCOMPARE(audioSpy.count(), 1);
+    QCOMPARE(trailSpy.count(), 0);
+    QCOMPARE(clickSpy.count(), 0);
+    QCOMPARE(w.favorites_for_tests(), QStringList{catalog.click_id});
+    QCOMPARE(w.capture_current_settings().audio.favorites,
+             std::vector<std::string>{catalog.click_id.toStdString()});
+
+    w.toggle_sound_favorite(catalog.boomer_id);
+    QCOMPARE(w.favorites_for_tests(),
+             (QStringList{catalog.click_id, catalog.boomer_id}));
+    QCOMPARE(w.capture_current_settings().audio.favorites,
+             (std::vector<std::string>{catalog.click_id.toStdString(),
+                                       catalog.boomer_id.toStdString()}));
+
+    // Removing is the same call: membership, not a separate verb.
+    w.toggle_sound_favorite(catalog.click_id);
+    QCOMPARE(w.favorites_for_tests(), QStringList{catalog.boomer_id});
+
+    // A favorite is never invented into the assignment combos: membership is a
+    // filter, not an assignment.
+    QCOMPARE(w.capture_current_settings()
+                 .audio.sounds[static_cast<int>(ptd::AudioEvent::LeftDown)],
+             std::string());
+}
+
+// T-107: favorites survive a programmatic apply/capture round trip through the
+// window, so loading a stored config shows the curated column and capturing it
+// back preserves the exact order.
+void TestSettingsWindow::soundFavoritesRoundTripThroughWindow() {
+    SoundCatalogFixture catalog;
+    QVERIFY(catalog.stage());
+
+    ptd::AppConfig cfg{};
+    cfg.audio.enabled = true;
+    cfg.audio.favorites = {catalog.boomer_id.toStdString(),
+                           catalog.click_id.toStdString()};
+
+    SettingsWindow w(cfg);
+    w.show();
+
+    // Population is silent: no publication, and the column already shows the
+    // curated order from the config.
+    QSignalSpy audioSpy(&w, &SettingsWindow::audio_config_changed);
+    QCOMPARE(audioSpy.count(), 0);
+    QCOMPARE(w.favorites_for_tests(),
+             (QStringList{catalog.boomer_id, catalog.click_id}));
+    QCOMPARE(w.capture_current_settings().audio.favorites, cfg.audio.favorites);
+}
+
+// T-107: Stop All is deliberately NOT Stop. Stop cancels the preview slot;
+// Stop All is a distinct signal so the Application can silence every voice.
+void TestSettingsWindow::soundStopAllIsItsOwnSignal() {
+    SettingsWindow w(ptd::AppConfig{});
+    w.show();
+
+    QSignalSpy stopSpy(&w, &SettingsWindow::sound_preview_stop_requested);
+    QSignalSpy stopAllSpy(&w, &SettingsWindow::sound_stop_all_requested);
+
+    QPushButton* btn_stop = w.findChild<QPushButton*>("btn_sound_stop");
+    QPushButton* btn_stop_all = w.findChild<QPushButton*>("btn_sound_stop_all");
+    QVERIFY(btn_stop != nullptr);
+    QVERIFY(btn_stop_all != nullptr);
+    QVERIFY(btn_stop != btn_stop_all);
+
+    btn_stop->click();
+    QCOMPARE(stopSpy.count(), 1);
+    QCOMPARE(stopAllSpy.count(), 0);
+
+    btn_stop_all->click();
+    QCOMPARE(stopAllSpy.count(), 1);
+    QCOMPARE(stopSpy.count(), 1);  // Stop All never rides the preview signal
+}
+
+// T-107: the user's explicit first requirement -- the sound picker must scroll
+// with the mouse wheel. A QListWidget scrolls when the wheel is delivered to
+// its viewport; this proves the delivery reaches the viewport (nothing on the
+// Sound tab swallows it) and actually moves the vertical scrollbar.
+void TestSettingsWindow::soundCatalogScrollsWithTheWheel() {
+    // Stage enough sounds that the catalog must scroll.
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    for (int i = 0; i < 80; ++i) {
+        QFile f(dir.filePath(QStringLiteral("s%1.wav").arg(i, 3, 10, QLatin1Char('0'))));
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        f.write(QByteArray(64, '\0'));
+        f.close();
+    }
+    ptd::SoundCatalog::set_sound_directory_for_tests(dir.path());
+
+    SettingsWindow w(ptd::AppConfig{});
+    w.show();
+    QListWidget* all = w.findChild<QListWidget*>("sound_catalog");
+    QVERIFY(all != nullptr);
+    QCOMPARE(all->count(), 80);
+
+    // Force a geometry pass so the scrollbar range is real.
+    w.resize(520, 500);
+    QCoreApplication::processEvents();
+    QScrollBar* bar = all->verticalScrollBar();
+    QVERIFY(bar != nullptr);
+    QVERIFY2(bar->maximum() > 0,
+             "80 staged sounds must overflow the picker, giving a scroll range");
+    QCOMPARE(bar->value(), 0);
+
+    // A wheel-down notch delivered to the VIEWPORT (where Qt routes real wheel
+    // input) must move the scrollbar. Sending it to the viewport, not the list,
+    // is what makes this a delivery proof rather than a hand-set value.
+    const QPoint pos = all->viewport()->rect().center();
+    QWheelEvent down(QPointF(all->viewport()->mapToGlobal(pos)),
+                     QPointF(all->viewport()->mapToGlobal(pos)),
+                     QPoint(0, 0), QPoint(0, -120), Qt::NoButton, Qt::NoModifier,
+                     Qt::NoScrollPhase, false);
+    QApplication::sendEvent(all->viewport(), &down);
+    QVERIFY2(bar->value() > 0,
+             "wheel-down over the picker viewport must scroll the catalog");
+
+    const int after_down = bar->value();
+    QWheelEvent up(QPointF(all->viewport()->mapToGlobal(pos)),
+                   QPointF(all->viewport()->mapToGlobal(pos)),
+                   QPoint(0, 0), QPoint(0, 120), Qt::NoButton, Qt::NoModifier,
+                   Qt::NoScrollPhase, false);
+    QApplication::sendEvent(all->viewport(), &up);
+    QVERIFY2(bar->value() < after_down,
+             "wheel-up must scroll the catalog back toward the top");
+
+    // Restore the suite catalog (never the ambient 380-file staged one).
+    stage_suite_catalog();
+}
+
+// T-121 (Gap A & B): per-event editor updates commit to AudioConfig and publish via signal.
+void TestSettingsWindow::soundEventEditorUpdatesAndPublishes() {
+    SettingsWindow w(ptd::AppConfig{});
+    w.show();
+
+    QSignalSpy audioSpy(&w, &SettingsWindow::audio_config_changed);
+
+    // Select typing.letter for editing
+    w.select_sound_event_for_editing(QStringLiteral("typing.letter"));
+    QCOMPARE(w.selected_sound_event_id(), QStringLiteral("typing.letter"));
+
+    QCheckBox* chk_en = w.findChild<QCheckBox*>("chk_event_enabled");
+    QComboBox* combo_snd = w.findChild<QComboBox*>("combo_event_sound");
+    SliderSpin* gain_spin = w.findChild<SliderSpin*>("event_gain_db");
+    QVERIFY(chk_en != nullptr);
+    QVERIFY(combo_snd != nullptr);
+    QVERIFY(gain_spin != nullptr);
+
+    const int initial_count = audioSpy.count();
+
+    // Change gain -> must commit and publish via user interaction
+    QDoubleSpinBox* gain_spinbox = gain_spin->findChild<QDoubleSpinBox*>();
+    QVERIFY(gain_spinbox != nullptr);
+    gain_spinbox->setValue(-6.0);
+    QVERIFY(audioSpy.count() > initial_count);
+
+    ptd::AudioConfig published = audioSpy.last().at(0).value<ptd::AudioConfig>();
+    ptd::EventSoundConfig ec = published.effective_event_config("typing.letter");
+    QCOMPARE(ec.gain_db, -6.0f);
+
+    // Disable event -> must commit and publish
+    const int count_before_toggle = audioSpy.count();
+    chk_en->setChecked(false);
+    QVERIFY(audioSpy.count() > count_before_toggle);
+
+    published = audioSpy.last().at(0).value<ptd::AudioConfig>();
+    ec = published.effective_event_config("typing.letter");
+    QCOMPARE(ec.enabled, false);
+
+    // Reset event -> restores defaults
+    QPushButton* btn_reset = w.findChild<QPushButton*>("btn_event_reset");
+    QVERIFY(btn_reset != nullptr);
+    btn_reset->click();
+
+    published = w.capture_current_settings().audio;
+    ec = published.effective_event_config("typing.letter");
+    QCOMPARE(ec.enabled, true);
+    QCOMPARE(ec.gain_db, 0.0f);
+}
+
+// T-121 (Gap C): random sound pool add, remove, and reorder operations.
+void TestSettingsWindow::soundPoolEditorOperations() {
+    SettingsWindow w(ptd::AppConfig{});
+    w.show();
+
+    w.select_sound_event_for_editing(QStringLiteral("mouse.left_down"));
+
+    QListWidget* list_pool = w.findChild<QListWidget*>("list_pool_entries");
+    QComboBox* combo_add = w.findChild<QComboBox*>("combo_pool_add_sound");
+    QPushButton* btn_add = w.findChild<QPushButton*>("btn_pool_add");
+    QPushButton* btn_remove = w.findChild<QPushButton*>("btn_pool_remove");
+    QPushButton* btn_up = w.findChild<QPushButton*>("btn_pool_up");
+    QPushButton* btn_down = w.findChild<QPushButton*>("btn_pool_down");
+
+    QVERIFY(list_pool != nullptr);
+    QVERIFY(combo_add != nullptr);
+    QVERIFY(btn_add != nullptr);
+    QVERIFY(btn_remove != nullptr);
+    QVERIFY(btn_up != nullptr);
+    QVERIFY(btn_down != nullptr);
+
+    // Ensure combo has an item to add
+    QVERIFY(combo_add->count() > 0);
+    combo_add->setCurrentIndex(0);
+    const QString sid1 = combo_add->currentData().toString();
+    QVERIFY(!sid1.isEmpty());
+
+    // Add first entry
+    btn_add->click();
+    QCOMPARE(list_pool->count(), 1);
+
+    ptd::AudioConfig cfg = w.capture_current_settings().audio;
+    ptd::EventSoundConfig ec = cfg.effective_event_config("mouse.left_down");
+    QCOMPARE(static_cast<int>(ec.pool.size()), 1);
+    QCOMPARE(QString::fromStdString(ec.pool[0].sound_id), sid1);
+    QCOMPARE(ec.use_pool, true);
+
+    // If second sound is available in test catalog, test reordering
+    if (combo_add->count() > 1) {
+        combo_add->setCurrentIndex(1);
+        const QString sid2 = combo_add->currentData().toString();
+        btn_add->click();
+        QCOMPARE(list_pool->count(), 2);
+
+        // Move entry 1 Up -> swaps with 0
+        list_pool->setCurrentRow(1);
+        btn_up->click();
+
+        cfg = w.capture_current_settings().audio;
+        ec = cfg.effective_event_config("mouse.left_down");
+        QCOMPARE(QString::fromStdString(ec.pool[0].sound_id), sid2);
+        QCOMPARE(QString::fromStdString(ec.pool[1].sound_id), sid1);
+
+        // Move entry 0 Down -> swaps back
+        list_pool->setCurrentRow(0);
+        btn_down->click();
+
+        cfg = w.capture_current_settings().audio;
+        ec = cfg.effective_event_config("mouse.left_down");
+        QCOMPARE(QString::fromStdString(ec.pool[0].sound_id), sid1);
+        QCOMPARE(QString::fromStdString(ec.pool[1].sound_id), sid2);
+    }
+
+    // Remove entry
+    list_pool->setCurrentRow(0);
+    btn_remove->click();
+    cfg = w.capture_current_settings().audio;
+    ec = cfg.effective_event_config("mouse.left_down");
+    QCOMPARE(static_cast<int>(ec.pool.size()), combo_add->count() > 1 ? 1 : 0);
+}
+
+// T-121: custom shortcuts and per-process exclusions management.
+void TestSettingsWindow::soundCustomShortcutsAndExclusions() {
+    SettingsWindow w(ptd::AppConfig{});
+    w.show();
+
+    // 1. Process exclusion add and remove
+    QLineEdit* edit_proc = w.findChild<QLineEdit*>("edit_proc");
+    if (!edit_proc) edit_proc = w.findChild<QLineEdit*>("edit_excluded_proc");
+    QPushButton* btn_add_proc = w.findChild<QPushButton*>("btn_add_excluded_proc");
+    QPushButton* btn_rm_proc = w.findChild<QPushButton*>("btn_remove_excluded_proc");
+    QListWidget* list_proc = w.findChild<QListWidget*>("list_excluded_procs");
+
+    QVERIFY(edit_proc != nullptr);
+    QVERIFY(btn_add_proc != nullptr);
+    QVERIFY(btn_rm_proc != nullptr);
+    QVERIFY(list_proc != nullptr);
+
+    edit_proc->setText(QStringLiteral("keepass.exe"));
+    btn_add_proc->click();
+
+    ptd::AudioConfig cfg = w.capture_current_settings().audio;
+    QCOMPARE(static_cast<int>(cfg.excluded_processes.size()), 1);
+    QCOMPARE(QString::fromStdString(cfg.excluded_processes[0]), QStringLiteral("keepass.exe"));
+
+    // Remove exclusion
+    list_proc->setCurrentRow(0);
+    btn_rm_proc->click();
+    cfg = w.capture_current_settings().audio;
+    QCOMPARE(static_cast<int>(cfg.excluded_processes.size()), 0);
+
+    // 2. Custom shortcut add and remove
+    QLineEdit* edit_sc_name = w.findChild<QLineEdit*>("edit_custom_sc_name");
+    QLineEdit* edit_sc_chord = w.findChild<QLineEdit*>("edit_custom_sc_chord");
+    QPushButton* btn_add_sc = w.findChild<QPushButton*>("btn_custom_sc_add");
+    QPushButton* btn_rm_sc = w.findChild<QPushButton*>("btn_custom_sc_remove");
+    QListWidget* list_sc = w.findChild<QListWidget*>("list_custom_shortcuts");
+
+    QVERIFY(edit_sc_name != nullptr);
+    QVERIFY(edit_sc_chord != nullptr);
+    QVERIFY(btn_add_sc != nullptr);
+    QVERIFY(btn_rm_sc != nullptr);
+    QVERIFY(list_sc != nullptr);
+
+    edit_sc_name->setText(QStringLiteral("Build"));
+    edit_sc_chord->setText(QStringLiteral("Ctrl+Shift+B"));
+    btn_add_sc->click();
+
+    cfg = w.capture_current_settings().audio;
+    QCOMPARE(static_cast<int>(cfg.custom_shortcuts.size()), 1);
+    QCOMPARE(QString::fromStdString(cfg.custom_shortcuts[0].display_name), QStringLiteral("Build"));
+    QCOMPARE(QString::fromStdString(cfg.custom_shortcuts[0].chord), QStringLiteral("Ctrl+Shift+B"));
+
+    // Remove custom shortcut
+    list_sc->setCurrentRow(0);
+    btn_rm_sc->click();
+    cfg = w.capture_current_settings().audio;
+    QCOMPARE(static_cast<int>(cfg.custom_shortcuts.size()), 0);
+}
+
+// T-121: AppOnly keyboard filter deduplication across child widgets.
+void TestSettingsWindow::soundAppOnlyKeyboardFilterDeduplication() {
+    SettingsWindow w(ptd::AppConfig{});
+    w.show();
+    w.activateWindow();
+
+    QTabWidget* tabs = w.findChild<QTabWidget*>();
+    QVERIFY(tabs != nullptr);
+    tabs->setCurrentIndex(3); // Switch to Sound tab so search widget is visible
+    QCoreApplication::processEvents();
+
+    QSignalSpy keySpy(&w, &SettingsWindow::app_key_event);
+
+    QLineEdit* search = w.findChild<QLineEdit*>("sound_search");
+    QVERIFY(search != nullptr);
+    search->setFocus();
+    QCoreApplication::processEvents();
+
+    // Send a key press directly to the focused child widget
+    QKeyEvent press(QEvent::KeyPress, Qt::Key_A, Qt::NoModifier, "a", false, 1);
+    QApplication::sendEvent(search, &press);
+
+    // Exactly ONE app_key_event must fire (no duplicate bubbling)
+    QCOMPARE(keySpy.count(), 1);
+
+    // Release
+    QKeyEvent release(QEvent::KeyRelease, Qt::Key_A, Qt::NoModifier, "a", false, 1);
+    QApplication::sendEvent(search, &release);
+    QCOMPARE(keySpy.count(), 2);
+}
+
 QTEST_MAIN(TestSettingsWindow)
 #include "test_settings_window.moc"
+

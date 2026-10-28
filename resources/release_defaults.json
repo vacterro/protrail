@@ -1,5 +1,5 @@
 {
-    "schema_version": 11,
+    "schema_version": 14,
     "master_enabled": true,
     "start_with_windows": false,
     "trail": {
@@ -61,5 +61,40 @@
     },
     "render": {
         "diagnostic_primitives": false
+    },
+    "audio": {
+        "enabled": false,
+        "muted": false,
+        "volume": 1.0,
+        "sounds": {
+            "left_down": "",
+            "left_up": "",
+            "right_down": "",
+            "right_up": "",
+            "middle_down": "",
+            "middle_up": "",
+            "scroll_up": "",
+            "scroll_down": ""
+        },
+        "favorites": [],
+        "recent_sounds": [],
+        "preview_on_selection": true,
+        "preview_debounce_ms": 35,
+        "keyboard_enabled": false,
+        "keyboard_scope": "app_only",
+        "typing_sounds_enabled": false,
+        "modifier_tap_sounds_enabled": false,
+        "suppress_repeat_typing": false,
+        "typing_repeat_cooldown_ms": 35,
+        "suppress_sensitive_contexts": true,
+        "excluded_processes": [],
+        "horizontal_scroll_enabled": true,
+        "scroll_sensitivity": 1.0,
+        "scroll_cooldown_ms": 25,
+        "scroll_max_rate_hz": 30,
+        "scroll_pitch_variation": 0.0,
+        "active_profile": "default",
+        "custom_shortcuts": [],
+        "event_configs": []
     }
 }

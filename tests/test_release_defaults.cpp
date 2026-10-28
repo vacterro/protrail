@@ -57,6 +57,9 @@ private slots:
     void sentinel_roundtrip_serialize_deserialize_preserves_every_semantic_value();
     void sentinel_omitted_field_fails_coverage_guard();
     void sentinel_apply_defaults_restores_all_values();
+    // T-80: the audio block ships SILENT -- an upgraded install must
+    // never start making noise nobody configured.
+    void audio_defaults_are_silent();
 };
 
 // Recursively collect every key path in a JSON object ("trail.style", ...).
@@ -138,6 +141,85 @@ static AppConfig make_sentinel_config() {
 
     // RenderConfig
     c.render.diagnostic_primitives = true;
+
+    // T-80 audio: every persisted key gets a distinct legal non-default value,
+    // so the coverage guard catches any key the serialiser starts to ignore.
+    // The names stay plain catalog ids (no paths), which is all validation
+    // accepts.
+    c.audio.enabled = true;
+    c.audio.muted = true;
+    c.audio.volume = 0.42f;
+    for (int i = 0; i < ptd::kAudioEventCount; ++i) {
+        c.audio.sounds[static_cast<std::size_t>(i)] =
+            std::string("sentinel_") + ptd::audio_event_name(i) + ".wav";
+    }
+    // T-107: the favorites list is a persisted key too, so the sentinel carries
+    // a non-empty one -- omitting it must change the deserialized config, or
+    // the coverage guard would silently stop protecting the field.
+    c.audio.favorites = {"sentinel_fav_a.wav", "sentinel_fav_b.wav"};
+
+    // T-120 schema 14: every newly persisted audio key needs its own distinct
+    // legal non-default value, for exactly the same reason as favorites above.
+    // Omitting any one of them must change the deserialized config, so a future
+    // key added to the serialiser without a sentinel value fails this guard.
+    c.audio.recent_sounds = {"sentinel_recent_a.wav", "sentinel_recent_b.wav"};
+    c.audio.preview_on_selection = !c.audio.preview_on_selection; // default true
+    c.audio.preview_debounce_ms = 200;                            // default 35
+
+    c.audio.keyboard_enabled = !c.audio.keyboard_enabled;         // default false
+    c.audio.keyboard_scope = ptd::KeyboardScope::SystemWide;      // default AppOnly
+    c.audio.typing_sounds_enabled = !c.audio.typing_sounds_enabled;
+    c.audio.modifier_tap_sounds_enabled = !c.audio.modifier_tap_sounds_enabled;
+    c.audio.suppress_repeat_typing = !c.audio.suppress_repeat_typing;
+    c.audio.typing_repeat_cooldown_ms = 250;                       // default 35
+    c.audio.suppress_sensitive_contexts = !c.audio.suppress_sensitive_contexts; // default true
+    c.audio.excluded_processes = {"sentinel_proc.exe"};
+
+    c.audio.horizontal_scroll_enabled = !c.audio.horizontal_scroll_enabled; // default true
+    c.audio.scroll_sensitivity = 2.5f;   // default 1.0
+    c.audio.scroll_cooldown_ms = 300;    // default 25
+    c.audio.scroll_max_rate_hz = 90;     // default 30
+    c.audio.scroll_pitch_variation = 0.25f; // default 0.0
+
+    c.audio.active_profile = ptd::SoundProfilePreset::Custom;    // default Default
+
+    // A custom binding whose every persisted member differs from the struct
+    // default, so dropping any one key changes the parsed configuration.
+    ptd::CustomShortcutBinding sentinel_shortcut{};
+    sentinel_shortcut.id = "custom.sentinel_action";
+    sentinel_shortcut.display_name = "Sentinel Action";
+    sentinel_shortcut.chord = "Ctrl+Alt+Shift+S";
+    sentinel_shortcut.is_app_shortcut = !sentinel_shortcut.is_app_shortcut; // default false
+    sentinel_shortcut.enabled = !sentinel_shortcut.enabled;                 // default true
+    c.audio.custom_shortcuts.push_back(sentinel_shortcut);
+
+    // One event configuration with distinct values in every persisted member,
+    // including a non-empty random pool, so omitting any of its keys -- or the
+    // whole event_configs array -- is observable.
+    ptd::EventSoundConfig sentinel_event{};
+    sentinel_event.enabled = !sentinel_event.enabled;             // default true
+    sentinel_event.sound_id = "sentinel_event.wav";
+    sentinel_event.use_pool = !sentinel_event.use_pool;           // default false
+    sentinel_event.no_immediate_repeat = !sentinel_event.no_immediate_repeat; // default true
+    sentinel_event.gain_db = -6.0f;                               // default 0
+    sentinel_event.policy = ptd::PlaybackPolicy::Queue;           // default Inherit
+    sentinel_event.interrupt_scope = ptd::InterruptScope::Global; // default Inherit
+    sentinel_event.cooldown_ms = 700;                             // default 0
+    sentinel_event.priority = 13;                                 // default 50
+    sentinel_event.fade_in_ms = 100;                              // default 0
+    sentinel_event.fade_out_ms = 200;                             // default 0
+    sentinel_event.min_retrigger_ms = 300;                        // default 0
+    sentinel_event.polyphony_allowance = 9;                       // default 4
+    sentinel_event.pitch_variation = 0.25f;                       // default 0
+    sentinel_event.normalize_override = !sentinel_event.normalize_override;
+    sentinel_event.normalize_enabled = !sentinel_event.normalize_enabled;
+    ptd::SoundPoolEntry sentinel_pool_entry{};
+    sentinel_pool_entry.enabled = !sentinel_pool_entry.enabled;   // default true
+    sentinel_pool_entry.sound_id = "sentinel_pool_a.wav";
+    sentinel_pool_entry.weight = 3.5f;                            // default 1.0
+    sentinel_pool_entry.gain_db = -3.0f;                          // default 0
+    sentinel_event.pool.push_back(sentinel_pool_entry);
+    c.audio.event_configs["typing.letter"] = sentinel_event;
 
     return c;
 }
@@ -310,6 +392,48 @@ void TestReleaseDefaults::sentinel_config_covers_all_persisted_fields() {
     QVERIFY(s.click.easing != d.click.easing);
 
     QVERIFY(s.render.diagnostic_primitives != d.render.diagnostic_primitives);
+
+    QVERIFY(s.audio.enabled != d.audio.enabled);
+    QVERIFY(s.audio.muted != d.audio.muted);
+    QVERIFY(s.audio.volume != d.audio.volume);
+    for (int i = 0; i < ptd::kAudioEventCount; ++i) {
+        QVERIFY2(s.audio.sounds[static_cast<std::size_t>(i)] !=
+                     d.audio.sounds[static_cast<std::size_t>(i)],
+                 "every audio assignment is a distinct sentinel value");
+    }
+    // T-107: the curated favorites list is a persisted field with its own
+    // distinct sentinel value.
+    QVERIFY(s.audio.favorites != d.audio.favorites);
+    QVERIFY(!s.audio.favorites.empty());
+
+    // T-120 schema 14: the keyboard, scroll, browser, pool, custom-binding and
+    // event-configuration fields are persisted too. Each one has its own
+    // distinct sentinel value here, so a future addition that the serialiser or
+    // the Release Defaults representation forgets fails this assertion instead
+    // of drifting silently.
+    QVERIFY(s.audio.recent_sounds != d.audio.recent_sounds);
+    QVERIFY(s.audio.preview_on_selection != d.audio.preview_on_selection);
+    QVERIFY(s.audio.preview_debounce_ms != d.audio.preview_debounce_ms);
+    QVERIFY(s.audio.keyboard_enabled != d.audio.keyboard_enabled);
+    QVERIFY(s.audio.keyboard_scope != d.audio.keyboard_scope);
+    QVERIFY(s.audio.typing_sounds_enabled != d.audio.typing_sounds_enabled);
+    QVERIFY(s.audio.modifier_tap_sounds_enabled != d.audio.modifier_tap_sounds_enabled);
+    QVERIFY(s.audio.suppress_repeat_typing != d.audio.suppress_repeat_typing);
+    QVERIFY(s.audio.typing_repeat_cooldown_ms != d.audio.typing_repeat_cooldown_ms);
+    QVERIFY(s.audio.suppress_sensitive_contexts != d.audio.suppress_sensitive_contexts);
+    QVERIFY(s.audio.excluded_processes != d.audio.excluded_processes);
+    QVERIFY(s.audio.horizontal_scroll_enabled != d.audio.horizontal_scroll_enabled);
+    QVERIFY(s.audio.scroll_sensitivity != d.audio.scroll_sensitivity);
+    QVERIFY(s.audio.scroll_cooldown_ms != d.audio.scroll_cooldown_ms);
+    QVERIFY(s.audio.scroll_max_rate_hz != d.audio.scroll_max_rate_hz);
+    QVERIFY(s.audio.scroll_pitch_variation != d.audio.scroll_pitch_variation);
+    QVERIFY(s.audio.active_profile != d.audio.active_profile);
+    QVERIFY(s.audio.custom_shortcuts != d.audio.custom_shortcuts);
+    QVERIFY(!s.audio.custom_shortcuts.empty());
+    QVERIFY(s.audio.event_configs != d.audio.event_configs);
+    QVERIFY(s.audio.event_configs.count("typing.letter") == 1);
+    QVERIFY(s.audio.event_configs.at("typing.letter").gain_db != 0.0f);
+    QVERIFY(!s.audio.event_configs.at("typing.letter").pool.empty());
 }
 
 void TestReleaseDefaults::sentinel_roundtrip_serialize_deserialize_preserves_every_semantic_value() {
@@ -353,6 +477,45 @@ void TestReleaseDefaults::sentinel_omitted_field_fails_coverage_guard() {
     QCOMPARE(tested_count, key_paths.size());
 }
 
+void TestReleaseDefaults::audio_defaults_are_silent() {
+    const AppConfig& d = ptd::release_defaults();
+
+    // Default-off, default-unmuted, default volume, every assignment None.
+    QVERIFY(!d.audio.enabled);
+    QVERIFY(!d.audio.muted);
+    QCOMPARE(d.audio.volume, ptd::AudioConfig::kMaxVolume);
+    for (int i = 0; i < ptd::kAudioEventCount; ++i) {
+        QCOMPARE(d.audio.sounds[static_cast<std::size_t>(i)], std::string());
+    }
+    QCOMPARE(d.audio, ptd::AudioConfig{});
+
+    // Validation is idempotent on the canonical source, and the schema is the
+    // audio introduction boundary.
+    QCOMPARE(ptd::AudioConfig::validated(d.audio), d.audio);
+    QCOMPARE(ptd::AppConfig::kAudioSchema, 12);
+    QCOMPARE(d.schema_version, ptd::AppConfig::kCurrentSchemaVersion);
+
+    // The embedded canonical JSON states the same block explicitly, so a
+    // future edit that forgets to update the resource fails the coverage
+    // guard above rather than silently shipping a different default.
+    const QByteArray canonical = ConfigStorage::serialize_json(d);
+    QVERIFY(canonical.contains(QByteArray("\"audio\":")));
+    for (int i = 0; i < ptd::kAudioEventCount; ++i) {
+        const QByteArray key = QByteArray("\"") +
+                               QByteArray(ptd::audio_event_name(i)) +
+                               QByteArray("\": \"\"");
+        QVERIFY2(canonical.contains(key),
+                 qPrintable(QStringLiteral("missing audio key ") +
+                            QString::fromLatin1(ptd::audio_event_name(i))));
+    }
+
+    // A fresh install (no file) resolves to exactly the same silent audio.
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const AppConfig fresh = ConfigStorage::load_from_file(
+        dir.filePath(QStringLiteral("config.json")).toStdWString());
+    QCOMPARE(fresh.audio, ptd::AudioConfig{});
+}
 void TestReleaseDefaults::sentinel_apply_defaults_restores_all_values() {
     AppConfig state = make_sentinel_config();
     QVERIFY(state != ptd::release_defaults());

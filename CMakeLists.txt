@@ -44,6 +44,11 @@ if(PROTRAIL_DEV_BUILD)
 else()
     add_compile_definitions($<$<CONFIG:Debug>:PROTRAIL_DEV_BUILD=1>)
 endif()
+
+# Windows.h defines min/max as function-like macros unless told not to, which
+# rewrites any std::max(a, b) call into `std::((a) > (b) ? ...)` and breaks the
+# compile. The audio engine needs both algorithms against Windows types.
+add_compile_definitions(NOMINMAX WIN32_LEAN_AND_MEAN)
 # The checkout path is only meaningful to the developer defaults panel. It is
 # defined for developer builds alone, so a production Release binary never
 # embeds the machine-specific source path.
@@ -92,7 +97,7 @@ set(PROTRAIL_WINDOWS_RC "${CMAKE_CURRENT_BINARY_DIR}/protrail.rc")
 if(EXISTS "C:/Qt/6.8.0/msvc2022_64")
     list(APPEND CMAKE_PREFIX_PATH "C:/Qt/6.8.0/msvc2022_64")
 endif()
-find_package(Qt6 6.8 REQUIRED COMPONENTS Widgets Test)
+find_package(Qt6 6.8 REQUIRED COMPONENTS Widgets Test Multimedia)
 qt_standard_project_setup()
 
 # ---- T-33 canonical Release Defaults build gate ----
@@ -151,8 +156,13 @@ add_executable(protrail
     src/platform/dpi_awareness.h
     src/platform/dpi_awareness.cpp
     src/platform/mouse_input.cpp
+    src/platform/keyboard_input.cpp
+    src/config/audio_config.cpp
+    src/platform/monotonic_clock.cpp
     src/platform/mouse_input.h
     src/platform/button_flags.h
+    src/platform/keyboard_input.h
+    src/platform/monotonic_clock.h
     src/platform/timestamp.h
     src/render/overlay_window.cpp
     src/render/overlay_window.h
@@ -182,6 +192,15 @@ add_executable(protrail
     src/config/release_defaults.cpp
     src/config/dev_defaults.h
     src/config/dev_defaults.cpp
+    src/config/audio_config.h
+    src/config/audio_config.cpp
+    src/audio/sound_decoder.h
+    src/audio/sound_decoder.cpp
+    src/audio/sound_backend.h
+    src/audio/sound_backend.cpp
+    src/audio/sound_engine.h
+    src/audio/sound_engine.cpp
+    src/platform/monotonic_clock.cpp
     "${PROTRAIL_RELEASE_DEFAULTS_QRC}"
     src/render/render_scheduler.h
     src/render/render_scheduler.cpp
@@ -193,6 +212,7 @@ add_executable(protrail
 
 target_link_libraries(protrail PRIVATE
     Qt6::Widgets
+    Qt6::Multimedia
     d2d1
     dcomp
     d3d11
@@ -213,6 +233,41 @@ set_target_properties(protrail PROPERTIES
     WIN32_EXECUTABLE ON
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
 )
+
+    # T-106: SoundCatalog resolves the catalog as <exe dir>/sound, but the dev
+    # build never staged it, so a `protrail.cmd run` launched build/Release/
+    # protrail.exe with an empty picker while the 380 wavs sat at the repo root.
+    # The packaging pipeline already copies sound/ beside the staged exe (opt-in
+    # -IncludeSounds); this brings the plain dev build to the same contract. The
+    # stager cleanly skips a portable tree without sound/. Keep the target
+    # present there too, so the build/test contract does not depend on media.
+    # T-109 / T-111 / T-112: A manifest tracks exactly which WAVs the build stage owns.
+    # Ownership is scoped per configuration ($<CONFIG>) to avoid cross-config collisions.
+    # Staging is a custom target tied to ALL and protrail so asset-only changes restage
+    # without requiring an executable relink.
+    set(PROTRAIL_SOUND_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/sound")
+        set(PROTRAIL_SOUND_STAGE_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/tools/stage_sound.cmake")
+        set(PROTRAIL_SOUND_MANIFEST "${CMAKE_CURRENT_BINARY_DIR}/sound.staging.$<CONFIG>.manifest")
+        add_custom_target(protrail_stage_sound ALL
+            COMMAND ${CMAKE_COMMAND}
+                -DSTAGE_SOUND_SOURCE_DIR=${PROTRAIL_SOUND_SOURCE_DIR}
+                -DSTAGE_SOUND_DEST_DIR=$<TARGET_FILE_DIR:protrail>/sound
+                -DSTAGE_SOUND_MANIFEST_FILE=${PROTRAIL_SOUND_MANIFEST}
+                -P "${PROTRAIL_SOUND_STAGE_SCRIPT}"
+            COMMENT "T-112: staging sound catalog beside protrail.exe"
+            VERBATIM)
+        add_dependencies(protrail protrail_stage_sound)
+
+# T-109: the oracle for the staging contract. Drives the real stager against
+# an isolated fixture so a regression in the manifest provenance (or a revert
+# to the old content copy) is caught by CTest, not by eye.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tools/test_stage_sound.cmake")
+    add_test(NAME protrail_sound_staging
+             COMMAND ${CMAKE_COMMAND} -P "${CMAKE_CURRENT_SOURCE_DIR}/tools/test_stage_sound.cmake")
+    set_tests_properties(protrail_sound_staging PROPERTIES
+        TIMEOUT 120
+    )
+endif()
 
 # ---- Tests ----
 enable_testing()
@@ -251,13 +306,33 @@ add_test(NAME protrail_timestamp_tests COMMAND protrail_timestamp_tests)
 
 # T-007R: pure multi-transition button-flag parser tests (no Qt, no Win32
 # runtime calls; only RI_MOUSE_* constants).
+# T-80: the wheel accumulator is pure config-layer arithmetic, so it rides
+# here with the button-transition parser it feeds.
 qt_add_executable(protrail_button_flags_tests
     tests/test_button_flags.cpp
+    src/config/audio_config.cpp
 )
 set_target_properties(protrail_button_flags_tests PROPERTIES
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
 )
 add_test(NAME protrail_button_flags_tests COMMAND protrail_button_flags_tests)
+
+# T-120: the pure core of the keyboard sound system -- 7-tier arbitration,
+# chord normalization, AltGr disambiguation, modifier-tap isolation, scope and
+# exclusion gating, scaled wheel accumulation, random-pool weights, dB gain and
+# profile presets. keyboard_input.cpp is linked for the router; the sink window
+# it creates is never touched here, so no Qt runtime is required.
+qt_add_executable(protrail_keyboard_sound_tests
+    tests/test_keyboard_sound_system.cpp
+    src/platform/keyboard_input.cpp
+    src/platform/monotonic_clock.cpp
+    src/core/log.cpp
+    src/config/audio_config.cpp
+)
+set_target_properties(protrail_keyboard_sound_tests PROPERTIES
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
+)
+add_test(NAME protrail_keyboard_sound_tests COMMAND protrail_keyboard_sound_tests)
 
 # T-007R A3: proves WM_INPUT arrives through the Qt win32 event dispatcher
 # with NO pump and NO polling timer (SendInput-automated).
@@ -265,6 +340,9 @@ qt_add_executable(protrail_input_dispatch
     tests/test_input_dispatch.cpp
     src/platform/dpi_awareness.cpp
     src/platform/mouse_input.cpp
+    src/platform/keyboard_input.cpp
+    src/config/audio_config.cpp
+    src/platform/monotonic_clock.cpp
     src/core/cursor_history.cpp
     src/core/log.cpp
 )
@@ -335,13 +413,23 @@ qt_add_executable(protrail_gui_tests
     src/config/config_storage.cpp
     src/config/release_defaults.cpp
     src/config/dev_defaults.cpp
+    src/config/audio_config.cpp
+    src/audio/sound_engine.cpp
+    src/platform/monotonic_clock.cpp
+    src/audio/sound_backend.cpp
+    src/audio/sound_decoder.cpp
     "${PROTRAIL_RELEASE_DEFAULTS_QRC}"
     src/core/log.cpp
     src/effects/trail_effect.cpp
     src/effects/click_bubble_effect.cpp
     src/core/cursor_history.cpp
 )
-target_link_libraries(protrail_gui_tests PRIVATE Qt6::Widgets Qt6::Test d2d1)
+target_link_libraries(protrail_gui_tests PRIVATE
+    Qt6::Widgets
+    Qt6::Multimedia
+    Qt6::Test
+    d2d1
+)
 set_target_properties(protrail_gui_tests PROPERTIES
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
 )
@@ -362,6 +450,7 @@ qt_add_executable(protrail_config_tests
     src/config/config_storage.cpp
     src/config/release_defaults.cpp
     src/config/dev_defaults.cpp
+    src/config/audio_config.cpp
     src/app/startup_paths.cpp
     "${PROTRAIL_RELEASE_DEFAULTS_QRC}"
     src/core/log.cpp
@@ -377,6 +466,9 @@ qt_add_executable(protrail_scheduler_tests
     tests/test_render_scheduler.cpp
     src/render/render_scheduler.cpp
     src/platform/mouse_input.cpp
+    src/platform/keyboard_input.cpp
+    src/config/audio_config.cpp
+    src/platform/monotonic_clock.cpp
     src/core/cursor_history.cpp
     src/core/log.cpp
 )
@@ -432,6 +524,9 @@ set(PROTRAIL_APP_SOURCES
     src/platform/dpi_awareness.cpp
     src/platform/mouse_input.h
     src/platform/mouse_input.cpp
+    src/platform/keyboard_input.cpp
+    src/config/audio_config.cpp
+    src/platform/monotonic_clock.cpp
     src/ui/tray_icon.h
     src/ui/tray_icon.cpp
     src/ui/branding.h
@@ -451,6 +546,15 @@ set(PROTRAIL_APP_SOURCES
     src/config/release_defaults.cpp
     src/config/dev_defaults.h
     src/config/dev_defaults.cpp
+    src/config/audio_config.h
+    src/config/audio_config.cpp
+    src/audio/sound_decoder.h
+    src/audio/sound_decoder.cpp
+    src/audio/sound_backend.h
+    src/audio/sound_backend.cpp
+    src/audio/sound_engine.h
+    src/audio/sound_engine.cpp
+    src/platform/monotonic_clock.cpp
     "${PROTRAIL_RELEASE_DEFAULTS_QRC}"
     src/core/log.h
     src/core/log.cpp
@@ -468,6 +572,7 @@ qt_add_executable(protrail_tray_tests
 )
 target_link_libraries(protrail_tray_tests PRIVATE
     Qt6::Widgets
+    Qt6::Multimedia
     Qt6::Test
     d2d1
     dcomp
@@ -498,6 +603,7 @@ qt_add_executable(protrail_trail_lifecycle_tests
 )
 target_link_libraries(protrail_trail_lifecycle_tests PRIVATE
     Qt6::Widgets
+    Qt6::Multimedia
     Qt6::Test
     d2d1
     dcomp
@@ -541,6 +647,7 @@ qt_add_executable(protrail_release_defaults_tests
     src/config/config_storage.cpp
     src/config/release_defaults.cpp
     src/config/dev_defaults.cpp
+    src/config/audio_config.cpp
     "${PROTRAIL_RELEASE_DEFAULTS_QRC}"
     src/core/log.cpp
 )
@@ -629,6 +736,74 @@ set_target_properties(protrail_single_instance_tests PROPERTIES
 )
 add_test(NAME protrail_single_instance_tests COMMAND protrail_single_instance_tests)
 
+# T-80: dedicated audio-engine regressions. The production backend is replaced
+# by the injectable FakePlayer, so the suite is deterministic and never needs
+# audio hardware; the shipped catalog decode check proves the assets themselves
+# are loadable WAV data.
+qt_add_executable(protrail_audio_tests
+    tests/test_sound_engine.cpp
+    src/config/audio_config.cpp
+    src/audio/sound_engine.cpp
+    src/platform/monotonic_clock.cpp
+    src/audio/sound_backend.cpp
+    src/audio/sound_decoder.cpp
+    src/core/log.cpp
+)
+target_link_libraries(protrail_audio_tests PRIVATE
+    Qt6::Core
+    Qt6::Multimedia
+    Qt6::Test
+)
+set_target_properties(protrail_audio_tests PROPERTIES
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
+)
+add_test(NAME protrail_audio_tests COMMAND protrail_audio_tests)
+set_tests_properties(protrail_audio_tests PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+)
+
+# T-97: tests/test_t82_pair.cpp is deliberately NOT a target here, so do not
+# read its absence as dead code. It is the fixed verifier half of the T-82
+# red/green pair and must compile against BOTH subject generations, including
+# the pre-fix snapshot under .saipen/evidence/pre/, which no CMake target can
+# do. It is driven by tests/t82_pair_runner.py exactly as
+# .saipen/evidence/t82_pair.contract.json declares; that runner builds it
+# against whatever subject sits in src/audio/ and requires exit 0 (57 checks).
+
+# T-80 real-backend control: the SAME production QtSoundPlayer, driven against
+# a staged WAV. QtSoundPlayer is linked by this target, so the multimedia
+# backend is exercised for real and the exit code reports whether an output
+# device actually produced a Playing voice.
+qt_add_executable(protrail_audio_runtime_tests
+    tests/test_audio_runtime.cpp
+    src/audio/sound_engine.cpp
+    src/platform/monotonic_clock.cpp
+    src/audio/sound_backend.cpp
+    src/audio/sound_decoder.cpp
+    src/config/audio_config.cpp
+    src/core/log.cpp
+)
+target_link_libraries(protrail_audio_runtime_tests PRIVATE
+    Qt6::Core
+    Qt6::Multimedia
+    Qt6::Test
+)
+set_target_properties(protrail_audio_runtime_tests PROPERTIES
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
+)
+add_test(NAME protrail_audio_runtime_tests COMMAND protrail_audio_runtime_tests)
+# T-90: the harness exits 0 when a voice reached the Playing state, 2 when every
+# check passed but no output device did (BACKEND_ONLY -- no audio hardware, not
+# a defect), and 1 only for a real check failure. Matching its own
+# "STATUS BACKEND_VERIFIED"/"STATUS BACKEND_FAILED" verdict line gates on the
+# verdict instead of the raw exit code, so a device-less runner (GitHub
+# windows-2022) accepts the exit-2 soft pass while exit 1 still fails.
+set_tests_properties(protrail_audio_runtime_tests PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+    PASS_REGULAR_EXPRESSION "STATUS BACKEND_VERIFIED"
+    FAIL_REGULAR_EXPRESSION "STATUS BACKEND_FAILED"
+)
+
 # T-019: CTest-launched executables need Qt runtime DLLs on PATH regardless
 # of the ambient agent shell (which does not export the Qt bin directory).
 # ENVIRONMENT_MODIFICATION prepends without clobbering the per-test
@@ -645,7 +820,9 @@ foreach(_test protrail_tests protrail_history_tests protrail_timestamp_tests
              protrail_trail_lifecycle_tests protrail_sparkle_tests
              protrail_release_defaults_tests
              protrail_autostart_tests
-             protrail_request_dedup_tests)
+             protrail_request_dedup_tests
+             protrail_audio_tests
+             protrail_audio_runtime_tests)
     set_tests_properties(${_test} PROPERTIES
         TIMEOUT 300
         ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${_qt_bin_dir}")

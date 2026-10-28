@@ -41,7 +41,11 @@ namespace ptd {
 //   WS_EX_TRANSPARENT click-through
 //   WS_EX_NOACTIVATE  never takes focus
 //   WS_EX_TOOLWINDOW  no taskbar / Alt+Tab entry
-//   WS_EX_TOPMOST     stays above other windows
+//   WS_EX_TOPMOST     stays above other windows. Set once at create(): it is
+//                     only a REQUEST, so any later window that raises itself
+//                     with HWND_TOPMOST is inserted ABOVE this overlay and the
+//                     overlay sinks to the bottom of the band for good.
+//                     ensure_topmost() re-asserts it while rendering.
 //
 // Frame rendering (T-008 B7 / T-009 C7): render_frame() is the real
 // per-frame path -- BeginDraw, full transparent Clear, optional
@@ -166,6 +170,12 @@ private:
     bool init_render();
     void release_render_resources();
 
+    // Re-assert topmost band membership (throttled, one GetWindow probe per
+    // second; a SetWindowPos only when something actually covers us).
+    // ponytail: covers z-order only. An exclusive-fullscreen D3D app sits
+    // above every topmost window by design -- not fixable here.
+    void ensure_topmost(int64_t now_ns);
+
     // T-019 continuous-stroke cap policy: stroke-style lookup for a cap
     // policy (all styles are cached in init_render(), never per frame).
     ID2D1StrokeStyle1* stroke_style_for(TrailCapPolicy policy) const;
@@ -212,6 +222,9 @@ private:
 
     // PERF-001 per-overlay visibility state (see frame_geometry.h).
     OverlayDirtyState dirty_{};
+
+    // Absolute now_ns of the next topmost probe (0 = probe on first frame).
+    int64_t next_topmost_probe_ns_ = 0;
 
     Microsoft::WRL::ComPtr<ID3D11Device> d3d_device_;
     Microsoft::WRL::ComPtr<IDXGIDevice> dxgi_device_;

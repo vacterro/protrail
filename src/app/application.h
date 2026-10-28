@@ -2,7 +2,9 @@
 
 #include "startup_mode.h"
 #include "../config/app_config.h"
+#include "../audio/sound_engine.h"
 #include "../render/overlay_manager.h"
+#include "../platform/keyboard_input.h"
 
 #include <atomic>
 #include <cstddef>
@@ -13,6 +15,8 @@
 namespace ptd {
 class CursorHistory;
 struct CursorSample;
+class KeyboardInput;
+struct ClassifiedKeyEvent;
 } // namespace ptd
 
 // B8/C10: active-only render scheduling lives here. There is NO permanent
@@ -103,6 +107,16 @@ public:
     ptd::ui::SettingsWindow* product_window_for_tests() const;
     ptd::ui::TrayIcon* tray_icon_for_tests() const;
 
+    // T-80: live audio-engine state, so an application-level test can prove
+    // the master gate and the shutdown contract without listening.
+    const ptd::SoundEngine& sound_engine_for_tests() const {
+        return sound_engine_;
+    }
+    ptd::SoundEngine& sound_engine_for_tests() {
+        return sound_engine_;
+    }
+    ptd::KeyboardInput* keyboard_input_for_tests() const;
+
     static Application& instance();
 
     // ---- T-021: Trail enable-lifecycle freshness (controller contract) ----
@@ -153,6 +167,23 @@ public:
 private:
     // B9: input-layer activity -> controller (renderer stays independent).
     void on_mouse_activity(const ptd::CursorSample& newest);
+    // T-80: independent wheel path -> audio only. Never wakes the renderer.
+    void on_mouse_wheel(int64_t timestamp_ns, int vertical_delta);
+    // T-120: horizontal wheel path -> audio only.
+    void on_mouse_horizontal_wheel(int64_t timestamp_ns, int horizontal_delta);
+    // T-120: auxiliary mouse buttons (X1/X2) -> audio only.
+    void on_mouse_aux_button(int64_t timestamp_ns, const char* canonical_event_id);
+    // T-120: passive keyboard event -> audio only.
+    void on_keyboard_event(int64_t timestamp_ns, const struct ptd::ClassifiedKeyEvent& ev);
+    // T-80: audio publication from the Sound tab (and from whole-config
+    // transactions). Applies the config to the engine and persists.
+    void apply_audio_config(const ptd::AudioConfig& cfg);
+    // T-81: smoke-mode-only audio self-check. Exercises the production
+    // QtSoundPlayer against the first shipped catalog sound so a portable
+    // rehearsal proves the DEPLOYED Qt Multimedia backend, not file metadata.
+    // Never runs outside smoke mode; needs no speakers (a missing output
+    // device is reported as BACKEND_ONLY, not a pass).
+    void run_audio_self_check();
     // B8: one effect frame; stops the render timer after the final
     // transparent frame has been presented.
     void render_effect_tick();
@@ -198,7 +229,22 @@ private:
     void update_scheduler_target_fps();
 
 
+    // T-80: audio engine (GUI-thread only) plus the running wheel remainder
+    // that turns partial high-resolution deltas into whole events.
     struct Impl;
     std::unique_ptr<Impl> d_;
+    // T-92: Qt-lifetime ordering by construction. sound_engine_ owns the
+    // QtSoundPlayer and its QSoundEffect voices, so it is declared AFTER d_
+    // (which owns the QApplication): reverse-order member destruction then
+    // tears the voices down BEFORE the QApplication instead of relying on
+    // the explicit shutdown() call running first.
+    ptd::SoundEngine sound_engine_{};
+    int wheel_accumulator_ = 0;
+    int hwheel_accumulator_ = 0;
+    // T-120: passive keyboard listener. Declared after d_ (which owns the
+    // QApplication) so its message-only raw-input HWND is destroyed before the
+    // application object, and it never installs a global hook that could outlive
+    // the process. nullptr when the keyboard subsystem was never created.
+    std::unique_ptr<ptd::KeyboardInput> keyboard_input_{};
     static std::atomic<Application*> s_instance_;
 };

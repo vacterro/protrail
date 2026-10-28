@@ -17,6 +17,10 @@ ctest --test-dir build -C Release --output-on-failure
 ctest --test-dir build -C Debug --output-on-failure
 ```
 
+The root launcher `protrail.cmd build` and `protrail.cmd test` run the same
+sequence — configure, both-configuration build, full-matrix suite — in one
+command (`smoke`, `package`, `run`, `clean` also available).
+
 The project treats MSVC warnings as errors. Keep persisted configuration changes covered by serialization, migration, canonical-default, and sentinel coverage. Main and Settings must remain views over the single application configuration authority; programmatic population must stay silent.
 
 ## Pull requests
