@@ -45,3 +45,10 @@ dev/presets/
 .saipen/cache/
 .saipen/locks/
 .saipen/recovery/conformance/
+
+# Personal sound catalog. ProTrail plays whatever the operator puts in a
+# `sound` folder beside the executable; the repository never ships it. The
+# names previously committed here were third-party game audio with no
+# redistribution rights, so the folder is untracked from now on and each user
+# supplies their own. See README "Sound" for the per-event file contract.
+/sound/
