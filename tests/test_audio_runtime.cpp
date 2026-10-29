@@ -286,7 +286,7 @@ int main(int argc, char** argv) {
     if (backend_loaded) {
         ptd::QtSoundPlayer player;
         check(player.initialize(), "production backend initializes");
-        player.set_volume(0.5);
+        player.set_volume(0.0);  // tests must never emit audible sound
         check(player.play("left_down", abs_path(stage.filePath("a00.wav")),
                           /*is_preview=*/false),
               "real backend accepts an event play");
@@ -298,7 +298,7 @@ int main(int argc, char** argv) {
             QSoundEffect probe2;
             probe2.setSource(QUrl::fromLocalFile(stage.filePath("a00.wav")));
             wait_ready(probe2, 3000);
-            probe2.setVolume(0.5);
+            probe2.setVolume(0.0);  // device probe only, no audible output
             probe2.play();
             device_played = wait_playing(probe2, 1500);
             probe2.stop();

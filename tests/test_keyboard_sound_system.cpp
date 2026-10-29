@@ -624,7 +624,23 @@ void test_app_only_local_feed_reaches_router() {
 
 } // namespace
 
+void test_fkey_overflow_safety() {
+    // T-127: canonicalize_key_token must never throw on an over-long F-key digit
+    // run. The old std::stoi(low.substr(1)) path raised std::out_of_range for
+    // values beyond INT_MAX and would have terminated the GUI keyboard thread.
+    expect_str(KeyboardInputRouter::normalize_chord_string("f1"), "F1", "F1 canonicalizes");
+    expect_str(KeyboardInputRouter::normalize_chord_string("F1"), "F1", "F1 uppercased");
+    expect_str(KeyboardInputRouter::normalize_chord_string("f24"), "F24", "F24 canonicalizes");
+    expect_str(KeyboardInputRouter::normalize_chord_string("f0"), "f0", "F0 is below the F1..F24 range and returns the raw token");
+    expect_str(KeyboardInputRouter::normalize_chord_string("f25"), "f25", "F25 exceeds the F24 range and returns the raw token");
+    expect_str(KeyboardInputRouter::normalize_chord_string("f100"), "f100", "F100 exceeds the range and returns the raw token");
+    // Arbitrarily long suffix must not throw or abort the process.
+    expect_str(KeyboardInputRouter::normalize_chord_string("f99999999999999999999"),
+               "f99999999999999999999", "extremely long f-key suffix does not throw");
+}
+
 int main() {
+    test_fkey_overflow_safety();
     test_chord_formatting_and_normalization();
     test_specific_key_and_typing_classification();
     test_arbitration_priority();

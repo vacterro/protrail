@@ -16,13 +16,12 @@ namespace ptd {
 // backend header because the voice pool is sized from it.
 constexpr int kMaxCacheSounds = 9;
 
-// T-120: Maximum stack polyphony voices across all events in the bounded voice pool.
-constexpr int kMaxStackPolyphonyVoices = 16;
-
 // T-120: event-voice ceiling shared by the bounded production pool and the test
 // double. The documented budget is eight concurrent event voices plus one
 // preview voice, so the number exists once at namespace scope and neither class
-// can drift from it.
+// can drift from it. T-129: this is the ONE ceiling every policy obeys -- a
+// separate "stack polyphony" constant that described sixteen parallel event
+// voices existed only to be enforced nowhere and was removed with it.
 constexpr int kMaxEventVoices = kMaxCacheSounds - 1;
 
 // T-122: one playback admission outcome. A bare bool cannot tell a capacity
@@ -249,12 +248,41 @@ public:
                 it = it->is_preview ? playing.erase(it) : ++it;
             }
         } else if (!allow_stack) {
-            // Override / single-lane for this event_id: replace existing voice for same event_id
+            // T-129: Override / single-lane for this event_id. Production
+            // QtSoundPlayer::play_ex replaces the voice of the SAME event id
+            // with one bounded voice and leaves every other voice alone
+            // (find_event_voice for a match, else acquire one bounded slot),
+            // and a full pool refuses the attempt instead of silently
+            // displacing a foreign voice. The fake models that exactly:
+            // the matching event's voice is replaced, and no event-voice
+            // budget or foreign voice is touched.
+            int non_preview = 0;
+            for (const auto& r : playing) {
+                if (!r.is_preview) ++non_preview;
+            }
+            bool replaced = false;
             for (auto it = playing.begin(); it != playing.end();) {
-                it = (!it->is_preview && it->event_id == event_id) ? playing.erase(it) : ++it;
+                if (!it->is_preview && it->event_id == event_id) {
+                    it = playing.erase(it);
+                    replaced = true;
+                } else {
+                    ++it;
+                }
+            }
+            // Override admits exactly one voice for this event id, so a
+            // repeat never crosses the pool's event budget: the displaced
+            // voice freed its own slot. A pool already holding the full
+            // event budget cannot admit another DISTINCT event.
+            if (!replaced && non_preview >= kMaxEventVoices) {
+                refused_plays++;
+                return false;
             }
         } else {
-            // Stack mode: enforce both per-event polyphony and global event voice ceiling
+            // T-129: Stack mode. The per-event polyphony cap and the global
+            // event-voice ceiling are the SAME two budgets production
+            // enforces: the per-event cap from the caller's allowance, and
+            // the pool's event budget that acquire_event_voice gates on
+            // (event_voice_available refuses the ninth event slot).
             const int cap = (max_event_polyphony > 0) ? max_event_polyphony : kMaxEventVoices;
             int ev_count = 0;
             int total_ev_count = 0;
@@ -264,7 +292,7 @@ public:
                     if (r.event_id == event_id) ++ev_count;
                 }
             }
-            if (ev_count >= cap || total_ev_count >= kMaxStackPolyphonyVoices) {
+            if (ev_count >= cap || total_ev_count >= kMaxEventVoices) {
                 refused_plays++;
                 return false;
             }
@@ -303,9 +331,12 @@ public:
         for (const auto& id : stopped_ids) notify_sync_completion(id);
     }
     void stop_event(const std::string& event_id) override {
+        // T-129: a preview voice is never stopped by an event id. Production
+        // QtSoundPlayer::stop_event skips every preview voice, so an event
+        // id that also names the preview key cannot silence a preview.
         int removed = 0;
         for (auto it = playing.begin(); it != playing.end();) {
-            if (it->event_id == event_id) {
+            if (!it->is_preview && it->event_id == event_id) {
                 it = playing.erase(it);
                 ++removed;
             } else {

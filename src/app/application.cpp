@@ -982,6 +982,7 @@ void Application::run_audio_self_check() {
         app_log(3, "AUDIO_SELFCHECK RESULT=INIT_FAILED");
         return;
     }
+    probe.set_volume(0.0);  // self-check must never emit audible sound
     const bool accepted = probe.play("@selfcheck", path.toStdString(), false);
     std::string status = probe.backend_status();
     // Bounded wait for the Loading transition, driven by the live event loop.

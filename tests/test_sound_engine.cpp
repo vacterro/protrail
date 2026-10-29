@@ -2515,6 +2515,152 @@ void test_c08_natural_completion_without_interruption(const QStringList& ids) {
     f.engine.shutdown();
 }
 
+// T-129: the stack/override voice LIFECYCLE and the fake's parity with the
+// production pool budget. The FakePlayer is the oracle every scheduler
+// regression is driven through, so a ceiling the production pool does not
+// implement makes the whole suite green while the product refuses the
+// playback: the fake enforced kMaxStackPolyphonyVoices (16) as the concurrent
+// event-voice ceiling while QtSoundPlayer::acquire_event_voice refuses at the
+// pool's own event budget (event_voice_available(8, 8) == false). This test
+// binds the fake to that budget for both policies, and covers the override
+// capacity refusal and the preview-survives-stop_event lifecycle.
+void test_fake_player_voice_lifecycle_parity() {
+    // ---- 1. The oracle: production's own gate, device-independent ----------
+    check_eq(ptd::kMaxCacheSounds, 9, "the pool budget is eight events plus one preview");
+    check_eq(ptd::QtSoundPlayer::kMaxEventVoices, ptd::kMaxEventVoices,
+             "the production class shares the namespace event ceiling");
+    check(!ptd::QtSoundPlayer::event_voice_available(ptd::kMaxEventVoices, ptd::kMaxEventVoices),
+          "production refuses an event slot past its own event budget");
+    check(ptd::QtSoundPlayer::event_voice_available(ptd::kMaxEventVoices - 1,
+                                                    ptd::kMaxEventVoices - 1),
+          "production admits the eighth event slot");
+
+    // ---- 2. STACK: the fake refuses at the production event budget ---------
+    {
+        FakePlayer p;
+        check(p.initialize(), "the stack-parity player initializes");
+        for (int i = 0; i < ptd::kMaxEventVoices; ++i) {
+            const std::string id = "ev" + std::to_string(i);
+            check(p.play_ex(id, "/staged/ev" + std::to_string(i) + ".wav", /*is_preview=*/false,
+                            1.0, /*allow_stack=*/true, ptd::kMaxEventVoices),
+                  "each of the eight event voices starts under Stack");
+        }
+        check_eq(p.active_playing_voice_count(), ptd::kMaxEventVoices,
+                 "the stack held exactly the event budget");
+        check(!p.play_ex("ev_final", "/staged/ev8.wav", /*is_preview=*/false, 1.0,
+                         /*allow_stack=*/true, ptd::kMaxEventVoices),
+              "a ninth concurrent Stack voice is refused, exactly like production");
+        check_eq(p.refused_plays, 1, "the stack refusal is counted");
+        check_eq(p.active_playing_voice_count(), ptd::kMaxEventVoices,
+                 "the stack refusal started no voice");
+    }
+
+    // ---- 3. The 16-voice ceiling the product never implemented is gone ----
+    {
+        FakePlayer p;
+        check(p.initialize(), "the over-long gate check initializes");
+        int started = 0;
+        for (int i = 0; i < 16; ++i) {
+            const std::string id = "ev" + std::to_string(i);
+            if (p.play_ex(id, "/staged/ev" + std::to_string(i) + ".wav",
+                          /*is_preview=*/false, 1.0, /*allow_stack=*/true, 16)) {
+                ++started;
+            }
+        }
+        check_eq(started, ptd::kMaxEventVoices,
+                 "the Stack policy can never outgrow the pool's event budget");
+    }
+
+    // ---- 4. OVERRIDE: capacity refusal, and replacement not accumulation ---
+    {
+        FakePlayer p;
+        check(p.initialize(), "the override-lifecycle player initializes");
+        for (int i = 0; i < ptd::kMaxEventVoices; ++i) {
+            const std::string id = "ev" + std::to_string(i);
+            check(p.play_ex(id, "/staged/ev" + std::to_string(i) + ".wav", /*is_preview=*/false,
+                            1.0, /*allow_stack=*/false, 1),
+                  "each Override event voice starts on its own slot");
+        }
+        check_eq(p.active_playing_voice_count(), ptd::kMaxEventVoices,
+                 "the pool holds the full event budget under Override");
+
+        // A Repeat of a live event replaces ITS OWN voice; the pool budget
+        // is unchanged and no foreign voice is displaced.
+        check(p.play_ex("ev3", "/staged/ev3b.wav", /*is_preview=*/false, 1.0,
+                        /*allow_stack=*/false, 1),
+              "an Override repeat replaces its own voice even at full budget");
+        check_eq(p.active_playing_voice_count(), ptd::kMaxEventVoices,
+                 "an Override repeat never accumulates a second voice");
+        check_eq(p.active_event_voice_count("ev3"), 1,
+                 "the replaced event holds exactly one voice");
+        bool replaced_path = false;
+        for (const auto& r : p.playing) {
+            if (!r.is_preview && r.event_id == "ev3" && r.path == "/staged/ev3b.wav") {
+                replaced_path = true;
+            }
+        }
+        check(replaced_path, "the replay carries the newly selected source");
+
+        // A DISTINCT event at full budget is refused instead of silently
+        // displacing one of the eight live voices.
+        check(!p.play_ex("ev_extra", "/staged/evx.wav", /*is_preview=*/false, 1.0,
+                         /*allow_stack=*/false, 1),
+              "a distinct Override event at full budget is refused");
+        check_eq(p.active_playing_voice_count(), ptd::kMaxEventVoices,
+                 "the refused Override displaced no live voice");
+        std::vector<std::string> ids;
+        for (const auto& r : p.playing) {
+            if (!r.is_preview) ids.push_back(r.event_id);
+        }
+        check(std::find(ids.begin(), ids.end(), "ev_extra") == ids.end(),
+              "the refused event left no record behind");
+    }
+
+    // ---- 5. stop_event never silences a preview voice ---------------------
+    {
+        FakePlayer p;
+        check(p.initialize(), "the preview-lifecycle player initializes");
+        check(p.play("@preview", "/staged/preview.wav", /*is_preview=*/true),
+              "a preview voice plays");
+        // The production skips every preview voice in stop_event, so a stop
+        // that names the preview key (or any key a preview carries) cannot
+        // end it.
+        p.stop_event("@preview");
+        check(p.is_playing_preview(),
+              "stop_event never touches a preview voice, like production");
+        check_eq(preview_records(p), 1, "the preview record survived the event stop");
+        // A real event voice is still stopped by its own id.
+        check(p.play("ev0", "/staged/ev0.wav", /*is_preview=*/false),
+              "an event voice plays alongside the preview");
+        p.stop_event("ev0");
+        check_eq(p.active_event_voice_count("ev0"), 0, "the event voice was stopped");
+        check(p.is_playing_preview(), "stopping an event left the preview alive");
+    }
+
+    // ---- 6. Capacity recovery on completion, after the ceiling was crossed -
+    {
+        FakePlayer p;
+        check(p.initialize(), "the recovery player initializes");
+        for (int i = 0; i < ptd::kMaxEventVoices; ++i) {
+            const std::string id = "ev" + std::to_string(i);
+            check(p.play_ex(id, "/staged/ev" + std::to_string(i) + ".wav", /*is_preview=*/false,
+                            1.0, /*allow_stack=*/true, ptd::kMaxEventVoices),
+                  "the full event budget starts before recovery");
+        }
+        check(!p.play_ex("ev_refused", "/staged/evx.wav", /*is_preview=*/false, 1.0,
+                         /*allow_stack=*/true, ptd::kMaxEventVoices),
+              "the budget refuses the extra voice");
+        p.notify_completion("ev2");
+        check_eq(p.active_playing_voice_count(), ptd::kMaxEventVoices - 1,
+                 "a natural completion frees exactly one voice");
+        check(p.play_ex("ev_new", "/staged/evn.wav", /*is_preview=*/false, 1.0,
+                        /*allow_stack=*/true, ptd::kMaxEventVoices),
+              "the freed slot admits the pending event after the refusal");
+        check_eq(p.active_playing_voice_count(), ptd::kMaxEventVoices,
+                 "the recovered pool holds the full budget again");
+    }
+}
+
 // P2: the FakePlayer behavioral contract. The fake must refuse exactly what
 // production QtSoundPlayer::play refuses and its preview state must be derived
 // from its own playback records, never a stale flag.
@@ -2825,6 +2971,8 @@ int main() {
     test_engine_injected_ownership();
     test_owned_player_lifecycle();
     test_initialization_failure_and_retry();
+    // T-129: stack/override voice lifecycle + FakePlayer parity.
+    test_fake_player_voice_lifecycle_parity();
     test_fake_player_contract();
     test_portable_lookup(click_path);
     test_reparse_point_guard(stage.path());

@@ -152,8 +152,16 @@ std::string canonicalize_key_token(const std::string& raw) {
             if (!std::isdigit(static_cast<unsigned char>(low[i]))) all_digits = false;
         }
         if (all_digits) {
-            const int fn = std::stoi(low.substr(1));
-            if (fn >= 1 && fn <= 24) return "F" + std::to_string(fn);
+            // A persisted binding can carry an arbitrarily long digit run.
+            // std::stoi would throw out_of_range / invalid_argument here and
+            // terminate the GUI keyboard thread, so parse the bounded range by
+            // hand: any run longer than three digits cannot be F1..F24.
+            const std::size_t digits = low.size() - 1;
+            if (digits >= 1 && digits <= 2) {
+                int fn = 0;
+                for (std::size_t i = 0; i < digits; ++i) fn = fn * 10 + (low[1 + i] - '0');
+                if (fn >= 1 && fn <= 24) return "F" + std::to_string(fn);
+            }
         }
     }
     if (low == "bksp" || low == "backspace" || low == "back") return "Backspace";
